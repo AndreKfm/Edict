@@ -91,7 +91,7 @@ summed in another order (bit-identical on 10^7 arguments), .NET's `ToString("F1"
 like the C libraries), and Q_atof with a reordered addition (differences stay below what the float conversion keeps).
 Not every reordering changes bits; which optimizations are permitted is measured, not argued.
 
-Level 2 so far (`tests/Edict.Engine.Tests`, 60 tests, identical results on Windows and Linux): the hull trace corpus
+Level 2 so far (`tests/Edict.Engine.Tests`, 70 tests, identical results on Windows and Linux): the hull trace corpus
 (10 maps × 10^5 traces, `docs/PLAN.md` section C), the loader dump, R7 with 7 known-bad copies of
 `SV_RecursiveHullCheck`. The corpus is a level-2 tape in all but name: it records calls at the module boundary with
 their inputs and results, and the port replays each call in isolation. A first corpus of uniform random traces passed

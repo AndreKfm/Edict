@@ -57,4 +57,7 @@ public unsafe class HullTraceBenchmarks
 
     [Benchmark(OperationsPerInvoke = Traces)]
     public float Iterative() => Run<IterativeCheck>();
+
+    [Benchmark(OperationsPerInvoke = Traces)]
+    public float Packed() => Run<PackedCheck>();
 }

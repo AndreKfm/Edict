@@ -49,6 +49,15 @@ public sealed unsafe class TraceGateTests
 
     [Theory]
     [MemberData(nameof(MapNames))]
+    public void Packed_hull_check_matches_every_record(string map)
+    {
+        using var f = new TraceMap(map);
+        string? d = FirstDivergence<PackedCheck>(f);
+        Assert.True(d is null, "first divergence: " + d);
+    }
+
+    [Theory]
+    [MemberData(nameof(MapNames))]
     public void Hull_point_contents_match_every_record(string map)
     {
         using var f = new TraceMap(map);

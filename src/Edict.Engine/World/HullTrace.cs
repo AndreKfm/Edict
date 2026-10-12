@@ -29,9 +29,10 @@ public struct Trace
 /// <c>SV_RecursiveHullCheck</c> with identical results: the literal recursion and an iterative one with an explicit
 /// stack. C checks node numbers against the hull's range on every visit and calls Sys_Error; here every hull is
 /// validated once when the model is loaded (<see cref="BrushLoader"/>), so the checks cannot fail and are left out.
+/// The variant over the packed node layout, the default, is in HullTracePacked.cs.
 /// </summary>
 [NoAlloc(Constraints.All)]
-public static unsafe class HullTrace
+public static unsafe partial class HullTrace
 {
     /// <summary>1/32 epsilon to keep floating point happy. A double, as in C: the crossing fraction is computed in double.</summary>
     public const double DistEpsilon = 0.03125;

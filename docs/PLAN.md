@@ -181,8 +181,8 @@ State 2026-10-12: **gate met** (P1 kill rule not reached: 100 % on the first ful
   variant a static-abstract type parameter). `src/Edict.Harness` reads the corpus. The trace path is
   `[NoAlloc(Constraints.All)]`; `SV_HullForEntity`'s two Sys_Errors (game state) throw preallocated exceptions under
   `Allow.Throw`.
-- Gate (`tests/Edict.Engine.Tests`, 60 tests, Windows and Linux): loader dump record by record, all 10^6 traces with
-  both variants, hull contents.
+- Gate (`tests/Edict.Engine.Tests`, 70 tests, Windows and Linux): loader dump record by record, all 10^6 traces with
+  each of the three variants, hull contents.
 - Deviations from C, none observable on valid data: hull trees are validated once at load (node range, plane
   index) instead of C's per-visit `bad node number` check, so the trace code needs no error path; out-of-range
   `modelindex` counts as "no model" (C reads out of bounds); lumps and PAK entries outside the file are load errors.
@@ -201,9 +201,25 @@ State 2026-10-12: **gate met** (P1 kill rule not reached: 100 % on the first ful
   signs and `frac` is clamped to 0 either way (measured: 1.5·10^6 crossings, 2 different unclamped values, both
   clamped). It stays as an equivalence test.
 - Benchmark (`bench/Edict.Benchmarks`, BenchmarkDotNet 0.15.8, Ryzen 9 3900X, .NET 10.0.9, whole corpus per
-  operation set): recursive 230 ns/trace on `start`, 273 on `lq_e0m3`; iterative 1.05× and 0.99× of that; 0 B
-  allocated. The explicit stack does not pay for its frame copies; the literal recursion stays the default. Not yet
-  measured: the C reference on the same inputs, `Vec3` passing variants (§B.2), `net11.0`.
+  operation set, 0 B allocated in every variant):
+
+  | Variant | `start` | `lq_e0m3` |
+  |---|---|---|
+  | Recursive (literal port, scalar twin) | 233.8 ns/trace | 272.0 |
+  | Iterative (explicit stack) | 1.05× | 0.98× |
+  | **Packed** (default): clip node and plane in one 32-byte `PackedNode`, built at load | **0.89×** | **0.88×** |
+
+  Where the time goes (measured): ~11–13 node visits plus ~8 point-contents visits per trace, 71–95 % of planes
+  axial (`p[type] - dist`, one subtraction), 1.4–1.5 crossings. A visit is ~45 cycles, dominated by the dependent
+  load clipnode → plane and branch mispredicts, not by its 2–12 FP operations; the packed layout removes the
+  dependent load (memory 168 vs 65 KiB on `start`, still in L2).
+  SIMD, measured and dropped: t1/t2 of non-axial planes in two `Vector128` lanes and `mid` in three, each lane in C
+  order (§B.1), bit-identical on all 10^6 traces, but 1.03× on both maps alone and 0.93× instead of 0.89× on top of
+  the packed layout: the shuffles cost more than the 6 µops saved on 5–29 % of visits. Batching traces across lanes
+  would be exact but the tree paths diverge after a few nodes. Disassembly of every variant (Tier1 and FullOpts):
+  no `vfmadd*`; RyuJIT does not contract `a*b+c`. SIMD in the simulation is left to the integer work of §B.1
+  (`Mod_DecompressVis`, `SV_FatPVS`). Not yet measured: the C reference on the same inputs, `Vec3` passing (§B.2),
+  `net11.0`, a 24-byte node.
 
 **Cut 2:** `PR_LoadProgs`, VM, builtins, `ED_LoadFromFile`, `SV_SpawnServer`, areanodes. Gate: frame-0 hash
 (edicts + typed globals after spawn, before `SV_Physics`) per map.

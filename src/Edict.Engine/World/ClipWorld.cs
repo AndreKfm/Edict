@@ -53,6 +53,14 @@ public readonly unsafe struct IterativeCheck : IHullCheck
         HullTrace.IterativeHullCheck(hull, num, p1f, p2f, p1, p2, ref trace);
 }
 
+/// <summary>The recursion over the packed node layout (<see cref="PackedNode"/>), scalar arithmetic.</summary>
+public readonly unsafe struct PackedCheck : IHullCheck
+{
+    [NoAlloc(Constraints.All)]
+    public static bool Check(Hull* hull, int num, float p1f, float p2f, in Vec3 p1, in Vec3 p2, ref Trace trace) =>
+        HullTrace.PackedHullCheck(hull, num, p1f, p2f, p1, p2, ref trace);
+}
+
 /// <summary>
 /// The parts of world.c that phase 1 ports: hull boxes (<c>SV_InitBoxHull</c>, <c>SV_HullForBox</c>),
 /// <c>SV_HullForEntity</c> and <c>SV_ClipMoveToEntity</c>, over a model table that plays <c>sv.models</c>. C keeps
@@ -79,9 +87,16 @@ public sealed unsafe class ClipWorld : IDisposable
         private MPlane _element0;
     }
 
+    [InlineArray(6)]
+    private struct PackedNodes6
+    {
+        private PackedNode _element0;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     private struct BoxHull
     {
+        public PackedNodes6 Packed;                   // first: 16-byte aligned in the 64-aligned block
         public Hull Hull;
         public ClipNodes6 ClipNodes;
         public Planes6 Planes;
@@ -109,6 +124,7 @@ public sealed unsafe class ClipWorld : IDisposable
     {
         _box->Hull.ClipNodes = (DClipNode*)Unsafe.AsPointer(ref _box->ClipNodes[0]);
         _box->Hull.Planes = (MPlane*)Unsafe.AsPointer(ref _box->Planes[0]);
+        _box->Hull.Packed = (PackedNode*)Unsafe.AsPointer(ref _box->Packed[0]);
         _box->Hull.FirstClipNode = 0;
         _box->Hull.LastClipNode = 5;
 
@@ -128,6 +144,13 @@ public sealed unsafe class ClipWorld : IDisposable
             ref MPlane plane = ref _box->Planes[i];
             plane.Type = (byte)(i >> 1);
             Unsafe.Add(ref plane.Normal.X, i >> 1) = 1;
+
+            // the packed copy of node and plane; the dist follows per box in HullForBox
+            ref PackedNode packed = ref _box->Packed[i];
+            packed.Children[0] = node.Children[0];
+            packed.Children[1] = node.Children[1];
+            packed.Type = plane.Type;
+            packed.Normal = plane.Normal;
         }
     }
 
@@ -144,6 +167,14 @@ public sealed unsafe class ClipWorld : IDisposable
         _box->Planes[3].Dist = mins.Y;
         _box->Planes[4].Dist = maxs.Z;
         _box->Planes[5].Dist = mins.Z;
+
+        // the same six values for the packed layout
+        _box->Packed[0].Dist = maxs.X;
+        _box->Packed[1].Dist = mins.X;
+        _box->Packed[2].Dist = maxs.Y;
+        _box->Packed[3].Dist = mins.Y;
+        _box->Packed[4].Dist = maxs.Z;
+        _box->Packed[5].Dist = mins.Z;
 
         return &_box->Hull;
     }
@@ -195,10 +226,13 @@ public sealed unsafe class ClipWorld : IDisposable
         return hull;
     }
 
-    /// <summary><c>SV_ClipMoveToEntity</c> with the default hull check.</summary>
+    /// <summary>
+    /// <c>SV_ClipMoveToEntity</c> with the default hull check: the packed layout, 10 % faster than the literal
+    /// recursion, which stays its scalar twin in the gate (docs/PLAN.md section C).
+    /// </summary>
     [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = SysErrorReason)]
     public Trace ClipMoveToEntity(in ClipEntity ent, in Vec3 start, in Vec3 mins, in Vec3 maxs, in Vec3 end) =>
-        ClipMoveToEntity<RecursiveCheck>(ent, start, mins, maxs, end);
+        ClipMoveToEntity<PackedCheck>(ent, start, mins, maxs, end);
 
     /// <summary>
     /// <c>SV_ClipMoveToEntity</c>: handles selection or creation of a clipping hull, and offseting (and eventually

@@ -60,7 +60,8 @@ public static unsafe class BrushLoader
         nuint size = NativeArena.SizeOf<MPlane>(numPlanes) + NativeArena.SizeOf<byte>(visLen)
             + NativeArena.SizeOf<MLeaf>(numLeafs) + NativeArena.SizeOf<MNode>(numNodes)
             + NativeArena.SizeOf<DClipNode>(numClip) + NativeArena.SizeOf<DModel>(numSub)
-            + NativeArena.SizeOf<DClipNode>(numNodes) + NativeArena.SizeOf<Model>(Math.Max(numSub, 1));
+            + NativeArena.SizeOf<DClipNode>(numNodes) + NativeArena.SizeOf<Model>(Math.Max(numSub, 1))
+            + NativeArena.SizeOf<PackedNode>(numClip) + NativeArena.SizeOf<PackedNode>(numNodes);
         var arena = new NativeArena(size);
         try
         {
@@ -248,6 +249,32 @@ public static unsafe class BrushLoader
             output->Children[0] = input->Children[0];
             output->Children[1] = input->Children[1];
         }
+
+        mod->Hulls[1].Packed = mod->Hulls[2].Packed = Pack(arena, mod->ClipNodes, count, mod->Planes, mod->NumPlanes);
+    }
+
+    /// <summary>
+    /// The packed copy of <paramref name="count"/> clip nodes with their planes (<see cref="PackedNode"/>): the
+    /// values of the two arrays, nothing computed. A node whose plane number is out of range stays zero; if a trace
+    /// could reach it, <see cref="ValidateHull"/> rejects the model.
+    /// </summary>
+    private static PackedNode* Pack(NativeArena arena, DClipNode* nodes, int count, MPlane* planes, int numPlanes)
+    {
+        PackedNode* output = arena.Alloc<PackedNode>(count);
+        for (int i = 0; i < count; i++)
+        {
+            DClipNode* node = nodes + i;
+            PackedNode* p = output + i;
+            p->Children[0] = node->Children[0];
+            p->Children[1] = node->Children[1];
+            if ((uint)node->PlaneNum >= (uint)numPlanes)
+                continue;
+            MPlane* plane = planes + node->PlaneNum;
+            p->Normal = plane->Normal;
+            p->Dist = plane->Dist;
+            p->Type = plane->Type;
+        }
+        return output;
     }
 
     private static void LoadSubmodels(Model* mod, NativeArena arena, DModel* input, int count)
@@ -299,6 +326,8 @@ public static unsafe class BrushLoader
                 output->Children[j] = (short)mod->Leafs[leaf].Contents;
             }
         }
+
+        hull.Packed = Pack(arena, hull.ClipNodes, count, mod->Planes, mod->NumPlanes);
     }
 
     /// <summary>

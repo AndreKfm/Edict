@@ -49,12 +49,29 @@ public unsafe struct MLeaf
     public fixed byte AmbientSoundLevel[4];
 }
 
-/// <summary><c>hull_t</c>.</summary>
+/// <summary>
+/// A clip node together with its plane, in one 32-byte record: everything one visit of
+/// <c>SV_RecursiveHullCheck</c> or <c>SV_HullPointContents</c> reads, so that a visit touches one cache line (two
+/// nodes per line, none straddling) instead of a <c>dclipnode_t</c> and, dependent on it, an <c>mplane_t</c>.
+/// Built from the two arrays when the model is loaded; the layout of the default trace variant (docs/PLAN.md
+/// section B.4), not a change of any value. Normal and Dist are 16-byte aligned (the arena is 64-aligned).
+/// </summary>
+[StructLayout(LayoutKind.Sequential, Size = 32)]
+public unsafe struct PackedNode
+{
+    public Vec3 Normal;                               // mplane_t.normal
+    public float Dist;                                // mplane_t.dist
+    public int Type;                                  // mplane_t.type (an int: compared as one, no byte extension)
+    public fixed short Children[2];                   // dclipnode_t.children; negative numbers are contents
+}
+
+/// <summary><c>hull_t</c>, plus the packed copy of the clip nodes (<see cref="PackedNode"/>).</summary>
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct Hull
 {
     public DClipNode* ClipNodes;
     public MPlane* Planes;
+    public PackedNode* Packed;                        // the same nodes as ClipNodes, with their planes
     public int FirstClipNode;
     public int LastClipNode;
     public Vec3 ClipMins;
