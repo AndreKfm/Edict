@@ -57,6 +57,7 @@ before anything depends on them.
 | Double literals promote float expressions | `OP_STATE` (`time + 0.1`), `anglemod` (all-double), `AngleVectors` (`angles[YAW] * (M_PI*2/360)`, then `sin((double)angle)` → float), `SV_RecursiveHullCheck` (`DIST_EPSILON` = `0.03125` double), `SV_AddGravity`, `MSG_ReadAngle` (`* (360.0/256)`), `MSG_ReadCoord` (`* (1.0/8)`) | hash gate | Port literal types exactly; analyzer ED003 flags float expressions mixed with literals in `[Exact]` code unless suffix matches C. |
 | float vs double state | `sv.time`, `host_frametime`, `realtime` are `double`; `pr_global_struct->time`, `nextthink`, `freetime`, `ltime` are `float` | hash gate | Never "upgrade" a type. |
 | Out-of-range float→int | `anglemod`, `PF_rint` (`(int)(f+0.5)`), `MSG_WriteCoord` (`(int)(f*8)`), `MSG_WriteAngle` (`((int)f*256/360) & 255`: truncates first, then integer arithmetic) | `-fsanitize=float-cast-overflow` lane over the whole corpus | C: UB, x64 `cvttss2si` gives `0x80000000`. .NET 9+ saturates for int/long; **.NET 11 also saturates for byte/short**. All casts go through `CCast.I32/U8/...` reproducing `cvttss2si`; ED002 bans raw casts of float in `[Exact]`. |
+| Integer `abs()` on floats | `SV_NewChaseDir`: `abs(deltay)>abs(deltax)` with `float deltax, deltay` (`sv_move.c:286/321`); C converts to `int` first (truncation), found by clang `-Wabsolute-value` | function-level test with fractional and out-of-range deltas | Port as `Math.Abs(CCast.I32(delta))`, never `MathF.Abs`. Compile the reference with `-Wabsolute-value` and review every hit. |
 | `min/max` macros vs `Math.Min` | bound clamps | unit test with NaN, ±0 | `CMath.Min/Max` = `(a<b)?a:b`; ban `Math(F).Min/Max` in `[Exact]`. |
 | Reduction order | `DotProduct` macro is `a0*b0 + a1*b1 + a2*b2`, left-associative; `Length` loop | hash gate | Own `Vec3`; ban `System.Numerics.Vector3`, `Vector128.Dot/Sum` in `[Exact]` (ED001). |
 | `atof` vs `Q_atof` | `ED_ParseEpair`/`PF_stof` use CRT `atof` (double then float: double rounding); `Cvar_Set` uses Quake's `Q_atof` | P0 fuzz vs reference | Two separate C# functions; `(float)ParseDouble`, never `float.Parse`. |
@@ -228,6 +229,14 @@ reference executable, so level-1 tests exist before the first C# module.
   of the R9 self-check needs LLVM for Windows (clang-cl) installed; until then R9 runs on Linux only and the
   exit gate below is not met.
 - .NET: `global.json` pins 10.0.100 with `latestFeature`: Windows resolves 10.0.203, WSL 10.0.112.
+- Spike (2026-10-12): the pristine tree builds headless on x64 with clang 18 (`sys_null`, `vid_null`, `snd_null`,
+  `cd_null`, `in_null`, `net_loop`, `net_none`, `net_vcr` + the common and software-renderer files) after three
+  build-level changes, none in id's files: `-std=gnu89` (implicit function declarations are errors in C99+),
+  `-fcommon` (tentative definitions in headers, e.g. `sadjust` in `d_local.h`), and a glue file defining
+  `isDedicated`, which only the platform `sys_*.c` files define. Hazard warnings to keep enabled and review:
+  `-Wpointer-to-int-cast` (3 hits: `world.c:287/824` are offset computations in `EDICT_FROM_AREA`, harmless;
+  `d_surf.c:141` renderer), `-Wabsolute-value` (the `sv_move.c` row in §A.2), `-Wshift-overflow` (`r_edge.c:700`,
+  renderer). Not yet run: no game data in place (LibreQuake download pending).
 
 ### E.7 P0 exit gate
 
