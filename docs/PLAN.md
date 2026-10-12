@@ -9,7 +9,7 @@ before anything depends on them.
 | # | Decision | Alternative rejected | Why |
 |---|---|---|---|
 | D1 | Exactness beats performance. A faster variant that is not bit-identical on the corpus is not a candidate. | "Fast mode" with tolerance | The hash proof is the project's thesis; a second mode doubles the test matrix. |
-| D2 | Reference build: 64-bit clang, `id386=0` (C paths only), `-O2 -ffp-contract=off -fno-fast-math -fno-strict-aliasing -march=x86-64-v2`, SSE scalar math, plus an engine-string table patch (§A.1). | MSVC; 32-bit SSE2 build | clang's FP contraction and excess-precision behaviour is documented and identical on Windows (clang-cl) and Linux. 64-bit keeps a modern toolchain and matches the C# process; the cost is one extra, well-known patch. |
+| D2 | Reference build: 64-bit clang, `id386=0` (C paths only), `-O2 -ffp-contract=off -fno-fast-math -fno-strict-aliasing -march=x86-64-v2`, SSE scalar math, plus a patch that moves five static strings to the hunk so string_t offsets fit an int (§A.1). | MSVC; 32-bit SSE2 build | clang's FP contraction and excess-precision behaviour is documented and identical on Windows (clang-cl) and Linux. 64-bit keeps a modern toolchain and matches the C# process; the cost is one small extra patch. |
 | D3 | `sin`, `cos`, `atan2` and `rand` are vendored into the reference (forced-include header) and ported 1:1 to C#. | Use each platform's libm/CRT | Otherwise ground truth depends on the CRT version of the machine that built the reference. sqrt/floor/ceil/fabs are IEEE-exact and stay native. Consequence to state publicly: the reference is "WinQuake + pinned libm", not "WinQuake as shipped in 1996". |
 | D4 | Target `net10.0` (LTS). .NET 11 is evaluated as a benchmark variant, not adopted by default (§G). | `net11.0` from day one | .NET 11 is STS, GA Nov 2026; one of its breaking changes touches float→int casts. |
 | D5 | The `[NoAlloc]` analyzer is copied as source from Prism (analyzer + annotations + its tests), renamed to `Edict.NoAlloc.*`, with no "HotPath"/"Archfacts" names left: namespace `Edict.NoAlloc`, diagnostic prefix `NA` instead of `HP`, `noalloc-allowlist.toml`, MSBuild property `EdictNoAllocInjectAttributes`. Prism's transitive verifier and benchmarks are not copied. | NuGet / project reference into Prism | Requested; Edict builds from a single checkout and evolves the analyzer independently. Without the verifier, the per-member rule "every callee must carry a matching marker" (NA008) still composes; what is lost is the report of exemption chains, which is acceptable at this scale. |
@@ -26,14 +26,16 @@ before anything depends on them.
   `_M_IX86` (`quakeasm.h:29` likewise). Neither is defined for x64 targets, so an x64 build gets the C paths without
   a patch; the build asserts `id386 == 0` anyway.
 - **Bitness.** WinQuake stores `string_t` (`typedef int`, `pr_comp.h:24`) as `char* - pr_strings`. Checked in the
-  pinned tree: 10 sites. Six point into static storage, so on x64 the difference to the hunk-allocated `pr_strings`
-  does not fit in an `int`: `pr_cmds.c:934/947/954` (`pr_string_temp`, a static array: `PF_ftos`, `PF_vtos`,
-  `PF_etos`), `sv_main.c:1160` (`sv.worldmodel->name`, in the static `mod_known`), `sv_main.c:1170/1172`
-  (`sv.name`, `sv.startspot`). The other four point into the hunk and stay in range: `host_cmd.c:939/1311`
-  (`host_client->name`), `pr_cmds.c:253` (`PF_setmodel`), `pr_edict.c:742` (`ED_NewString`).
-  Decision (D2): 64-bit build with a QuakeSpasm-style engine-string table (`PR_SetEngineString`/`PR_GetString`)
-  for the six static sites, guarded by `#ifdef EDICT_REF` and reviewed as its own patch hunk. Safety net: a run
-  under `-fsanitize=undefined` over the corpus; a missed site shows up as a garbage string, which the
+  pinned tree: 10 sites. Five compiled ones point into static storage, so on x64 the difference to the
+  hunk-allocated `pr_strings` does not fit in an `int`: `pr_cmds.c:934/947/954` (`pr_string_temp`, a static
+  array: `PF_ftos`, `PF_vtos`, `PF_etos`), `sv_main.c:1160` (`sv.worldmodel->name`, in the static `mod_known`),
+  `sv_main.c:1170` (`sv.name`); `sv_main.c:1172` (`sv.startspot`) is `#ifdef QUAKE2` and not compiled. The other
+  four point into the hunk and stay in range: `host_cmd.c:939/1311` (`host_client->name`), `pr_cmds.c:253`
+  (`PF_setmodel`), `pr_edict.c:742` (`ED_NewString`). Observed failure without a fix: SEGV in `strcmp` under
+  `OP_EQ_S` during `ED_LoadFromFile`.
+  Implemented as `ref/patches/0002`: instead of a QuakeSpasm-style string table (which changes every read site),
+  the five strings are moved to the hunk (same contents, same lifetime), so every offset fits an `int` and no read
+  site changes. Safety net: a sanitizer run over the corpus; a missed site shows up as a garbage string, which the
   content-based string hash (§A.3) catches.
 - **FMA contraction.** `-ffp-contract=off` and a baseline ISA without FMA (`-march=x86-64-v2`). Self-check: a test
   expression whose fused and unfused results differ, compiled into the reference, must give the unfused bits.
@@ -198,12 +200,26 @@ per-entity, per-field first-divergence report, not only a frame hash.
 ### E.3 Keeping the C patch minimal and auditable
 
 - `ref/upstream/` pristine id-Software/Quake WinQuake tree at a pinned commit (vendored, GPLv2).
-- `ref/patched/` = upstream + `ref/edict.patch` (generated by `git diff`, reviewed as a unit).
+- `ref/patches/NNNN-*.patch`: a numbered series, one concern per patch, each with a header stating category
+  (undefined behaviour / 64-bit / harness hook), the failure that required it, and why results do not change.
+  `ref/build.sh` copies upstream, applies the series, adds `ref/src/*.c`, compiles. No patched tree is committed.
 - New files only, no logic in hooks: `edict_hash.c` (lanes, serialization, virtual clock, argv), `net_tape.c`
   (net driver modeled on `net_loop.c` that feeds recorded client messages), `edict_libm.c/.h`, `edict_rand.c`.
 - Hook lines under `#ifdef EDICT_HASH`: end of `Host_ServerFrame`, main loop (`Host_Frame(1.0f/72)` until tape end),
-  `Sys_FloatTime`, net driver table, `SV_ReadClientMessage` (record mode). Target: ≤ 30 changed lines in id files,
-  checked by CI (`git diff --stat` budget).
+  `Sys_FloatTime`, net driver table, `SV_ReadClientMessage` (record mode). Target: ≤ 30 changed code lines in id
+  files for harness hooks, checked by CI. Undefined-behaviour and 64-bit patches are outside that budget but each
+  needs evidence that results do not change.
+- State 2026-10-12: `0001` (`COM_FileBase` read before its argument; old/new compared on 21 paths, 0 differences),
+  `0002` (string_t offsets, see §A.1). With both, the release build loads LibreQuake `start`, runs the QuakeC spawn
+  functions and keeps running headless (client + server, `vid_null`).
+- Sanitizer findings not patched (yet), with reasons:
+  - misaligned `edict_t` accesses (`pr_edict.c`, link functions in `common.c`): `pr_edict_size` is not rounded;
+    x86-64 tolerates it, and rounding would change `EDICT_TO_PROG` values; the asan mode will use
+    `-fno-sanitize=alignment` once this is recorded in an ADR;
+  - `model.c:666` writes `vecs[0][j]` for `j < 8` across a `float[2][4]` (contiguous, works; the port reads 8 floats);
+  - `draw.c:885` null `draw_disc` before `Draw_Init`, `cl_parse.c:548` `1<<31`: client side, revisit in P5;
+  - `R_RenderView` aborts under ASan with "called without enough stack": its 10,000-byte stack-depth check trips on
+    ASan's larger frames; sanitizer runs of the server use dedicated mode (no renderer).
 - Headless: dedicated mode with the null drivers `vid_null.c`, `snd_null.c`, `cd_null.c`, `in_null.c`, `sys_null.c`
   (all five present in the pinned tree). `sys_null.c`'s `Sys_FloatTime` already returns a virtual clock, but it
   advances by 0.1 per *call*, not per frame; the harness replaces it.
@@ -236,7 +252,7 @@ reference executable, so level-1 tests exist before the first C# module.
   `isDedicated`, which only the platform `sys_*.c` files define. Hazard warnings to keep enabled and review:
   `-Wpointer-to-int-cast` (3 hits: `world.c:287/824` are offset computations in `EDICT_FROM_AREA`, harmless;
   `d_surf.c:141` renderer), `-Wabsolute-value` (the `sv_move.c` row in §A.2), `-Wshift-overflow` (`r_edge.c:700`,
-  renderer). Not yet run: no game data in place (LibreQuake download pending).
+  renderer). Data: LibreQuake v0.09-beta `lite.zip` via `tools/fetch-data.sh` (pinned SHA-256); all maps BSP29, `progs.dat` version 6, CRC 5927, as WinQuake requires.
 
 ### E.7 P0 exit gate
 
@@ -320,7 +336,7 @@ Recommendation: stay on `net10.0`. From P1 on, run the benchmark project against
 
 ## Owner decisions (2026-10-12)
 
-- Reference: 64-bit with engine-string table (D2).
+- Reference: 64-bit; string_t fix implemented as hunk copies (D2, §A.1).
 - Copy only the `[NoAlloc]` analyzer, renamed, nothing named HotPath (D5).
 - Analyzer copy licensed GPLv2 by its copyright holder (§H).
 - Plan and ADRs in English.

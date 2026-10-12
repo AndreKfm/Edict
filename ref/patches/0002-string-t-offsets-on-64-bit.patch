@@ -1,0 +1,83 @@
+EDICT 0002: string_t offsets that do not fit an int on 64-bit builds
+
+Category: 64-bit correctness, no change in results.
+string_t is an int offset from pr_strings. Five compiled sites store the offset of a string in static
+storage, which on x64 lies too far from the hunk-allocated pr_strings:
+  pr_cmds.c   PF_ftos, PF_vtos, PF_etos   pr_string_temp - pr_strings
+  sv_main.c   SV_SpawnServer              sv.worldmodel->name - pr_strings, sv.name - pr_strings
+(sv.startspot is QUAKE2-only and not compiled.) First failure: SEGV in strcmp under OP_EQ_S during
+ED_LoadFromFile. The strings move to the hunk: pr_string_temp is allocated in PR_LoadProgs, which
+SV_SpawnServer calls after Host_ClearMemory; the two SV_SpawnServer strings are copied by
+SV_EngineString. Contents and lifetimes are unchanged; no read site changes.
+
+--- a/pr_cmds.c
++++ b/pr_cmds.c
+@@ -920,7 +920,9 @@
+ 	Con_DPrintf ("%s",PF_VarString(0));
+ }
+ 
+-char	pr_string_temp[128];
++// EDICT: on the hunk (PR_LoadProgs) instead of static storage, so that pr_string_temp - pr_strings fits a
++// string_t (int) on 64-bit builds.
++char	*pr_string_temp;
+ 
+ void PF_ftos (void)
+ {
+--- a/pr_edict.c
++++ b/pr_edict.c
+@@ -1011,6 +1011,10 @@
+ 
+ 	pr_functions = (dfunction_t *)((byte *)progs + progs->ofs_functions);
+ 	pr_strings = (char *)progs + progs->ofs_strings;
++	{	// EDICT: see pr_cmds.c
++		extern char *pr_string_temp;
++		pr_string_temp = Hunk_AllocName (128, "strtemp");
++	}
+ 	pr_globaldefs = (ddef_t *)((byte *)progs + progs->ofs_globaldefs);
+ 	pr_fielddefs = (ddef_t *)((byte *)progs + progs->ofs_fielddefs);
+ 	pr_statements = (dstatement_t *)((byte *)progs + progs->ofs_statements);
+--- a/sv_main.c
++++ b/sv_main.c
+@@ -1034,6 +1034,24 @@
+ 
+ /*
+ ================
++SV_EngineString
++
++EDICT: a string_t is an int offset from pr_strings. sv.name and the model names live in static storage, which
++on 64-bit builds is too far from the hunk for an int; copy them to the hunk (same contents, same lifetime: the
++hunk is reset on every SV_SpawnServer, where both are set again).
++================
++*/
++static string_t SV_EngineString (char *s)
++{
++	char	*copy;
++
++	copy = Hunk_Alloc (strlen (s) + 1);
++	strcpy (copy, s);
++	return copy - pr_strings;
++}
++
++/*
++================
+ SV_SpawnServer
+ 
+ This is called at the start of each level
+@@ -1157,7 +1175,7 @@
+ 	ent = EDICT_NUM(0);
+ 	memset (&ent->v, 0, progs->entityfields * 4);
+ 	ent->free = false;
+-	ent->v.model = sv.worldmodel->name - pr_strings;
++	ent->v.model = SV_EngineString (sv.worldmodel->name);
+ 	ent->v.modelindex = 1;		// world model
+ 	ent->v.solid = SOLID_BSP;
+ 	ent->v.movetype = MOVETYPE_PUSH;
+@@ -1167,7 +1185,7 @@
+ 	else
+ 		pr_global_struct->deathmatch = deathmatch.value;
+ 
+-	pr_global_struct->mapname = sv.name - pr_strings;
++	pr_global_struct->mapname = SV_EngineString (sv.name);
+ #ifdef QUAKE2
+ 	pr_global_struct->startspot = sv.startspot - pr_strings;
+ #endif
