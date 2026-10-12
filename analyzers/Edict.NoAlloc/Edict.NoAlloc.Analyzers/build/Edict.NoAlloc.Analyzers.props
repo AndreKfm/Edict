@@ -1,0 +1,6 @@
+<Project>
+  <!-- Set EdictNoAllocInjectAttributes to false when referencing Edict.NoAlloc.Annotations instead. -->
+  <ItemGroup>
+    <CompilerVisibleProperty Include="EdictNoAllocInjectAttributes" />
+  </ItemGroup>
+</Project>

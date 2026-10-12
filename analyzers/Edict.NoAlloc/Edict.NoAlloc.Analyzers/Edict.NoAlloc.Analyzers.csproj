@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <RootNamespace>Edict.NoAlloc.Analyzers</RootNamespace>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <DevelopmentDependency>true</DevelopmentDependency>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Analyzers bind to the compiler they run in: target the oldest Roslyn we support, not the newest. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="4.14.0" PrivateAssets="all" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Allowlists/bcl.noalloc-allowlist.toml" LogicalName="Edict.NoAlloc.bcl.noalloc-allowlist.toml" />
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md;AnalyzerReleases.Unshipped.md" />
+    <InternalsVisibleTo Include="Edict.NoAlloc.Analyzers.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
+    <None Include="build/Edict.NoAlloc.Analyzers.props" Pack="true" PackagePath="build" />
+    <None Include="build/Edict.NoAlloc.Analyzers.props" Pack="true" PackagePath="buildTransitive" />
+  </ItemGroup>
+</Project>

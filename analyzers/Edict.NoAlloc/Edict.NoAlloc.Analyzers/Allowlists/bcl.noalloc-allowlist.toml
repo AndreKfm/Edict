@@ -1,0 +1,229 @@
+# Copyright (C) 2026 Andre Kaufmann
+# SPDX-License-Identifier: GPL-2.0-or-later
+# Baseline allowlist shipped with the analyzer: runtime library members assumed to satisfy every constraint
+# (no allocation, lock, blocking, async, explicit throw for valid arguments, reflection or type initialization).
+# Entries a target framework lacks are skipped silently for this file only; BaselineAllowlistTests checks that
+# every entry resolves on the test runtime. Format: analyzers/Edict.NoAlloc/README.md, section Allowlist.
+
+# Object, arrays, strings
+[[member]]
+symbol = "cs:*/M:System.Object.#ctor"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Object.ReferenceEquals(System.Object,System.Object)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.Array.Length"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.String.Length"
+constraints = ["All"]
+# Indexers renamed with [IndexerName] do not resolve as P: ids in Roslyn; list the getter instead.
+[[member]]
+symbol = "cs:*/M:System.String.get_Chars(System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.String.Equals(System.String)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.String.op_Equality(System.String,System.String)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.String.op_Inequality(System.String,System.String)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.String.op_Implicit(System.String)~System.ReadOnlySpan{System.Char}"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.MemoryExtensions.AsSpan(System.String)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.MemoryExtensions.AsSpan``1(``0[])"
+constraints = ["All"]
+
+# Index and Range (construction only; slicing goes through the collection's own members)
+[[member]]
+symbol = "cs:*/M:System.Index.op_Implicit(System.Int32)~System.Index"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Index.#ctor(System.Int32,System.Boolean)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Range.#ctor(System.Index,System.Index)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Range.StartAt(System.Index)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Range.EndAt(System.Index)"
+constraints = ["All"]
+
+# Span<T>
+[[member]]
+symbol = "cs:*/M:System.Span`1.#ctor(`0[])"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.#ctor(`0[],System.Int32,System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.#ctor(System.Void*,System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.#ctor(`0@)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.Span`1.Length"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.Span`1.IsEmpty"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.Span`1.Item(System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.Slice(System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.Slice(System.Int32,System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.Fill(`0)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.Clear"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.CopyTo(System.Span{`0})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.TryCopyTo(System.Span{`0})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.GetEnumerator"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.Enumerator.MoveNext"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.Span`1.Enumerator.Current"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.Enumerator.System#IDisposable#Dispose"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.op_Implicit(`0[])~System.Span{`0}"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Span`1.op_Implicit(System.Span{`0})~System.ReadOnlySpan{`0}"
+constraints = ["All"]
+
+# ReadOnlySpan<T>
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.#ctor(`0[])"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.#ctor(`0[],System.Int32,System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.#ctor(System.Void*,System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.#ctor(`0@)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.ReadOnlySpan`1.Length"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.ReadOnlySpan`1.IsEmpty"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.ReadOnlySpan`1.Item(System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.Slice(System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.Slice(System.Int32,System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.CopyTo(System.Span{`0})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.TryCopyTo(System.Span{`0})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.GetEnumerator"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.Enumerator.MoveNext"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.ReadOnlySpan`1.Enumerator.Current"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.Enumerator.System#IDisposable#Dispose"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.ReadOnlySpan`1.op_Implicit(`0[])~System.ReadOnlySpan{`0}"
+constraints = ["All"]
+
+# Memory marshalling and binary primitives
+[[member]]
+symbol = "cs:*/M:System.Runtime.InteropServices.MemoryMarshal.GetReference``1(System.Span{``0})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Runtime.InteropServices.MemoryMarshal.GetReference``1(System.ReadOnlySpan{``0})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.ReadInt16LittleEndian(System.ReadOnlySpan{System.Byte})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.ReadInt32LittleEndian(System.ReadOnlySpan{System.Byte})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.ReadInt64LittleEndian(System.ReadOnlySpan{System.Byte})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.ReadUInt16LittleEndian(System.ReadOnlySpan{System.Byte})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(System.ReadOnlySpan{System.Byte})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.ReadUInt64LittleEndian(System.ReadOnlySpan{System.Byte})"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(System.Span{System.Byte},System.Int16)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(System.Span{System.Byte},System.Int32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.WriteInt64LittleEndian(System.Span{System.Byte},System.Int64)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(System.Span{System.Byte},System.UInt16)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(System.Span{System.Byte},System.UInt32)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Buffers.Binary.BinaryPrimitives.WriteUInt64LittleEndian(System.Span{System.Byte},System.UInt64)"
+constraints = ["All"]
+
+# Time, nullable, spinning
+[[member]]
+symbol = "cs:*/M:System.Diagnostics.Stopwatch.GetTimestamp"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/P:System.Nullable`1.HasValue"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Nullable`1.GetValueOrDefault"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Nullable`1.GetValueOrDefault(`0)"
+constraints = ["All"]
+[[member]]
+symbol = "cs:*/M:System.Threading.SpinWait.SpinOnce"
+constraints = ["All"]
