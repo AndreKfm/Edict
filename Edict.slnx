@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/analyzers/" />
+  <Folder Name="/analyzers/Edict.NoAlloc/">
+    <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers/Edict.NoAlloc.Analyzers.csproj" />
+    <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers.Tests/Edict.NoAlloc.Analyzers.Tests.csproj" />
+    <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Annotations/Edict.NoAlloc.Annotations.csproj" />
+  </Folder>
+</Solution>
