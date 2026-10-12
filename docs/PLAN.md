@@ -312,8 +312,10 @@ Identical `.edh` across two runs, `-O0`/`-O2`, Windows/Linux; `ftos`/`atof` fuzz
 sanitizer silent on all tapes; analyzer vendored and building; the R7 known-bad variants for level 1 all fail.
 
 State 2026-10-12: met: identical across two runs, `-O0`/`-O2`, ASan, Windows/Linux (10 maps × 4,000 frames with
-generated tapes); analyzer copied and building (68/68 tests). Open: `ftos`/`atof` fuzz, `float-cast-overflow`
-lane, R7 variants (need the C# side), a second seed for `dev`.
+generated tapes); analyzer copied and building (68/68 tests); `float-cast-overflow` silent on the current
+corpus (it is part of clang's `-fsanitize=undefined` in the asan mode; check confirmed active with a test
+program; 0 reports over 10 maps × 4,000 frames). Open: `ftos`/`atof` fuzz and the R7 variants (both need the
+C# side), a second seed for `dev`.
 
 ## F. Repository layout and CI
 
