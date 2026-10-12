@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Differential harness (docs/PLAN.md section F): reference corpora and how the port loads their inputs. -->
+  <ItemGroup>
+    <ProjectReference Include="../Edict.Engine/Edict.Engine.csproj" />
+  </ItemGroup>
+</Project>

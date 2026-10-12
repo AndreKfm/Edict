@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Edict.Engine/Edict.Engine.csproj" />
+    <ProjectReference Include="../../src/Edict.Harness/Edict.Harness.csproj" />
+  </ItemGroup>
+</Project>
