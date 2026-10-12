@@ -52,3 +52,27 @@ Captured records feed level 1 (inputs) and level 2 (call tapes).
 A green suite says: on these inputs, port and reference produce identical bits. It does not say the port is
 equivalent on inputs outside the corpus. That is why the corpus grows (R5), why inputs include exhaustive and
 captured sets (R4), and why the harness is checked against known-bad variants (R7).
+
+## Running (state 2026-10-12)
+
+```bash
+# Linux (WSL): reference executable and oracle library from the same objects
+sh ref/build.sh release ~/edict-ref
+# Windows (Git Bash, LLVM clang): same, as .exe/.dll
+CC="/c/Program Files/LLVM/bin/clang.exe" LIBS="" EXE=".exe" EXTRA_CFLAGS="-DWINDED -D_CRT_SECURE_NO_WARNINGS" sh ref/build.sh release <dir>
+# level-1 differential tests (EDICT_ORACLE: libedict_oracle.so or edict_oracle.dll)
+EDICT_ORACLE=<path> dotnet run --project tests/Edict.Exact.Tests -c Release
+# system level, R9: tools/r9-linux.sh, then tools/r9-windows.sh <dir with the Linux .edh files>
+```
+
+In WSL, build the C# side with `--artifacts-path` outside the checkout, so that Windows and Linux builds do not share
+`obj/`.
+
+Level 1 so far (`tests/Edict.Exact.Tests`, 23 tests, identical results on Windows and Linux): `CMath` sin, cos,
+atan, atan2 (edge tables, 10^6-scale seeded sets, Quake-style float angles and vectors), `CCast` (edge tables and
+all 2^32 float bit patterns), `CRand` (10^6 calls from seed 1, five other seeds), `CString.Strcmp` (word table,
+10^6 random pairs). R7 variants (`KnownBadTests`): runtime `Math.Sin` and `Math.Atan2`, one ulp off, a distributed
+product in the sin kernel, the saturating .NET cast, `System.Random`, a skipped `rand()` call, a sign-only strcmp:
+all detected. A first R7 candidate, the sin kernel's inner polynomial summed in another order, was bit-identical
+to the original on 10^7 arguments, so it was replaced: not every reordering changes bits, which is why permitted
+optimizations are measured, not argued.

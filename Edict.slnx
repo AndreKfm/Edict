@@ -5,4 +5,10 @@
     <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers.Tests/Edict.NoAlloc.Analyzers.Tests.csproj" />
     <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Annotations/Edict.NoAlloc.Annotations.csproj" />
   </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Edict.Exact/Edict.Exact.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Edict.Exact.Tests/Edict.Exact.Tests.csproj" />
+  </Folder>
 </Solution>

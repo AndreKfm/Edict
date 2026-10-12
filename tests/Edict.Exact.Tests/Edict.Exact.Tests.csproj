@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../../src/Edict.Exact/Edict.Exact.csproj" />
+  </ItemGroup>
+</Project>

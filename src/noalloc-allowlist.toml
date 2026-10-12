@@ -1,0 +1,18 @@
+# Copyright (C) 2026 Andre Kaufmann
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Runtime library members Edict assumes to satisfy the listed [NoAlloc] constraints, in addition to the analyzer's
+# embedded baseline (analyzers/Edict.NoAlloc/README.md, section Allowlist). Every entry needs a reason; an entry is
+# an assumption, not a proof: the allocation tests (docs/TESTING.md) are the measurement.
+
+[[member]]
+symbol = "cs:*/M:System.Double.IsNaN(System.Double)"
+constraints = ["All"]
+runtime = "*"
+reason = "bit test on the argument; no allocation, lock, throw or type initialization"
+
+[[member]]
+symbol = "cs:*/M:System.Single.IsNaN(System.Single)"
+constraints = ["All"]
+runtime = "*"
+reason = "bit test on the argument; no allocation, lock, throw or type initialization"
