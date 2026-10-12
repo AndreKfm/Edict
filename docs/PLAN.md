@@ -1,7 +1,8 @@
 # Edict — plan (draft 1, 2026-10-12)
 
-Status: draft for review. Statements about the WinQuake source are from memory unless a file/line is cited;
-items marked **(verify)** must be checked against the pinned tree in phase 0 before anything depends on them.
+Status: draft for review. The WinQuake tree is pinned in `ref/upstream/` (id-Software/Quake `bf4ac42`); statements
+with a file:line refer to it and were checked there. Statements without one are from memory and must be checked
+before anything depends on them.
 
 ## 0. Decisions this plan rests on (each becomes an ADR)
 
@@ -21,29 +22,41 @@ items marked **(verify)** must be checked against the pinned tree in phase 0 bef
 - **x87 / excess precision.** Any build that lets the compiler use x87 (32-bit without `-mfpmath=sse`, or `id386=1` with
   `Sys_SetFPCW`/`Sys_LowFPPrecision`) produces results that depend on register spills. Mitigation: SSE scalar only.
   Self-check: identical hashes at `-O0` and `-O2`.
-- **Bitness.** WinQuake stores `string_t` as `char* - pr_strings` truncated to `int` (e.g. `PF_ftos` temp string,
-  `sv.name`, `sv.modelname` assignments in `SV_SpawnServer`) **(verify sites)**. On x64 these offsets can exceed 32 bits.
-  Decision (D2): 64-bit build with a QuakeSpasm-style engine-string table (`PR_SetEngineString`/`PR_GetString`,
-  ~40 lines, ~10 call sites), guarded by `#ifdef EDICT_REF` and reviewed as its own patch hunk. P0 task: find every
-  `- pr_strings` site with a grep plus a run under `-fsanitize=undefined` (pointer-overflow, implicit-conversion)
-  over the corpus; a missed site shows up as a garbage string, which the content-based string hash (§A.3) catches.
+- **id386.** `quakedef.h:64` sets `id386` from `__i386__`, which `quakedef.h:50-51` also defines on Windows for
+  `_M_IX86` (`quakeasm.h:29` likewise). Neither is defined for x64 targets, so an x64 build gets the C paths without
+  a patch; the build asserts `id386 == 0` anyway.
+- **Bitness.** WinQuake stores `string_t` (`typedef int`, `pr_comp.h:24`) as `char* - pr_strings`. Checked in the
+  pinned tree: 10 sites. Six point into static storage, so on x64 the difference to the hunk-allocated `pr_strings`
+  does not fit in an `int`: `pr_cmds.c:934/947/954` (`pr_string_temp`, a static array: `PF_ftos`, `PF_vtos`,
+  `PF_etos`), `sv_main.c:1160` (`sv.worldmodel->name`, in the static `mod_known`), `sv_main.c:1170/1172`
+  (`sv.name`, `sv.startspot`). The other four point into the hunk and stay in range: `host_cmd.c:939/1311`
+  (`host_client->name`), `pr_cmds.c:253` (`PF_setmodel`), `pr_edict.c:742` (`ED_NewString`).
+  Decision (D2): 64-bit build with a QuakeSpasm-style engine-string table (`PR_SetEngineString`/`PR_GetString`)
+  for the six static sites, guarded by `#ifdef EDICT_REF` and reviewed as its own patch hunk. Safety net: a run
+  under `-fsanitize=undefined` over the corpus; a missed site shows up as a garbage string, which the
+  content-based string hash (§A.3) catches.
 - **FMA contraction.** `-ffp-contract=off` and a baseline ISA without FMA (`-march=x86-64-v2`). Self-check: a test
   expression whose fused and unfused results differ, compiled into the reference, must give the unfused bits.
 - **libm / CRT.** See D3. Functions reached from simulation code: `sin/cos` (`AngleVectors` ← `SV_ClientThink`,
   `PF_makevectors`), `atan2` (`vectoyaw`, `PF_vectoyaw`, `PF_vectoangles`), `sqrt` (`VectorNormalize`, `Length`,
   `SV_UserFriction`, `PF_vlen`, `PF_normalize`). Candidate source: musl (MIT, derived from fdlibm).
-- **`rand()`.** `PF_random` is `(rand() & 0x7fff) / ((float)0x7fff)`. The MSVC LCG differs from glibc. Vendor one LCG
-  on both sides. In a listen server the client side (particles, `CL_ParseTEnt`, `R_RocketTrail`) consumes the same
-  stream and perturbs server randomness → reference runs are `-dedicated`; client and server get separate streams in
-  the client lane.
+- **`rand()`.** The MSVC LCG differs from glibc. Vendor one LCG on both sides. Server-side consumers in the pinned
+  tree, all of which the port must call in the same order and number:
+  - `_Host_Frame` (`host.c:644`) calls `rand()` once per host frame "to keep the random time dependent", **before**
+    `Host_FilterTime`, so also on frames that are filtered out;
+  - `PF_random` (`pr_cmds.c:474`): `(rand() & 0x7fff) / ((float)0x7fff)`;
+  - `SV_NewChaseDir` (`sv_move.c:321/341`) and `SV_MoveToGoal` (`sv_move.c:421`): monster movement.
+  The client side (`cl_main.c`, `cl_parse.c`, `cl_tent.c`, `r_part.c`, `snd_dma.c`, `menu.c`) consumes the same stream
+  in a listen server and perturbs server randomness → reference runs are `-dedicated`; client and server get
+  separate streams in the client lane. (`net_dgrm.c` calls `rand()` only in commented-out code.)
 
 ### A.2 Porting traps (C semantics that C# does not reproduce by default)
 
 | Trap | Concrete sites | Detection | Rule |
 |---|---|---|---|
-| Double literals promote float expressions | `OP_STATE` (`time + 0.1`), `anglemod` (all-double), `AngleVectors` (`angles[YAW] * (M_PI*2/360)`, then `sin((double)angle)` → float), `SV_RecursiveHullCheck` (`DIST_EPSILON` = `0.03125` double), `SV_AddGravity`, `MSG_ReadAngle` (`* (360.0/256)`) | hash gate | Port literal types exactly; analyzer ED003 flags float expressions mixed with literals in `[Exact]` code unless suffix matches C. |
+| Double literals promote float expressions | `OP_STATE` (`time + 0.1`), `anglemod` (all-double), `AngleVectors` (`angles[YAW] * (M_PI*2/360)`, then `sin((double)angle)` → float), `SV_RecursiveHullCheck` (`DIST_EPSILON` = `0.03125` double), `SV_AddGravity`, `MSG_ReadAngle` (`* (360.0/256)`), `MSG_ReadCoord` (`* (1.0/8)`) | hash gate | Port literal types exactly; analyzer ED003 flags float expressions mixed with literals in `[Exact]` code unless suffix matches C. |
 | float vs double state | `sv.time`, `host_frametime`, `realtime` are `double`; `pr_global_struct->time`, `nextthink`, `freetime`, `ltime` are `float` | hash gate | Never "upgrade" a type. |
-| Out-of-range float→int | `anglemod`, `PF_rint` (`(int)(f+0.5)`), `MSG_WriteCoord` (`(int)(f*8)`), `MSG_WriteAngle` | `-fsanitize=float-cast-overflow` lane over the whole corpus | C: UB, x64 `cvttss2si` gives `0x80000000`. .NET 9+ saturates for int/long; **.NET 11 also saturates for byte/short**. All casts go through `CCast.I32/U8/...` reproducing `cvttss2si`; ED002 bans raw casts of float in `[Exact]`. |
+| Out-of-range float→int | `anglemod`, `PF_rint` (`(int)(f+0.5)`), `MSG_WriteCoord` (`(int)(f*8)`), `MSG_WriteAngle` (`((int)f*256/360) & 255`: truncates first, then integer arithmetic) | `-fsanitize=float-cast-overflow` lane over the whole corpus | C: UB, x64 `cvttss2si` gives `0x80000000`. .NET 9+ saturates for int/long; **.NET 11 also saturates for byte/short**. All casts go through `CCast.I32/U8/...` reproducing `cvttss2si`; ED002 bans raw casts of float in `[Exact]`. |
 | `min/max` macros vs `Math.Min` | bound clamps | unit test with NaN, ±0 | `CMath.Min/Max` = `(a<b)?a:b`; ban `Math(F).Min/Max` in `[Exact]`. |
 | Reduction order | `DotProduct` macro is `a0*b0 + a1*b1 + a2*b2`, left-associative; `Length` loop | hash gate | Own `Vec3`; ban `System.Numerics.Vector3`, `Vector128.Dot/Sum` in `[Exact]` (ED001). |
 | `atof` vs `Q_atof` | `ED_ParseEpair`/`PF_stof` use CRT `atof` (double then float: double rounding); `Cvar_Set` uses Quake's `Q_atof` | P0 fuzz vs reference | Two separate C# functions; `(float)ParseDouble`, never `float.Parse`. |
@@ -56,7 +69,10 @@ items marked **(verify)** must be checked against the pinned tree in phase 0 bef
 ### A.3 Hash-scope traps
 
 - `string_t` values are address-dependent → hash string **content**, never offsets.
-- Entity references are byte offsets with layout-dependent stride (`EDICT_TO_PROG`) → hash as **index**.
+- Entity references are byte offsets with layout-dependent stride (`EDICT_TO_PROG`) → hash as **index**. The
+  stride is `pr_edict_size = progs->entityfields * 4 + sizeof (edict_t) - sizeof(entvars_t)` (`pr_edict.c:1021`),
+  not rounded up: on x64 edicts can be misaligned for the pointer members of `edict_t`; on the C# side the stride
+  is free to differ.
 - Untyped globals (`OP_ADDRESS` temporaries) contain layout-dependent offsets → the gate covers only `ddef`-typed
   globals; raw globals are a diagnostic lane.
 - `edict_t` has padding; never `memcpy` structs into the hash. Walk `progs->fielddefs` and `globaldefs`.
@@ -187,8 +203,9 @@ per-entity, per-field first-divergence report, not only a frame hash.
 - Hook lines under `#ifdef EDICT_HASH`: end of `Host_ServerFrame`, main loop (`Host_Frame(1.0f/72)` until tape end),
   `Sys_FloatTime`, net driver table, `SV_ReadClientMessage` (record mode). Target: ≤ 30 changed lines in id files,
   checked by CI (`git diff --stat` budget).
-- Headless: dedicated mode with the null drivers (`vid_null.c`, `snd_null.c`, `cd_null.c`, `in_null.c`, `sys_null.c`
-  — **(verify)** which exist in the pinned tree).
+- Headless: dedicated mode with the null drivers `vid_null.c`, `snd_null.c`, `cd_null.c`, `in_null.c`, `sys_null.c`
+  (all five present in the pinned tree). `sys_null.c`'s `Sys_FloatTime` already returns a virtual clock, but it
+  advances by 0.1 per *call*, not per frame; the harness replaces it.
 
 ### E.4 Inputs
 
