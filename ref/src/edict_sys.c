@@ -12,11 +12,15 @@ Arguments (besides Quake's own):
   -edicthash <file>  write per-frame hashes (.edh) to file
   -edictperent       add one hash per edict to every frame record
   -mem <mb>          hunk size in megabytes (default 32)
+  -edicttraces <file> <count> <seed>
+                     after the first frame with a running map, write the hull trace corpus (edict_traces.c)
+                     instead of continuing, then exit
 The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
 */
 #include "quakedef.h"
 #include "errno.h"
 #include "edict_hash.h"
+#include "edict_traces.h"
 
 #define EDICT_FRAMETIME	"0.013889"	// 72 Hz, the rate Host_FilterTime is built around
 
@@ -213,7 +217,7 @@ static int ArgValue (char *name, int fallback)
 int main (int argc, char **argv)
 {
 	static quakeparms_t	parms;
-	int		frames, frame, before, i;
+	int		frames, frame, before, i, traces;
 
 	COM_InitArgv (argc, argv);
 
@@ -229,6 +233,9 @@ int main (int argc, char **argv)
 	frames = ArgValue ("-edictframes", 0);
 	if (frames <= 0)
 		Sys_Error ("-edictframes <n> is required");
+	traces = COM_CheckParm ("-edicttraces");
+	if (traces && traces >= com_argc - 3)
+		Sys_Error ("-edicttraces <file> <count> <seed>");
 	i = COM_CheckParm ("-edicthash");
 	if (i && i < com_argc - 1)
 		EdictHash_Open (com_argv[i + 1], COM_CheckParm ("-edictperent") ? EDH_FLAG_PER_ENTITY : 0);
@@ -247,6 +254,12 @@ int main (int argc, char **argv)
 		{
 			EdictHash_Frame ();
 			EdictHash_DumpGlobals ();
+			if (traces)
+			{
+				EdictTraces_Write (com_argv[traces + 1], Q_atoi (com_argv[traces + 2]),
+					strtoull (com_argv[traces + 3], NULL, 0));
+				break;
+			}
 		}
 	}
 
