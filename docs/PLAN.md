@@ -214,10 +214,25 @@ per-entity, per-field first-divergence report, not only a frame hash.
   with byte-quantized angles. Replay in dedicated mode through `net_tape.c`; C# implements the same driver.
 - Corpus: LibreQuake maps + own tapes only. No id data in the repository or in CI.
 
-### E.5 P0 exit gate
+### E.5 Differential testing
+
+The rules (R1–R10) and the three levels (function / module call tapes / lockstep) are in
+[TESTING.md](TESTING.md). P0 builds the oracle library (`libedict_ref.so`) from the same objects as the
+reference executable, so level-1 tests exist before the first C# module.
+
+### E.6 Toolchain (state 2026-10-12)
+
+- Reference and oracle: Linux, WSL Ubuntu 24.04, clang 18.1.3, make (CMake is not installed in WSL). Same
+  platform as CI.
+- Windows has no C compiler (Visual Studio's LLVM folder contains only clang-format/clang-tidy). The Windows leg
+  of the R9 self-check needs LLVM for Windows (clang-cl) installed; until then R9 runs on Linux only and the
+  exit gate below is not met.
+- .NET: `global.json` pins 10.0.100 with `latestFeature`: Windows resolves 10.0.203, WSL 10.0.112.
+
+### E.7 P0 exit gate
 
 Identical `.edh` across two runs, `-O0`/`-O2`, Windows/Linux; `ftos`/`atof` fuzz matches; `float-cast-overflow`
-sanitizer silent on all tapes; analyzer vendored and building.
+sanitizer silent on all tapes; analyzer vendored and building; the R7 known-bad variants for level 1 all fail.
 
 ## F. Repository layout and CI
 
