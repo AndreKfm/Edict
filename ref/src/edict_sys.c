@@ -244,7 +244,10 @@ int main (int argc, char **argv)
 		if (host_framecount != before + 1)
 			Sys_Error ("host frame %i did not run (filtered or aborted)", frame);
 		if (sv.active)
+		{
 			EdictHash_Frame ();
+			EdictHash_DumpGlobals ();
+		}
 	}
 
 	EdictHash_Close ();

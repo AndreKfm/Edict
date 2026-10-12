@@ -312,6 +312,34 @@ void EdictHash_Frame (void)
 	FlushStream ();
 }
 
+/*
+Diagnostic: -edictdumpglobals <framecount> <file> writes the raw globals words (u32 each) and, after them,
+one line per globaldef ("ofs type name\n") at the given host_framecount.
+*/
+void EdictHash_DumpGlobals (void)
+{
+	static int	frame = -1;
+	int			i;
+	FILE		*f;
+
+	if (frame == -1)
+	{
+		i = COM_CheckParm ("-edictdumpglobals");
+		frame = (i && i < com_argc - 2) ? Q_atoi (com_argv[i + 1]) : 0;
+	}
+	if (!frame || host_framecount != frame)
+		return;
+	i = COM_CheckParm ("-edictdumpglobals");
+	f = fopen (com_argv[i + 2], "wb");
+	if (!f)
+		Sys_Error ("EdictHash: cannot open %s", com_argv[i + 2]);
+	fwrite (pr_globals, 4, progs->numglobals, f);
+	for (i = 0 ; i < progs->numglobaldefs ; i++)
+		fprintf (f, "%i %i %s\n", pr_globaldefs[i].ofs, pr_globaldefs[i].type & ~DEF_SAVEGLOBAL,
+			pr_strings + pr_globaldefs[i].s_name);
+	fclose (f);
+}
+
 void EdictHash_Close (void)
 {
 	if (edh)

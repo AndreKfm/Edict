@@ -17,6 +17,8 @@ edict_u64 EdictHash_XXH64 (const void *data, int length);
 void EdictHash_Open (char *path, int flags);
 // Called after every host frame that ran while sv.active; writes one frame record.
 void EdictHash_Frame (void);
+// Diagnostic: -edictdumpglobals <framecount> <file>
+void EdictHash_DumpGlobals (void);
 void EdictHash_Close (void);
 
 #endif

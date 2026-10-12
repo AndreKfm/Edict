@@ -42,6 +42,14 @@ before anything depends on them.
 - **libm / CRT.** See D3. Functions reached from simulation code: `sin/cos` (`AngleVectors` ← `SV_ClientThink`,
   `PF_makevectors`), `atan2` (`vectoyaw`, `PF_vectoyaw`, `PF_vectoangles`), `sqrt` (`VectorNormalize`, `Length`,
   `SV_UserFriction`, `PF_vlen`, `PF_normalize`). Candidate source: musl (MIT, derived from fdlibm).
+- **`strcmp()` magnitude.** `OP_NE_S` stores the return value of `strcmp` as a QuakeC float
+  (`pr_exec.c:523`: `c->_float = strcmp (...)`). The standard fixes only the sign: glibc returns the difference of
+  the first differing bytes (e.g. 112), MSVC and the sanitizer interceptors return ±1. Found 2026-10-12 because the
+  raw globals lane differed between the release and the ASan build (one compiler temporary, −7 vs −1). A static
+  scan of LibreQuake's `progs.dat` found 53 `NE_S` statements, all used as truth tests only (heuristic: linear,
+  40-statement window), so the gated state was not affected. Pinned anyway: `ref/src/edict_libc.h` (force-included)
+  defines `strcmp` as the byte difference of the first differing bytes as `unsigned char`; the C# port does the
+  same. After pinning, release and ASan agree in every lane.
 - **`rand()`.** The MSVC LCG differs from glibc. Vendor one LCG on both sides. Server-side consumers in the pinned
   tree, all of which the port must call in the same order and number:
   - `_Host_Frame` (`host.c:644`) calls `rand()` once per host frame "to keep the random time dependent", **before**
@@ -247,6 +255,17 @@ per-entity, per-field first-divergence report, not only a frame hash.
   release vs ASan/UBSan: identical in all lanes. Coverage is weak: without a player, 0 entities change on 7 of 10
   maps (3 on `start`, 5 on `lq_e0m6`, 2 on `dev`); the lanes differ per frame mainly through `sv.time` and the
   globals. R9 is repeated with generated tapes before it counts for the P0 exit gate.
+  Cause found: `-dedicated` without a number means 8 client slots, `Host_FindMaxClients` then sets `deathmatch 1`
+  (`host.c:197`), and the QuakeC removes all monsters in deathmatch. Runs now use `-dedicated 1` (single player).
+- Tapes implemented (2026-10-12): `ref/src/edict_tape.c` (net driver, replaces `net_none.c`; format in its
+  header), `tools/tapegen.py` (interim generator, splitmix64 so a C# port reproduces tapes bit for bit). Per frame
+  a tape holds reliable messages followed by at most one unreliable one, because `SV_ReadClientMessage` stops
+  reading after the first unreliable message.
+- R9 with tapes (2026-10-12): 10 maps × 4,000 frames (seed = map number), single player; release twice,
+  `-O2` vs `-O0`, release vs ASan/UBSan: identical in all lanes, including the raw globals lane. 48–169 entities
+  change per map; the player entity changes in 3,996 of 3,999 frames on `start`. On `dev` the tape walks the
+  player into an exit to `lq_e4m1`, which the lite package lacks; the server stops after 1,490 frames (game
+  behaviour, not a harness fault; that map needs another seed). Windows leg still open.
 
 ### E.5 Differential testing
 
