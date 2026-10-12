@@ -42,6 +42,16 @@ before anything depends on them.
 - **libm / CRT.** See D3. Functions reached from simulation code: `sin/cos` (`AngleVectors` ← `SV_ClientThink`,
   `PF_makevectors`), `atan2` (`vectoyaw`, `PF_vectoyaw`, `PF_vectoangles`), `sqrt` (`VectorNormalize`, `Length`,
   `SV_UserFriction`, `PF_vlen`, `PF_normalize`). Candidate source: musl (MIT, derived from fdlibm).
+  Implemented 2026-10-12: `ref/src/edict_libm.c` (sin, cos, atan, atan2; fdlibm algorithms as carried by musl,
+  written from the published algorithms, Sun notice kept), redirected by the force-included `edict_libc.h`.
+  `sqrt`, `floor`, `ceil`, `fabs` stay with the C library (exact in IEEE). `tan` and `pow` are only called by
+  client/renderer code (`r_main.c`, `screen.c`, `view.c`) and are left for P5. Accuracy against glibc
+  (`ref/tests/libm_accuracy.c`): max 1 ulp on 10^7 sin/cos arguments in [−4π, 4π], on Quake-style float angles,
+  on [−10^5, 10^5], on 5·10^6 atan/atan2 arguments of any magnitude; 82–99.98 % bit-identical to glibc.
+  Deviation: |x| ≥ 2^20·π/2 is reduced with `fmod (x, 2π)` instead of `__rem_pio2_large`; deterministic but
+  inaccurate there (sin(1e300) differs from glibc completely); no game angle comes near it.
+  `rand`: the MSVC LCG (`seed*214013+2531011`, `(seed>>16)&0x7fff`, seed 1; WinQuake never calls `srand`).
+  Redirecting the names also stops the compiler from folding `sin (constant)` with its own math library.
 - **`strcmp()` magnitude.** `OP_NE_S` stores the return value of `strcmp` as a QuakeC float
   (`pr_exec.c:523`: `c->_float = strcmp (...)`). The standard fixes only the sign: glibc returns the difference of
   the first differing bytes (e.g. 112), MSVC and the sanitizer interceptors return ±1. Found 2026-10-12 because the
@@ -265,7 +275,7 @@ per-entity, per-field first-divergence report, not only a frame hash.
   `-O2` vs `-O0`, release vs ASan/UBSan: identical in all lanes, including the raw globals lane. 48–169 entities
   change per map; the player entity changes in 3,996 of 3,999 frames on `start`. On `dev` the tape walks the
   player into an exit to `lq_e4m1`, which the lite package lacks; the server stops after 1,490 frames (game
-  behaviour, not a harness fault; that map needs another seed). Windows leg still open.
+  behaviour, not a harness fault; that map needs another seed). Windows leg: see E.6.
 
 ### E.5 Differential testing
 
@@ -277,9 +287,15 @@ reference executable, so level-1 tests exist before the first C# module.
 
 - Reference and oracle: Linux, WSL Ubuntu 24.04, clang 18.1.3, make (CMake is not installed in WSL). Same
   platform as CI.
-- Windows has no C compiler (Visual Studio's LLVM folder contains only clang-format/clang-tidy). The Windows leg
-  of the R9 self-check needs LLVM for Windows (clang-cl) installed; until then R9 runs on Linux only and the
-  exit gate below is not met.
+- Windows: LLVM 23.1.3 installed 2026-10-12 (`winget install LLVM.LLVM`); `clang.exe` finds Visual Studio and
+  the Windows SDK itself. `ref/build.sh` runs in Git Bash with `CC`, `LIBS=""`, `EXE=.exe` and
+  `EXTRA_CFLAGS=-DWINDED` (id's switch for its Windows dedicated server: `VID_LockBuffer` becomes the same empty
+  macro as on Linux). `menu.c` is replaced on both platforms by `ref/src/edict_menu.c` (stubs): its `_WIN32` code
+  needs DirectDraw and SciTech headers. Effect checked: Linux hashes unchanged in the gated lanes; on `lq_e0m8` one
+  raw-globals word moves by 576 bytes (a string offset into the hunk, which no longer holds the menu's commands).
+- R9 Windows vs Linux (2026-10-12, `tools/r9-windows.sh`): 10 maps × 4,000 frames, Windows (clang 23, MSVC ABI,
+  UCRT) vs Linux (clang 18, glibc): identical in all lanes including raw globals. Tapes generated on Windows are
+  byte-identical to the Linux ones.
 - .NET: `global.json` pins 10.0.100 with `latestFeature`: Windows resolves 10.0.203, WSL 10.0.112.
 - Spike (2026-10-12): the pristine tree builds headless on x64 with clang 18 (`sys_null`, `vid_null`, `snd_null`,
   `cd_null`, `in_null`, `net_loop`, `net_none`, `net_vcr` + the common and software-renderer files) after three
@@ -294,6 +310,10 @@ reference executable, so level-1 tests exist before the first C# module.
 
 Identical `.edh` across two runs, `-O0`/`-O2`, Windows/Linux; `ftos`/`atof` fuzz matches; `float-cast-overflow`
 sanitizer silent on all tapes; analyzer vendored and building; the R7 known-bad variants for level 1 all fail.
+
+State 2026-10-12: met: identical across two runs, `-O0`/`-O2`, ASan, Windows/Linux (10 maps × 4,000 frames with
+generated tapes); analyzer copied and building (68/68 tests). Open: `ftos`/`atof` fuzz, `float-cast-overflow`
+lane, R7 variants (need the C# side), a second seed for `dev`.
 
 ## F. Repository layout and CI
 
