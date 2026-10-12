@@ -63,7 +63,15 @@ CC="/c/Program Files/LLVM/bin/clang.exe" LIBS="" EXE=".exe" EXTRA_CFLAGS="-DWIND
 # level-1 differential tests (EDICT_ORACLE: libedict_oracle.so or edict_oracle.dll)
 EDICT_ORACLE=<path> dotnet run --project tests/Edict.Exact.Tests -c Release
 # system level, R9: tools/r9-linux.sh, then tools/r9-windows.sh <dir with the Linux .edh files>
+# phase-1 gate (module level): trace corpus from the reference, then the port against it
+sh tools/traces.sh ~/edict-ref data/traces
+dotnet run --project tests/Edict.Engine.Tests -c Release
+# benchmarks (gate-passing variants only, R8)
+dotnet run --project bench/Edict.Benchmarks -c Release -- --filter "*HullTrace*"
 ```
+
+The engine tests read the corpus from `EDICT_TRACES` and the game data from `EDICT_DATA` (defaults: `data/traces` and
+`data/libreq-v0.09-beta` in the checkout); with `--artifacts-path` outside the checkout (WSL) set both.
 
 In WSL, build the C# side with `--artifacts-path` outside the checkout, so that Windows and Linux builds do not share
 `obj/`.
@@ -82,3 +90,11 @@ Three first candidates turned out not to be bad, and were replaced after measuri
 summed in another order (bit-identical on 10^7 arguments), .NET's `ToString("F1")` (correctly rounded, ties to even,
 like the C libraries), and Q_atof with a reordered addition (differences stay below what the float conversion keeps).
 Not every reordering changes bits; which optimizations are permitted is measured, not argued.
+
+Level 2 so far (`tests/Edict.Engine.Tests`, 60 tests, identical results on Windows and Linux): the hull trace corpus
+(10 maps × 10^5 traces, `docs/PLAN.md` section C), the loader dump, R7 with 7 known-bad copies of
+`SV_RecursiveHullCheck`. The corpus is a level-2 tape in all but name: it records calls at the module boundary with
+their inputs and results, and the port replays each call in isolation. A first corpus of uniform random traces passed
+the port but also three known-bad variants; how the generator was changed is in `docs/PLAN.md` section C. A corpus
+whose inputs a game would rarely produce at random needs the same check: R7 decides whether it is good enough, not
+its size.

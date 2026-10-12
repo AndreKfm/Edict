@@ -168,6 +168,43 @@ C# must match **every record**; the diff reports the first mismatching record.
 Why: it exercises `DIST_EPSILON` promotion and `plane->type < 3` fast paths, it is the hottest server path (so
 benchmarking starts immediately), and it proves the harness pipeline end to end at small scope.
 
+State 2026-10-12: **gate met** (P1 kill rule not reached: 100 % on the first full run). Implemented:
+- Reference: `ref/src/edict_traces.c` (`-edicttraces <file> <count> <seed>`, called from `edict_sys.c` after the
+  first frame with a running map; no id file touched), `tools/traces.sh` (10 maps × 100,000 traces, seed = list
+  position). The `.etr` file holds the loader dump (planes, nodes, leafs, clipnodes, hull 0, every brush model's
+  hulls and bounds) and per trace the inputs, the complete `trace_t` and `SV_HullPointContents` of the world hulls
+  at start and end. Inputs are stored, so the port reads them (R2). Generator: splitmix64 instead of xorshift (the
+  tape generator's). The 10 corpora are byte-identical from release, `-O0`, ASan/UBSan and Windows (R9).
+- Port: `src/Edict.Engine` — `PakFile`/`QFileSystem` (memory-mapped, `COM_FindFile` order and `COM_CheckRegistered`),
+  `BrushLoader` (collision lumps into one `NativeArena`), `HullTrace` (`SV_HullPointContents`, literal and
+  iterative `SV_RecursiveHullCheck`), `ClipWorld` (box hull, `SV_HullForEntity`, `SV_ClipMoveToEntity<TCheck>`, the
+  variant a static-abstract type parameter). `src/Edict.Harness` reads the corpus. The trace path is
+  `[NoAlloc(Constraints.All)]`; `SV_HullForEntity`'s two Sys_Errors (game state) throw preallocated exceptions under
+  `Allow.Throw`.
+- Gate (`tests/Edict.Engine.Tests`, 60 tests, Windows and Linux): loader dump record by record, all 10^6 traces with
+  both variants, hull contents.
+- Deviations from C, none observable on valid data: hull trees are validated once at load (node range, plane
+  index) instead of C's per-visit `bad node number` check, so the trace code needs no error path; out-of-range
+  `modelindex` counts as "no model" (C reads out of bounds); lumps and PAK entries outside the file are load errors.
+  Model brush data loaded so far: collision only (no textures, faces, lighting); `Mod_SetParent` comes with the
+  renderer. Item boxes (`maps/b_*.bsp`) are brush models of their own in `sv.models`.
+- Corpus coverage (R7, 8 variants): the first corpus (uniform points, rejection-sampled into open space) missed three
+  known-bad variants. The backup loop at the end of `SV_RecursiveHullCheck` ran 5 times in 10^6 traces. The
+  generator now chains traces as `SV_FlyMove` does (start at the last `endpos`, slide, push into the plane or the
+  corner of the last two planes, drop), starts some traces on sloped planes, and picks 4 % of the records by
+  importance sampling with a private copy of `SV_RecursiveHullCheck` that only reports whether the loop moved the
+  crossing point (~2,700 such records per map; results still come from id's function). Now detected: `frac` as
+  double, unary minus instead of `vec3_origin - normal`, `t1 <= 0` for the side, `frac -= 0.1f`, no backup loop,
+  `midf = frac`, reordered dot product.
+  Not bad, shown rather than assumed: `DIST_EPSILON` as a float. `t1 ∓ 1/32` moves `t1` toward zero, which is exact
+  in float for 1/32 ≤ |t1| < 2^19; for |t1| < 1/32 it can round, but numerator and denominator then have opposite
+  signs and `frac` is clamped to 0 either way (measured: 1.5·10^6 crossings, 2 different unclamped values, both
+  clamped). It stays as an equivalence test.
+- Benchmark (`bench/Edict.Benchmarks`, BenchmarkDotNet 0.15.8, Ryzen 9 3900X, .NET 10.0.9, whole corpus per
+  operation set): recursive 230 ns/trace on `start`, 273 on `lq_e0m3`; iterative 1.05× and 0.99× of that; 0 B
+  allocated. The explicit stack does not pay for its frame copies; the literal recursion stays the default. Not yet
+  measured: the C reference on the same inputs, `Vec3` passing variants (§B.2), `net11.0`.
+
 **Cut 2:** `PR_LoadProgs`, VM, builtins, `ED_LoadFromFile`, `SV_SpawnServer`, areanodes. Gate: frame-0 hash
 (edicts + typed globals after spawn, before `SV_Physics`) per map.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
