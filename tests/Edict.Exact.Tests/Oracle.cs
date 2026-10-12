@@ -37,6 +37,11 @@ internal static unsafe class Oracle
     private static readonly delegate* unmanaged<byte*, byte*, int> StrcmpFn = (delegate* unmanaged<byte*, byte*, int>)Get("EdictOracle_Strcmp");
     private static readonly delegate* unmanaged<float, int> FloatToIntFn = (delegate* unmanaged<float, int>)Get("EdictOracle_FloatToInt");
     private static readonly delegate* unmanaged<double, int> DoubleToIntFn = (delegate* unmanaged<double, int>)Get("EdictOracle_DoubleToInt");
+    private static readonly delegate* unmanaged<float, byte*, int, int> FtosFn = (delegate* unmanaged<float, byte*, int, int>)Get("EdictOracle_Ftos");
+    private static readonly delegate* unmanaged<float, float, float, byte*, int, int> VtosFn = (delegate* unmanaged<float, float, float, byte*, int, int>)Get("EdictOracle_Vtos");
+    private static readonly delegate* unmanaged<byte*, float> EpairFloatFn = (delegate* unmanaged<byte*, float>)Get("EdictOracle_EpairFloat");
+    private static readonly delegate* unmanaged<byte*, float> QAtofFn = (delegate* unmanaged<byte*, float>)Get("EdictOracle_QAtof");
+    private static readonly object FormatLock = new();     // PF_ftos/PF_vtos use the reference's globals
 
     public static double Sin(double x) => SinFn(x);
     public static double Cos(double x) => CosFn(x);
@@ -46,6 +51,39 @@ internal static unsafe class Oracle
     public static int Rand() => RandFn();
     public static int FloatToInt(float f) => FloatToIntFn(f);
     public static int DoubleToInt(double d) => DoubleToIntFn(d);
+
+    /// <summary>PF_ftos itself; the string is copied to <paramref name="dest"/>, the length returned.</summary>
+    public static int Ftos(float v, Span<byte> dest)
+    {
+        lock (FormatLock)
+            fixed (byte* p = dest)
+                return FtosFn(v, p, dest.Length);
+    }
+
+    /// <summary>PF_vtos itself.</summary>
+    public static int Vtos(float x, float y, float z, Span<byte> dest)
+    {
+        lock (FormatLock)
+            fixed (byte* p = dest)
+                return VtosFn(x, y, z, p, dest.Length);
+    }
+
+    /// <summary>ED_ParseEpair's float conversion: (float)atof (s).</summary>
+    public static float EpairFloat(ReadOnlySpan<byte> s) => WithCString(s, p => EpairFloatFn(p));
+
+    /// <summary>Q_atof itself.</summary>
+    public static float QAtof(ReadOnlySpan<byte> s) => WithCString(s, p => QAtofFn(p));
+
+    private delegate float CStringFunc(byte* p);
+
+    private static float WithCString(ReadOnlySpan<byte> s, CStringFunc f)
+    {
+        Span<byte> c = s.Length < 1024 ? stackalloc byte[s.Length + 1] : new byte[s.Length + 1];
+        s.CopyTo(c);
+        c[s.Length] = 0;
+        fixed (byte* p = c)
+            return f(p);
+    }
 
     /// <summary>strcmp on two NUL-terminated copies of the spans.</summary>
     public static int Strcmp(ReadOnlySpan<byte> a, ReadOnlySpan<byte> b)

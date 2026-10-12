@@ -68,12 +68,13 @@ public sealed class KnownBadTests
         }, Oracle.Sin, 2, 1_000_000, -0.78, 0.78));
 
     [Fact]
-    public void Saturating_cast_instead_of_CCast() =>
-        MustDiverge("(int)float in .NET (saturating)", () =>
+    public void Hardware_cast_instead_of_CCast() =>
+        MustDiverge("(int)float as cvttss2si (0x80000000 out of range), the reference before pinning", () =>
         {
+            static int Cvttss2si(float f) => f >= -2147483648f && f < 2147483648f ? (int)f : int.MinValue;
             foreach (float f in new[] { 3e9f, -3e9f, float.NaN, float.PositiveInfinity })
             {
-                string? r = Compare("(int)float", Hex(f), (int)f, Oracle.FloatToInt(f));
+                string? r = Compare("(int)float", Hex(f), Cvttss2si(f), Oracle.FloatToInt(f));
                 if (r is not null)
                     return r;
             }
@@ -117,5 +118,54 @@ public sealed class KnownBadTests
         {
             byte[] a = "plat"u8.ToArray(), b = [];
             return Compare("strcmp", "\"plat\", \"\"", Math.Sign(CString.Strcmp(a, b)), Oracle.Strcmp(a, b));
+        });
+
+    // .NET's ToString("F1") was a first candidate here and matched the reference on the exact ties 0.25, 0.75, 2.5
+    // and -0.25: it is correctly rounded, ties to even, like glibc and UCRT. Not a known-bad variant (it allocates,
+    // which the analyzer rejects, but that is a different gate). Rounding half away from zero is.
+    [Fact]
+    public void Ftos_rounding_half_away_from_zero() =>
+        MustDiverge("ftos rounding ties away from zero", () =>
+        {
+            Span<byte> reference = stackalloc byte[256];
+            foreach (float v in new[] { 0.25f, 0.75f, 2.5f, -0.25f })
+            {
+                double tenths = Math.Round(v * 10.0, MidpointRounding.AwayFromZero) / 10;
+                string port = tenths.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture).PadLeft(5);
+                int m = Oracle.Ftos(v, reference);
+                string r = System.Text.Encoding.Latin1.GetString(reference[..m]);
+                if (port != r)
+                    return $"ftos({v}): port \"{port}\", reference \"{r}\"";
+            }
+            return null;
+        });
+
+    [Fact]
+    public void Atof_with_float_Parse() =>
+        MustDiverge("float.Parse instead of (float)strtod (no double rounding)", () =>
+        {
+            // 1 + 2^-24 is halfway between two floats; the trailing 1 lifts the decimal just above it. strtod rounds
+            // to the double 1 + 2^-24, and the float conversion then ties to even (1.0); float.Parse rounds once (up).
+            byte[] s = "1.000000059604644775390625000001"u8.ToArray();
+            float port = float.Parse("1.000000059604644775390625000001", System.Globalization.CultureInfo.InvariantCulture);
+            return Compare("atof", "1.000000059604644775390625000001", port, Oracle.EpairFloat(s));
+        });
+
+    // A first candidate, Q_atof adding (c - '0') instead of computing (val*10 + c) - '0', gave the same float on a
+    // 39-digit input: the double results differ at most in low bits that the float conversion drops. Not a
+    // known-bad variant on that input. Porting Q_atof as atof is: atof skips white space and accepts '+' and
+    // exponents, Q_atof does not.
+    [Fact]
+    public void Q_atof_ported_as_atof() =>
+        MustDiverge("Q_atof implemented with atof semantics", () =>
+        {
+            foreach (string text in new[] { " 1.5", "+2", "1e5" })
+            {
+                byte[] s = System.Text.Encoding.Latin1.GetBytes(text);
+                string? r = Compare("Q_atof", text, (float)CAtof.Atof(s), Oracle.QAtof(s));
+                if (r is not null)
+                    return r;
+            }
+            return null;
         });
 }

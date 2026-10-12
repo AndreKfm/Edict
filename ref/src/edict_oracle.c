@@ -31,7 +31,7 @@ EDICT_EXPORT void EdictOracle_Srand (unsigned int seed) { srand (seed); }
 EDICT_EXPORT int EdictOracle_Rand (void) { return rand (); }
 EDICT_EXPORT int EdictOracle_Strcmp (const char *a, const char *b) { return strcmp (a, b); }
 
-// C conversions as the reference compiler emits them (x86-64: cvttss2si / cvttsd2si)
+// C conversions as the reference compiles them (-fno-strict-float-cast-overflow: saturating, NaN to 0)
 EDICT_EXPORT int EdictOracle_FloatToInt (float f) { return (int)f; }
 EDICT_EXPORT int EdictOracle_DoubleToInt (double d) { return (int)d; }
 

@@ -25,7 +25,10 @@ FILES="edict_sys edict_hash edict_xxh64 edict_libc edict_libm edict_oracle cl_de
  sbar screen snd_null cd_null in_null vid_null sv_main sv_move sv_phys sv_user view wad world zone"
 # C89 code: gnu89 (implicit declarations), -fcommon (tentative definitions in headers).
 # edict_libc.h pins implementation-defined C library results that reach the state (docs/PLAN.md D3).
-BASE="-include edict_libc.h -std=gnu89 -fcommon -ffp-contract=off -fno-strict-aliasing -march=x86-64-v2 -Wabsolute-value -Wpointer-to-int-cast"
+# -fno-strict-float-cast-overflow: out-of-range float-to-int conversions saturate to the target range and NaN
+# converts to 0 (measured through the oracle), instead of undefined behaviour the optimizer may exploit: clang 23
+# folded PF_ftos's "v == (int)v" into an integrality test, clang 18 did not (docs/PLAN.md, section A.2).
+BASE="-include edict_libc.h -std=gnu89 -fcommon -ffp-contract=off -fno-strict-float-cast-overflow -fno-strict-aliasing -march=x86-64-v2 -Wabsolute-value -Wpointer-to-int-cast"
 case "$MODE" in
   release) CFLAGS="$BASE -O2"; LDFLAGS="" ;;
   o0)      CFLAGS="$BASE -O0"; LDFLAGS="" ;;

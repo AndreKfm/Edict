@@ -4,17 +4,20 @@
 namespace Edict.Exact;
 
 /// <summary>
-/// C's float-to-int conversions as the x86-64 reference emits them (cvttss2si / cvttsd2si): truncation toward zero,
-/// and 0x80000000 for NaN and for values outside the int range. C leaves those cases undefined; .NET 9+ saturates
-/// (and .NET 11 also for 8- and 16-bit targets), so a plain cast differs exactly where the reference is
-/// least predictable. Simulation code converts only through these methods (docs/PLAN.md §A.2).
+/// C's float-to-int conversions as the reference compiles them: with -fno-strict-float-cast-overflow (ref/build.sh)
+/// clang saturates out-of-range values to the target range and converts NaN to 0. C itself leaves these cases
+/// undefined, and without the flag clang 18 and clang 23 produced different results for the same line
+/// (docs/PLAN.md, section A.2). Written out explicitly instead of relying on the .NET cast, whose semantics changed
+/// in .NET 9 (int, long) and .NET 11 (8- and 16-bit targets). Simulation code converts only through these methods.
 /// </summary>
 [NoAlloc(Constraints.All)]
 public static class CCast
 {
-    /// <summary><c>(int)f</c> for a C <c>float</c>.</summary>
-    public static int I32(float f) => f >= -2147483648f && f < 2147483648f ? (int)f : int.MinValue;
+    /// <summary><c>(int)f</c> for a C <c>float</c>: truncation, saturation, NaN to 0.</summary>
+    public static int I32(float f) =>
+        f >= 2147483648f ? int.MaxValue : f >= -2147483648f ? (int)f : float.IsNaN(f) ? 0 : int.MinValue;
 
-    /// <summary><c>(int)d</c> for a C <c>double</c>.</summary>
-    public static int I32(double d) => d > -2147483649.0 && d < 2147483648.0 ? (int)d : int.MinValue;
+    /// <summary><c>(int)d</c> for a C <c>double</c>: truncation, saturation, NaN to 0.</summary>
+    public static int I32(double d) =>
+        d >= 2147483648.0 ? int.MaxValue : d > -2147483649.0 ? (int)d : double.IsNaN(d) ? 0 : int.MinValue;
 }

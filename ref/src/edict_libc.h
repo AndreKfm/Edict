@@ -14,6 +14,8 @@ can no longer fold calls such as sin (constant) at compile time with its own mat
 #define EDICT_LIBC_H
 
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -34,6 +36,19 @@ double edict_cos (double x);
 double edict_atan (double x);
 double edict_atan2 (double y, double x);
 
+// sprintf: PF_ftos/PF_vtos format floats into QuakeC strings (state). The C libraries agree on finite values
+// (checked: correctly rounded, ties to even, on glibc and UCRT) but print NaN differently ("-nan" vs "-nan(ind)").
+// edict_sprintf passes every conversion to the C library one at a time and prints NaN and infinities itself, in
+// glibc style: optional sign, "nan"/"inf" (upper case for F/E/G/A), padded with spaces to the field width.
+// Supported: flags, width and precision as digits, conversions d i u x X o c s p f F e E g G a A %; anything
+// else is a Sys_Error. vsprintf (console output) is not redirected: it does not reach the state.
+int edict_sprintf (char *out, const char *fmt, ...);
+
+// atof: ED_ParseEpair stores atof (s) in float fields. glibc and UCRT parse finite values alike but return
+// different NaN bit patterns for "nan". Pinned: strtod, then every NaN becomes the quiet NaN 0x7ff8000000000000
+// with the sign of the parsed value.
+double edict_atof (const char *s);
+
 // EDICT_LIBC_NO_REDIRECT: declarations only, for tests that compare against the C library.
 #ifndef EDICT_LIBC_NO_REDIRECT
 #define strcmp	edict_strcmp
@@ -43,6 +58,8 @@ double edict_atan2 (double y, double x);
 #define cos		edict_cos
 #define atan	edict_atan
 #define atan2	edict_atan2
+#define sprintf	edict_sprintf
+#define atof	edict_atof
 #endif
 
 #endif

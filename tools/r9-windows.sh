@@ -15,8 +15,9 @@ CC="$CLANG" LIBS="" EXE=".exe" EXTRA_CFLAGS="-DWINDED -D_CRT_SECURE_NO_WARNINGS"
 mkdir -p "$WORK/runs"
 cd "$REPO/data/libreq-v0.09-beta"
 seed=0; fail=0
-for map in start lq_e0m1 lq_e0m2 lq_e0m3 lq_e0m4 lq_e0m5 lq_e0m6 lq_e0m7 lq_e0m8 dev; do
-  seed=$((seed + 1))
+# map:seed; dev uses seed 14 because seed 10 walks the player into an exit to a map the lite package lacks
+for entry in start:1 lq_e0m1:2 lq_e0m2:3 lq_e0m3:4 lq_e0m4:5 lq_e0m5:6 lq_e0m6:7 lq_e0m7:8 lq_e0m8:9 dev:14; do
+  map=${entry%:*}; seed=${entry#*:}
   python -I "$REPO/tools/tapegen.py" "$WORK/runs/$map.etp" $seed $FRAMES
   "$WORK/build/edict_ref.exe" -dedicated 1 -edictframes $FRAMES -edictperent -edicttape "$WORK/runs/$map.etp" \
     -edicthash "$WORK/runs/$map.win.edh" +map $map > "$WORK/runs/$map.log" 2>&1 || echo "$map: exit $?"
