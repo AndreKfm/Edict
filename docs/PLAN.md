@@ -178,8 +178,14 @@ per-entity, per-field first-divergence report, not only a frame hash.
 
 ### E.1 Hash
 
-- Algorithm: XXH3-64 (`xxhash.h`, BSD-2 on the C side; `System.IO.Hashing.XxHash3` on the C# side). Not a
-  cryptographic property; only collision resistance across a corpus matters.
+- Algorithm: XXH64 (seed 0). C side: own implementation from the specification (`ref/src/edict_xxh64.c`, no
+  external header); C# side: `System.IO.Hashing.XxHash64`. Checked 2026-10-12: lengths 0–300 (every code path),
+  301/301 identical, including the published value for empty input (`ef46db3751d8e999`). XXH3 was the first
+  choice; XXH64 avoids vendoring `xxhash.h`, and speed is irrelevant in the harness. Not a cryptographic
+  property; only collision resistance across a corpus matters.
+- Implemented in `ref/src/edict_hash.c` (format in its header comment). Deviation from the list below: entity
+  fields are hashed word by word with a type map built from `fielddefs` (vectors as three floats; untyped words
+  as raw bits), so duplicate defs such as `origin` and `origin_x` do not enter twice.
 - Canonical little-endian stream per entity: `u32 index, u8 free, u32 freetime bits, u8 num_leafs,
   i16 leafnums[num_leafs], baseline (as bits)`, then every field in `fielddefs` order, typed:
   `ev_float`/`ev_vector` raw bits; `ev_string` content bytes + NUL; `ev_entity` as index; `ev_function`/`ev_field`
@@ -226,10 +232,21 @@ per-entity, per-field first-divergence report, not only a frame hash.
 
 ### E.4 Inputs
 
-- Tapes recorded with a listen-server build of the same patch at fixed 72 Hz frametime: per frame
+- ~~Tapes recorded with a listen-server build~~ (revised 2026-10-12, see below). Original idea: per frame
   `(host_framecount, length, bytes)` of client 0's messages, including the signon string commands and `clc_move`
   with byte-quantized angles. Replay in dedicated mode through `net_tape.c`; C# implements the same driver.
+- Revision: the reference is headless (no video, no input), so nobody can play it, and a listen-server recording
+  would mix client `rand()` calls into the server stream (§A.1). Instead, tapes are **generated**: a seeded
+  generator writes a tape file of client messages (signon string commands, then one `clc_move` per frame with
+  forward/side/up moves, view angles, buttons and impulses following a scripted random walk). Input is open-loop
+  (it does not react to the game), so the same file drives the C reference and the C# port, and the dedicated
+  replay is the ground truth. Human-played tapes can be added later from any source port that can log
+  `clc_move`; they are not required for the proof.
 - Corpus: LibreQuake maps + own tapes only. No id data in the repository or in CI.
+- R9 without input (2026-10-12, `tools/r9-linux.sh`): 10 maps × 2,000 frames, release twice, `-O2` vs `-O0`,
+  release vs ASan/UBSan: identical in all lanes. Coverage is weak: without a player, 0 entities change on 7 of 10
+  maps (3 on `start`, 5 on `lq_e0m6`, 2 on `dev`); the lanes differ per frame mainly through `sv.time` and the
+  globals. R9 is repeated with generated tapes before it counts for the P0 exit gate.
 
 ### E.5 Differential testing
 

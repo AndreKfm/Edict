@@ -1,0 +1,22 @@
+/*
+Copyright (C) 2026 Andre Kaufmann
+SPDX-License-Identifier: GPL-2.0-or-later
+
+Edict reference build: per-frame state hashes (.edh), docs/PLAN.md section E.1.
+*/
+#ifndef EDICT_HASH_H
+#define EDICT_HASH_H
+
+typedef unsigned long long edict_u64;
+
+// XXH64 (seed 0), implemented from the xxHash specification; checked against System.IO.Hashing.XxHash64.
+edict_u64 EdictHash_XXH64 (const void *data, int length);
+
+// Opens the .edh output; flags: EDH_FLAG_PER_ENTITY adds one hash per edict to every frame record.
+#define EDH_FLAG_PER_ENTITY	1
+void EdictHash_Open (char *path, int flags);
+// Called after every host frame that ran while sv.active; writes one frame record.
+void EdictHash_Frame (void);
+void EdictHash_Close (void);
+
+#endif

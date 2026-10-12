@@ -1,0 +1,320 @@
+/*
+Copyright (C) 2026 Andre Kaufmann
+SPDX-License-Identifier: GPL-2.0-or-later
+
+Edict reference build: per-frame state hashes (.edh), docs/PLAN.md section E.1.
+
+Every value is serialized into a canonical little-endian byte stream and hashed with XXH64. Nothing that depends
+on memory layout enters the gated lanes: strings are hashed by content, entity references by edict index, and
+padding and pointers (edict_t.area) are never read. The C# port produces the same streams.
+
+File layout (all integers little-endian):
+  header   "EDH1"  u32 version  u32 flags
+  record   'M'  char map[64]  u32 progs_crc  u32 entityfields  u32 numglobals          on every new map
+  record   'F'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
+                u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw
+                [u64 entity_hash x num_edicts, if EDH_FLAG_PER_ENTITY]                on every server frame
+Lanes:
+  edicts         sv.time, num_edicts, state, paused, serverflags, lightstyles, then (index, entity hash) pairs
+  globals_typed  every globals word covered by a globaldef, typed like entity fields
+  globals_raw    every globals word as raw bits; contains layout-dependent entity offsets: diagnostic only
+*/
+#include "quakedef.h"
+#include "edict_hash.h"
+
+/*
+==============================================================================
+Canonical byte streams
+==============================================================================
+*/
+
+#define STREAM_SIZE	(1 << 20)
+static unsigned char	stream[STREAM_SIZE];
+static int				stream_len;
+
+static void put8 (int v)
+{
+	if (stream_len >= STREAM_SIZE)
+		Sys_Error ("EdictHash: stream overflow");
+	stream[stream_len++] = (unsigned char)v;
+}
+
+static void put32 (unsigned int v)
+{
+	put8 (v); put8 (v >> 8); put8 (v >> 16); put8 (v >> 24);
+}
+
+static void put64 (edict_u64 v)
+{
+	put32 ((unsigned int)v); put32 ((unsigned int)(v >> 32));
+}
+
+static void putfloat (float f)
+{
+	unsigned int bits;
+	memcpy (&bits, &f, 4);
+	put32 (bits);
+}
+
+static void putdouble (double d)
+{
+	edict_u64 bits;
+	memcpy (&bits, &d, 8);
+	put64 (bits);
+}
+
+static void putstring (const char *s)
+{
+	while (*s)
+		put8 (*s++);
+	put8 (0);
+}
+
+/*
+==============================================================================
+Word types for entity fields and globals
+==============================================================================
+*/
+
+#define WT_RAW		0	// no def covers the word
+#define WT_FLOAT	1
+#define WT_STRING	2
+#define WT_ENTITY	3
+#define WT_FUNCTION	4
+#define WT_FIELD	5
+#define WT_POINTER	6
+
+static unsigned char	*fieldtypes;	// [progs->entityfields]
+static unsigned char	*globaltypes;	// [progs->numglobals]
+static dprograms_t		*typed_for;		// progs the maps were built for
+
+static void BuildTypes (unsigned char *types, int count, ddef_t *defs, int numdefs)
+{
+	int		i, t, ofs;
+
+	memset (types, WT_RAW, count);
+	for (i = 0 ; i < numdefs ; i++)
+	{
+		t = defs[i].type & ~DEF_SAVEGLOBAL;
+		ofs = defs[i].ofs;
+		if (t == ev_vector)
+		{
+			if (ofs + 3 <= count)
+				types[ofs] = types[ofs + 1] = types[ofs + 2] = WT_FLOAT;
+			continue;
+		}
+		if (ofs >= count)
+			continue;
+		switch (t)
+		{
+		case ev_float:		types[ofs] = WT_FLOAT; break;
+		case ev_string:		types[ofs] = WT_STRING; break;
+		case ev_entity:		types[ofs] = WT_ENTITY; break;
+		case ev_function:	types[ofs] = WT_FUNCTION; break;
+		case ev_field:		types[ofs] = WT_FIELD; break;
+		case ev_pointer:	types[ofs] = WT_POINTER; break;
+		default:			break;	// ev_void
+		}
+	}
+}
+
+// One word, typed. Returns without writing for pointers (layout-dependent, never in a gated lane).
+static void PutWord (int type, int raw)
+{
+	float	f;
+
+	switch (type)
+	{
+	case WT_FLOAT:
+		memcpy (&f, &raw, 4);
+		putfloat (f);
+		break;
+	case WT_STRING:
+		putstring (pr_strings + raw);
+		break;
+	case WT_ENTITY:
+		// EDICT_TO_PROG is a byte offset with a layout-dependent stride: hash the index
+		if (raw % pr_edict_size)
+			Sys_Error ("EdictHash: entity value %i is not a multiple of %i", raw, pr_edict_size);
+		put32 ((unsigned int)(raw / pr_edict_size));
+		break;
+	case WT_POINTER:
+		break;
+	default:		// function index, field offset (in words), untyped
+		put32 ((unsigned int)raw);
+		break;
+	}
+}
+
+/*
+==============================================================================
+Lanes
+==============================================================================
+*/
+
+static edict_u64 HashEntity (int index)
+{
+	edict_t	*e = EDICT_NUM (index);
+	int		*words = (int *)&e->v;
+	int		i;
+
+	stream_len = 0;
+	put32 (index);
+	put8 (e->free ? 1 : 0);
+	putfloat (e->freetime);
+	put32 (e->num_leafs);
+	for (i = 0 ; i < e->num_leafs && i < MAX_ENT_LEAFS ; i++)
+		put32 ((unsigned int)(unsigned short)e->leafnums[i]);
+	for (i = 0 ; i < 3 ; i++) putfloat (e->baseline.origin[i]);
+	for (i = 0 ; i < 3 ; i++) putfloat (e->baseline.angles[i]);
+	put32 (e->baseline.modelindex);
+	put32 (e->baseline.frame);
+	put32 (e->baseline.colormap);
+	put32 (e->baseline.skin);
+	put32 (e->baseline.effects);
+	for (i = 0 ; i < progs->entityfields ; i++)
+		PutWord (fieldtypes[i], words[i]);
+	return EdictHash_XXH64 (stream, stream_len);
+}
+
+static edict_u64 HashGlobals (int typed)
+{
+	int		*words = (int *)pr_globals;
+	int		i;
+
+	stream_len = 0;
+	for (i = 0 ; i < progs->numglobals ; i++)
+	{
+		if (!typed)
+			put32 ((unsigned int)words[i]);
+		else if (globaltypes[i] != WT_RAW && globaltypes[i] != WT_POINTER)
+		{
+			put32 (i);
+			PutWord (globaltypes[i], words[i]);
+		}
+	}
+	return EdictHash_XXH64 (stream, stream_len);
+}
+
+/*
+==============================================================================
+Output
+==============================================================================
+*/
+
+static FILE			*edh;
+static int			edh_flags;
+static edict_u64	*entity_hashes;
+static int			entity_hashes_size;
+
+static void FlushStream (void)
+{
+	if (fwrite (stream, 1, stream_len, edh) != (size_t)stream_len)
+		Sys_Error ("EdictHash: write failed");
+	stream_len = 0;
+}
+
+void EdictHash_Open (char *path, int flags)
+{
+	edh = fopen (path, "wb");
+	if (!edh)
+		Sys_Error ("EdictHash: cannot open %s", path);
+	edh_flags = flags;
+	stream_len = 0;
+	put8 ('E'); put8 ('D'); put8 ('H'); put8 ('1');
+	put32 (1);
+	put32 (flags);
+	FlushStream ();
+}
+
+static void MapRecord (void)
+{
+	char	name[64];
+	int		i;
+
+	fieldtypes = realloc (fieldtypes, progs->entityfields);
+	globaltypes = realloc (globaltypes, progs->numglobals);
+	if (!fieldtypes || !globaltypes)
+		Sys_Error ("EdictHash: out of memory");
+	BuildTypes (fieldtypes, progs->entityfields, pr_fielddefs, progs->numfielddefs);
+	BuildTypes (globaltypes, progs->numglobals, pr_globaldefs, progs->numglobaldefs);
+	typed_for = progs;
+
+	memset (name, 0, sizeof (name));
+	strncpy (name, sv.name, sizeof (name) - 1);
+	stream_len = 0;
+	put8 ('M');
+	for (i = 0 ; i < 64 ; i++)
+		put8 (name[i]);
+	put32 (progs->crc);
+	put32 (progs->entityfields);
+	put32 (progs->numglobals);
+	FlushStream ();
+}
+
+void EdictHash_Frame (void)
+{
+	edict_u64	lane_edicts, lane_typed, lane_raw;
+	int			i, n;
+
+	if (!edh)
+		return;
+	if (progs != typed_for)
+		MapRecord ();
+
+	n = sv.num_edicts;
+	if (n > entity_hashes_size)
+	{
+		entity_hashes = realloc (entity_hashes, n * sizeof (edict_u64));
+		if (!entity_hashes)
+			Sys_Error ("EdictHash: out of memory");
+		entity_hashes_size = n;
+	}
+	for (i = 0 ; i < n ; i++)
+		entity_hashes[i] = HashEntity (i);
+
+	stream_len = 0;
+	putdouble (sv.time);
+	put32 (n);
+	put32 (sv.state);
+	put32 (sv.paused ? 1 : 0);
+	put32 (svs.serverflags);
+	for (i = 0 ; i < MAX_LIGHTSTYLES ; i++)
+	{
+		if (sv.lightstyles[i])
+		{
+			put8 (1);
+			putstring (sv.lightstyles[i]);
+		}
+		else
+			put8 (0);
+	}
+	for (i = 0 ; i < n ; i++)
+	{
+		put32 (i);
+		put64 (entity_hashes[i]);
+	}
+	lane_edicts = EdictHash_XXH64 (stream, stream_len);
+	lane_typed = HashGlobals (1);
+	lane_raw = HashGlobals (0);
+
+	stream_len = 0;
+	put8 ('F');
+	put32 (host_framecount);
+	putdouble (sv.time);
+	put32 (n);
+	put64 (lane_edicts);
+	put64 (lane_typed);
+	put64 (lane_raw);
+	if (edh_flags & EDH_FLAG_PER_ENTITY)
+		for (i = 0 ; i < n ; i++)
+			put64 (entity_hashes[i]);
+	FlushStream ();
+}
+
+void EdictHash_Close (void)
+{
+	if (edh)
+		fclose (edh);
+	edh = NULL;
+}

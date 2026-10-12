@@ -1,0 +1,253 @@
+/*
+Copyright (C) 1996-1997 Id Software, Inc.
+Copyright (C) 2026 Andre Kaufmann
+SPDX-License-Identifier: GPL-2.0-or-later
+
+Edict reference build: system driver. Derived from WinQuake's sys_null.c; replaces it in the build.
+Differences: a virtual clock instead of 0.1 s per Sys_FloatTime call, isDedicated from -dedicated, and a main
+that runs a fixed number of host frames at a fixed frame time and writes the state hashes (edict_hash.c).
+
+Arguments (besides Quake's own):
+  -edictframes <n>   run n host frames, then exit (required)
+  -edicthash <file>  write per-frame hashes (.edh) to file
+  -edictperent       add one hash per edict to every frame record
+  -mem <mb>          hunk size in megabytes (default 32)
+The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
+*/
+#include "quakedef.h"
+#include "errno.h"
+#include "edict_hash.h"
+
+#define EDICT_FRAMETIME	"0.013889"	// 72 Hz, the rate Host_FilterTime is built around
+
+qboolean	isDedicated;
+extern cvar_t	host_framerate;	// host.c; not declared in a header
+
+static double	edict_clock;	// virtual time, advanced by the harness once per host frame
+
+/*
+===============================================================================
+
+FILE IO (unchanged from sys_null.c)
+
+===============================================================================
+*/
+
+#define MAX_HANDLES             10
+FILE    *sys_handles[MAX_HANDLES];
+
+int             findhandle (void)
+{
+	int             i;
+
+	for (i=1 ; i<MAX_HANDLES ; i++)
+		if (!sys_handles[i])
+			return i;
+	Sys_Error ("out of handles");
+	return -1;
+}
+
+int filelength (FILE *f)
+{
+	int             pos;
+	int             end;
+
+	pos = ftell (f);
+	fseek (f, 0, SEEK_END);
+	end = ftell (f);
+	fseek (f, pos, SEEK_SET);
+
+	return end;
+}
+
+int Sys_FileOpenRead (char *path, int *hndl)
+{
+	FILE    *f;
+	int             i;
+
+	i = findhandle ();
+
+	f = fopen(path, "rb");
+	if (!f)
+	{
+		*hndl = -1;
+		return -1;
+	}
+	sys_handles[i] = f;
+	*hndl = i;
+
+	return filelength(f);
+}
+
+int Sys_FileOpenWrite (char *path)
+{
+	FILE    *f;
+	int             i;
+
+	i = findhandle ();
+
+	f = fopen(path, "wb");
+	if (!f)
+		Sys_Error ("Error opening %s: %s", path,strerror(errno));
+	sys_handles[i] = f;
+
+	return i;
+}
+
+void Sys_FileClose (int handle)
+{
+	fclose (sys_handles[handle]);
+	sys_handles[handle] = NULL;
+}
+
+void Sys_FileSeek (int handle, int position)
+{
+	fseek (sys_handles[handle], position, SEEK_SET);
+}
+
+int Sys_FileRead (int handle, void *dest, int count)
+{
+	return fread (dest, 1, count, sys_handles[handle]);
+}
+
+int Sys_FileWrite (int handle, void *data, int count)
+{
+	return fwrite (data, 1, count, sys_handles[handle]);
+}
+
+int     Sys_FileTime (char *path)
+{
+	FILE    *f;
+
+	f = fopen(path, "rb");
+	if (f)
+	{
+		fclose(f);
+		return 1;
+	}
+
+	return -1;
+}
+
+void Sys_mkdir (char *path)
+{
+}
+
+/*
+===============================================================================
+
+SYSTEM IO
+
+===============================================================================
+*/
+
+void Sys_MakeCodeWriteable (unsigned long startaddr, unsigned long length)
+{
+}
+
+void Sys_Error (char *error, ...)
+{
+	va_list         argptr;
+
+	EdictHash_Close ();
+	fflush (stdout);
+	fprintf (stderr, "Sys_Error: ");
+	va_start (argptr,error);
+	vfprintf (stderr, error,argptr);
+	va_end (argptr);
+	fprintf (stderr, "\n");
+	exit (1);
+}
+
+void Sys_Printf (char *fmt, ...)
+{
+	va_list         argptr;
+
+	va_start (argptr,fmt);
+	vprintf (fmt,argptr);
+	va_end (argptr);
+}
+
+void Sys_Quit (void)
+{
+	EdictHash_Close ();
+	fflush (stdout);
+	exit (0);
+}
+
+double Sys_FloatTime (void)
+{
+	return edict_clock;
+}
+
+char *Sys_ConsoleInput (void)
+{
+	return NULL;
+}
+
+void Sys_Sleep (void)
+{
+}
+
+void Sys_SendKeyEvents (void)
+{
+}
+
+void Sys_HighFPPrecision (void)
+{
+}
+
+void Sys_LowFPPrecision (void)
+{
+}
+
+//=============================================================================
+
+static int ArgValue (char *name, int fallback)
+{
+	int	i = COM_CheckParm (name);
+
+	return (i && i < com_argc - 1) ? Q_atoi (com_argv[i + 1]) : fallback;
+}
+
+int main (int argc, char **argv)
+{
+	static quakeparms_t	parms;
+	int		frames, frame, before, i;
+
+	COM_InitArgv (argc, argv);
+
+	parms.memsize = ArgValue ("-mem", 32) * 1024 * 1024;
+	parms.membase = malloc (parms.memsize);
+	if (!parms.membase)
+		Sys_Error ("cannot allocate %i bytes", parms.memsize);
+	parms.basedir = ".";
+	parms.argc = com_argc;
+	parms.argv = com_argv;
+
+	isDedicated = COM_CheckParm ("-dedicated") != 0;
+	frames = ArgValue ("-edictframes", 0);
+	if (frames <= 0)
+		Sys_Error ("-edictframes <n> is required");
+	i = COM_CheckParm ("-edicthash");
+	if (i && i < com_argc - 1)
+		EdictHash_Open (com_argv[i + 1], COM_CheckParm ("-edictperent") ? EDH_FLAG_PER_ENTITY : 0);
+
+	Host_Init (&parms);
+	Cvar_Set ("host_framerate", EDICT_FRAMETIME);
+
+	for (frame = 0 ; frame < frames ; frame++)
+	{
+		edict_clock += host_framerate.value;
+		before = host_framecount;
+		Host_Frame (host_framerate.value);
+		if (host_framecount != before + 1)
+			Sys_Error ("host frame %i did not run (filtered or aborted)", frame);
+		if (sv.active)
+			EdictHash_Frame ();
+	}
+
+	EdictHash_Close ();
+	fflush (stdout);
+	return 0;
+}
