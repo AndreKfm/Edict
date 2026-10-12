@@ -4,3 +4,6 @@
 *.bsp binary
 *.dem binary
 *.edh binary
+
+# Pristine id Software sources: keep the bytes exactly as upstream.
+ref/upstream/** -text
