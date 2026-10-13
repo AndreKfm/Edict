@@ -119,7 +119,7 @@ with its reason; one that becomes detected is reported so that it can be moved o
 whose text no longer matches or one that does not build makes the run fail.
 
 ```sh
-EDICT_ORACLE=<path> python3 -I tools/mutate.py <work dir> [link] [move] [check]
+EDICT_ORACLE=<path> python3 -I tools/mutate.py <work dir> [link] [move] [check] [spawn]
 ```
 
 The game alone was again not enough for linking, movement and the PVS: R7 found blind spots where the tapes never go
@@ -131,9 +131,15 @@ finding a client, aim turning to a target, a chasing monster moving), so that a 
 The frame-0 gate (cut 2, step 4) compares state hashes, so the hash itself is checked first, on the reference's
 own state: at each spawn record of a capture the replay hashes its memory with the port's `StateHash` and requires
 the reference's spawn record from the `.edh` of the same run, lane by lane and entity by entity.
+Then the gate (`SpawnGateTests`): the port spawns each map, and each spawn-only variant of `tools/captures.sh`
+(other skills, deathmatch, coop), from the inputs the capture recorded, and must hash as the reference's spawn
+record. The tapes are single player on skill 1, so the variants are what reaches the skill and deathmatch filters
+and the cvar adjustments; the maps' entity texts are well formed, so `SpawnParseTests` puts the parser on what they
+never contain (high bytes, comments, escapes, keys with trailing spaces, runs of spaces in vectors).
 
-Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after step 3c-3): about 77 s for a full run — build 6 s,
-engine tests 60 s (124 tests), exact tests 8 s, analyzer tests 3 s. The largest engine classes: `KnownBadVmTests`
-25 s, `VmReplayTests` 16 s, `TraceGateTests` 12 s, `BuiltinTests` 12 s; `WorldFuzzTests` 2 s. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
+Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after step 4b): about 89 s for a full run — build 6 s,
+engine tests 72 s (218 tests), exact tests 7 s, analyzer tests 4 s. The largest engine classes: `KnownBadVmTests`
+25 s, `VmReplayTests` 16 s, `TraceGateTests` 13 s, `BuiltinTests` 12 s alone (23 s next to the others);
+`SpawnGateTests` 6 s, `SpawnParseTests` 2 s, `WorldFuzzTests` 2 s. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
 they change (0.2 s; 132 s when each ran the whole fuzz). `tools/mutate.py` is not part of the suite (one build per
-mutant; all 36 mutants of the three groups in 449 s).
+mutant; the group `spawn` with its 21 mutants takes 216 s).

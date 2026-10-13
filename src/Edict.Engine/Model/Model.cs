@@ -156,4 +156,11 @@ public unsafe struct Model
 
     public int VisDataLength;
     public byte* VisData;
+
+    /// <summary>
+    /// The entity lump (Mod_LoadEntities), zero-terminated; null if the lump is empty. C copies the lump into the
+    /// hunk without adding a terminator and relies on the one the map compiler writes (and on the hunk's zeroed
+    /// rounding); the port adds one.
+    /// </summary>
+    public byte* Entities;
 }

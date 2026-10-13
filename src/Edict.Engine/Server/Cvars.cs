@@ -113,4 +113,28 @@ public sealed unsafe class Cvars
         int i = Find(name);
         return i < 0 ? 0 : _vars[i].Value;
     }
+
+    private static readonly SysErrorException SetValueNotIntegral =
+        new("Cvar_SetValue: only integral values are ported (\"%f\" of 0..2^24 in magnitude)");
+
+    /// <summary>
+    /// <c>Cvar_SetValue</c>: <c>sprintf (val, "%f", value)</c>, then Cvar_Set. Ported for the integral values engine
+    /// code sets (skill, deathmatch in SV_SpawnServer), which print exactly as the integer and ".000000"; any other
+    /// value stops with an error until a general "%f" exists.
+    /// </summary>
+    public void SetValue(byte* name, float value)
+    {
+        if (value != MathF.Floor(value) || MathF.Abs(value) > 1 << 24)
+            throw SetValueNotIntegral;
+        byte* val = stackalloc byte[32];
+        var text = new Span<byte>(val, 32);
+        int n = 0;
+        if (value == 0 && *(int*)&value < 0)
+            text[n++] = (byte)'-';     // "%f" of -0.0 is "-0.000000"
+        n += CFormat.Int((int)value, text[n..]);
+        ".000000"u8.CopyTo(text[n..]);
+        n += 7;
+        val[n] = 0;
+        Set(name, val);
+    }
 }

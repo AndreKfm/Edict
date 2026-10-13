@@ -56,12 +56,15 @@ public static unsafe class BrushLoader
         int numSub = lumps.Count<DModel>(Bsp.LumpModels);
         int visLen = header->Lump(Bsp.LumpVisibility).FileLen;
         lumps.Check(Bsp.LumpVisibility);
+        int entLen = header->Lump(Bsp.LumpEntities).FileLen;
+        lumps.Check(Bsp.LumpEntities);
 
         nuint size = NativeArena.SizeOf<MPlane>(numPlanes) + NativeArena.SizeOf<byte>(visLen)
             + NativeArena.SizeOf<MLeaf>(numLeafs) + NativeArena.SizeOf<MNode>(numNodes)
             + NativeArena.SizeOf<DClipNode>(numClip) + NativeArena.SizeOf<DModel>(numSub)
             + NativeArena.SizeOf<DClipNode>(numNodes) + NativeArena.SizeOf<Model>(Math.Max(numSub, 1))
-            + NativeArena.SizeOf<PackedNode>(numClip) + NativeArena.SizeOf<PackedNode>(numNodes);
+            + NativeArena.SizeOf<PackedNode>(numClip) + NativeArena.SizeOf<PackedNode>(numNodes)
+            + NativeArena.SizeOf<byte>(entLen + 1);
         var arena = new NativeArena(size);
         try
         {
@@ -75,6 +78,12 @@ public static unsafe class BrushLoader
             LoadNodes(mod, arena, (DNode*)lumps.Data(Bsp.LumpNodes), numNodes);
             LoadClipnodes(mod, arena, (DClipNode*)lumps.Data(Bsp.LumpClipnodes), numClip);
             LoadSubmodels(mod, arena, (DModel*)lumps.Data(Bsp.LumpModels), numSub);
+            if (entLen > 0)
+            {
+                mod->Entities = arena.Alloc<byte>(entLen + 1);
+                new ReadOnlySpan<byte>(lumps.Data(Bsp.LumpEntities), entLen).CopyTo(new Span<byte>(mod->Entities, entLen));
+                mod->Entities[entLen] = 0;
+            }
             MakeHull0(mod, arena, name);
 
             // set up the submodels (FIXME: this is confusing)

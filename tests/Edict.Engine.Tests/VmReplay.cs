@@ -232,6 +232,46 @@ public sealed unsafe class VmReplay : IDisposable
         : _progs is not null && fnum > 0 && fnum < _progs.NumFunctions ? Encoding.Latin1.GetString(_progs.String(_progs.Functions[fnum].SName))
         : $"#{fnum}";
 
+    /// <summary>What a map's first spawn starts from, as the capture recorded it.</summary>
+    public sealed record SpawnInputs(string Map, int HeaderBytes, int MaxClients, List<(byte[] Name, byte[] Value)> Cvars,
+                                     uint RandSeed);
+
+    /// <summary>
+    /// The first map record of <paramref name="file"/> (header size, maxclients, cvars) and the rand seed at its first
+    /// engine entry (the world's spawn function: nothing draws from rand before it in SV_SpawnServer).
+    /// </summary>
+    public static SpawnInputs FirstSpawn(string file)
+    {
+        byte[] d = File.ReadAllBytes(file);
+        int p = 8;
+        int I(int at) => BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(at, 4));
+        byte[] Z()
+        {
+            int e = Array.IndexOf(d, (byte)0, p);
+            byte[] s = d[p..e];
+            p = e + 1;
+            return s;
+        }
+        if (d[p++] != (byte)'M')
+            throw new InvalidDataException($"{file}: no map record first");
+        string map = Encoding.Latin1.GetString(d, p, 64).TrimEnd('\0');
+        p += 64;
+        int header = I(p + 12), maxClients = I(p + 28), numCvars = I(p + 32);
+        p += 36;
+        var cvars = new List<(byte[], byte[])>();
+        for (int i = 0; i < numCvars; i++)
+            cvars.Add((Z(), Z()));
+        while (d[p] == (byte)'F')
+        {
+            p += 5;
+            Z();
+        }
+        if (d[p] != (byte)'E')
+            throw new InvalidDataException($"{file}: record '{(char)d[p]}' before the first engine entry");
+        uint seed = (uint)I(p + 1 + 17);   // fnum, framecount, state, self, other, then rand_seed
+        return new SpawnInputs(map, header, maxClients, cvars, seed);
+    }
+
     /// <summary>The next record kind, after any 'F' records.</summary>
     private byte Next()
     {

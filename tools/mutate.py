@@ -15,12 +15,18 @@ import os, shutil, subprocess, sys
 # Not known-bad variants, shown rather than assumed:
 # - SV_CheckBottom's midpoint (mins + maxs)*0.5 in float instead of double. Halving is exact in both, and rounding the
 #   exact value to float gives the same bits (denormals included).
+# - ED_ParseEdict parsing keys with a leading underscore: ED_FindField does not find them in LibreQuake's progs.dat,
+#   which has no field whose name begins with one (another progs could have).
+# - SV_SpawnServer setting both the coop and the deathmatch global: with coop, deathmatch has just been set to 0, and
+#   without coop, coop is 0; either way the other global gets the 0 it has.
 # - PF_checkclient's interval with > instead of >=: sv.time - sv.lastchecktime == 0.1 cannot hold. 0.1 as a double is
 #   an odd multiple of 2^-55; with sv.time >= 1 (it starts at 1) the difference is exact and a multiple of 2^-52.
 
 # Known blind spots: mutants the gates do not detect yet, each with the reason; reported, not counted as failures.
 # They are run like the others, so that one that becomes detected shows (then move it out of here).
 KNOWN = {
+    'sprite bounds in float': 'differs only for a sprite of odd width or height; the three sprites of LibreQuake are '
+        '16x16, 32x32 and 64x64',
     'aim: target centre in float': 'equivalent except on denormals: origin + 0.5*(mins + maxs) rounded once from double '
         'is the correctly rounded float sum (53 >= 2*24 + 2 bits make the double rounding innocuous), and halving in float '
         'is exact unless the sum is denormal. Needs denormal coordinates with an odd last bit',
@@ -76,6 +82,50 @@ MUTANTS = {
          "if (((int*)t)[EntVars.Owner] == clip.PassEdict * EdictSize)\n                    continue;   // don't clip against own missiles", ''),
         ('ClipToLinks: points interact', 'src/Edict.Engine/Server/Move.cs',
          'if (clip.PassEdict >= 0 && Fields(clip.PassEdict)[EntVars.Size] != 0 && t[EntVars.Size] == 0)\n                continue;   // points never interact', ''),
+    ]),
+    'spawn': (['Edict.Engine.Tests.SpawnGateTests', 'Edict.Engine.Tests.SpawnParseTests'], [
+        ('COM_Parse: unsigned char', 'src/Edict.Engine/Common/ComParse.cs',
+         'while ((c = (sbyte)*data) <= \' \')', 'while ((c = *data) <= \' \')'),
+        ('COM_Parse: colon not a single token', 'src/Edict.Engine/Common/ComParse.cs',
+         "c == '\\'' || c == ':';", "c == '\\'';"),
+        ('COM_Parse: no comments', 'src/Edict.Engine/Common/ComParse.cs',
+         "if (c == '/' && data[1] == '/')", "if (c == '/' && data[1] == '/' && len < 0)"),
+        ('ED_NewString: no newline escape', 'src/Edict.Engine/Server/Spawn.cs',
+         "s[i] == 'n' ? (byte)'\\n' : (byte)'\\\\';", "s[i] == 'n' ? (byte)'n' : (byte)'\\\\';"),
+        ('ED_NewString: backslash kept with the next character', 'src/Edict.Engine/Server/Spawn.cs',
+         "            if (c == '\\\\' && i < l - 1)", "            if (Environment.ProcessorCount < 0)"),
+        ('ED_ParseEdict: no anglehack', 'src/Edict.Engine/Server/Spawn.cs',
+         'bool anglehack = token.SequenceEqual("angle"u8);', 'bool anglehack = false;'),
+        ('ED_ParseEdict: no light hack', 'src/Edict.Engine/Server/Spawn.cs',
+         'if (token.SequenceEqual("light"u8))', 'if (Environment.ProcessorCount < 0)'),
+        ('ED_ParseEdict: trailing spaces kept', 'src/Edict.Engine/Server/Spawn.cs',
+         "while (n != 0 && keyname[n - 1] == ' ')", "while (Environment.ProcessorCount < 0)"),
+        ('ED_ParseEdict: world cleared too', 'src/Edict.Engine/Server/Spawn.cs',
+         'if (ent != 0)   // hack', 'if (true)'),
+        ('ED_ParseEdict: empty entity not freed', 'src/Edict.Engine/Server/Spawn.cs',
+         'if (!init)\n            EdictNum(ent)->Free = 1;', 'if (!init)\n            EdictNum(ent)->Free = 0;'),
+        ('ED_ParseEpair: vector split at runs of spaces', 'src/Edict.Engine/Server/Spawn.cs',
+         "                    w = v = v + 1;", "                    w = v = v + 1;\n                    while (str[v] == ' ') { v++; w++; }"),
+        ('ED_ParseEpair: float through Q_atof', 'src/Edict.Engine/Server/Spawn.cs',
+         '*(float*)d = (float)CAtof.Atof(s);', '*(float*)d = CAtof.QAtof(s);'),
+        ('ED_LoadFromFile: skill 1 uses not-hard', 'src/Edict.Engine/Server/Spawn.cs',
+         '(CurrentSkill == 1 && (spawnflags & SpawnflagNotMedium) != 0)', '(CurrentSkill == 1 && (spawnflags & SpawnflagNotHard) != 0)'),
+        ('ED_LoadFromFile: skill 3 not hard', 'src/Edict.Engine/Server/Spawn.cs',
+         '(CurrentSkill >= 2 && (spawnflags & SpawnflagNotHard) != 0)', '(CurrentSkill == 2 && (spawnflags & SpawnflagNotHard) != 0)'),
+        ('ED_LoadFromFile: deathmatch ignores spawnflags', 'src/Edict.Engine/Server/Spawn.cs',
+         'if ((spawnflags & SpawnflagNotDeathmatch) != 0)', 'if (Environment.ProcessorCount < 0)'),
+        ('SV_SpawnServer: skill not rounded', 'src/Edict.Engine/Server/Spawn.cs',
+         'CurrentSkill = CCast.I32(CvarValue("skill"u8) + 0.5);', 'CurrentSkill = CCast.I32(CvarValue("skill"u8));'),
+        ('SV_SpawnServer: coop keeps deathmatch', 'src/Edict.Engine/Server/Spawn.cs',
+         'if (CvarValue("coop"u8) != 0)\n            CvarSetValue("deathmatch"u8, 0);', ''),
+        ('SV_SpawnServer: sv.time 0', 'src/Edict.Engine/Server/Spawn.cs',
+         '        Time = 1.0;', '        Time = 0;'),
+        ('SV_SpawnServer: client slots not reserved', 'src/Edict.Engine/Server/Spawn.cs',
+         '        NumEdicts = MaxClients + 1;', '        NumEdicts = 1;'),
+        ('PF_lightstyle: not stored', 'src/Edict.Engine/Server/Builtins.cs',
+         '        sv.SetLightstyle(style, val);', ''),
+        ('sprite bounds in float', 'src/Edict.Engine/Model/ModelCache.cs',
+         'm->Mins = new Vec3(-width / 2, -width / 2, -height / 2);', 'm->Mins = new Vec3(-width / 2f, -width / 2f, -height / 2f);'),
     ]),
     'check': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.WorldFuzzTests'], [
         ('PointInLeaf: d >= 0 goes to the front', 'src/Edict.Engine/Server/CheckClient.cs',

@@ -14,7 +14,7 @@ namespace Edict.Engine;
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public static unsafe class Builtins
 {
-    public const int SetOrigin = 2, SetModel = 3, SetSize = 4, CheckClient = 17, Aim = 44;
+    public const int SetOrigin = 2, SetModel = 3, SetSize = 4, CheckClient = 17, Aim = 44, Lightstyle = 35, AmbientSound = 74;
     public const int TraceLine = 16, WalkMove = 32, DropToFloor = 34, CheckBottom = 40, PointContents = 41, MoveToGoal = 67;
     public const int MakeVectors = 1, Random = 7, Normalize = 9, Vlen = 12, VectoYaw = 13, PrecacheSound = 19,
         PrecacheModel = 20, Ftos = 26, Vtos = 27, Rint = 36, Floor = 37, Ceil = 38, Fabs = 43, Cvar = 45,
@@ -29,7 +29,7 @@ public static unsafe class Builtins
         MakeVectors or Random or Normalize or Vlen or VectoYaw or PrecacheSound or PrecacheModel or Ftos or Vtos or Rint
             or Floor or Ceil or Fabs or Cvar or ChangeYaw or VectoAngles or PrecacheFile or CvarSet or PrecacheModel2
             or PrecacheSound2 or PrecacheFile2 or Spawn or Remove or Find or FindRadius or NextEnt or MakeStatic
-            or SetOrigin or SetModel or SetSize or CheckClient or Aim
+            or SetOrigin or SetModel or SetSize or CheckClient or Aim or Lightstyle or AmbientSound
             or TraceLine or WalkMove or DropToFloor or CheckBottom or PointContents or MoveToGoal => true,
         _ => false,
     };
@@ -74,6 +74,8 @@ public static unsafe class Builtins
             case MoveToGoal: sv.MoveToGoal(); break;
             case CheckClient: ReturnEdict(sv, sv.CheckClient()); break;
             case Aim: PF_aim(sv); break;
+            case Lightstyle: PF_lightstyle(sv); break;
+            case AmbientSound: PF_ambientsound(sv); break;
             default: throw sv.Vm.RunError(NotPorted);
         }
     }
@@ -410,6 +412,27 @@ public static unsafe class Builtins
         *sv.G(GlobalVars.TracePlaneDist) = trace.Plane.Dist;
         sv.Globals[GlobalVars.TraceEnt] = trace.Ent >= 0 ? trace.Ent * sv.EdictSize : 0;
     }
+
+    private static readonly SysErrorException BadLightstyle = new("PF_lightstyle: style outside sv.lightstyles (undefined in C)");
+
+    /// <summary>
+    /// lightstyle (style, value): sv.lightstyles[style] = value. Once the server is active C also sends the style to
+    /// every client: message output, which comes with the messages lane.
+    /// </summary>
+    private static void PF_lightstyle(Server sv)
+    {
+        int style = CCast.I32(*sv.G(OfsParm0));
+        byte* val = S(sv, OfsParm1);
+        if ((uint)style >= Server.MaxLightstyles)
+            throw BadLightstyle;
+        sv.SetLightstyle(style, val);
+    }
+
+    /// <summary>
+    /// ambientsound (pos, samp, vol, attenuation): a sound that is not precached is a console message; otherwise C
+    /// adds svc_spawnstaticsound to the signon message, which comes with the messages lane. No state changes.
+    /// </summary>
+    private static void PF_ambientsound(Server sv) => sv.SoundIndex(S(sv, OfsParm1));
 
     private const float DamageAim = 2;                // DAMAGE_AIM
 

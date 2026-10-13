@@ -223,4 +223,37 @@ public static class CAtof
         }
         return (float)(val * sign);
     }
+    /// <summary>
+    /// C's atoi: white space (space, tab, newline, vertical tab, form feed, carriage return), an optional sign,
+    /// decimal digits. False if the value is outside int: there the reference's C libraries differ (glibc goes through
+    /// a 64-bit strtol and truncates, UCRT saturates at 32 bits), so it is not part of the pinned behaviour.
+    /// </summary>
+    public static bool TryAtoi(ReadOnlySpan<byte> s, out int value)
+    {
+        int i = 0;
+        while (At(s, i) == ' ' || (At(s, i) >= 9 && At(s, i) <= 13))
+            i++;
+        bool negative = false;
+        if (At(s, i) == '-' || At(s, i) == '+')
+            negative = At(s, i++) == '-';
+        long v = 0;
+        while (At(s, i) >= '0' && At(s, i) <= '9')
+        {
+            v = v * 10 + (At(s, i++) - '0');
+            if (v > 1L << 31)
+            {
+                value = 0;
+                return false;
+            }
+        }
+        if (negative)
+            v = -v;
+        if (v < int.MinValue || v > int.MaxValue)
+        {
+            value = 0;
+            return false;
+        }
+        value = (int)v;
+        return true;
+    }
 }

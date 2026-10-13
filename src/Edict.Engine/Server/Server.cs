@@ -69,6 +69,9 @@ public sealed unsafe partial class Server
     /// <summary><c>sv.state == ss_active</c>; false while loading (spawn functions run).</summary>
     public bool Active { get; set; }
 
+    /// <summary>The number of the builtin the engine's host was last asked for and does not have (diagnostic).</summary>
+    public int UnportedBuiltin { get; set; } = -1;
+
     /// <summary><c>sv.paused</c>.</summary>
     public bool Paused { get; set; }
 
@@ -207,6 +210,15 @@ public sealed unsafe partial class Server
                 return;
         }
         throw Vm.RunError(SoundOverflow);
+    }
+
+    /// <summary>The index of <paramref name="s"/> in sv.sound_precache (entry 0 is ""), or -1.</summary>
+    public int SoundIndex(byte* s)
+    {
+        for (int i = 0; i < MaxSounds && _soundPrecache[i] is not null; i++)
+            if (Same(_soundPrecache[i], s))
+                return i;
+        return -1;
     }
 
     /// <summary>PF_precache_model's list and sv.models: a new name loads its model (Mod_ForName).</summary>

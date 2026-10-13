@@ -367,6 +367,37 @@ changes after the last spawn function (entities freed by `ED_LoadFromFile`) that
 XXH64; `EdhFile` reads the spawn records. Checked before the port spawns anything itself: the capture replay hashes
 the reference's state at every spawn point (15 on the 10 maps, respawns included) and matches every lane and every
 entity; `StateHashTests` checks XXH64 against the reference's on every length up to 1,100.
+Step 4b done (2026-10-13), and with it the cut-2 gate: the port spawns every map itself and hashes as the reference
+at frame 0. `Server/Spawn.cs`: `SV_SpawnServer` up to the frame-0 point (skill rounded and clamped, deathmatch reset
+for coop, `sv.time` 1, the world model and its inline models as precache entries, the world edict, the spawn
+globals) and pr_edict.c's parser (`ED_FindField`, `ED_FindFunction`, `ED_NewString` with its escapes,
+`ED_ParseEpair`, `ED_ParseEdict` with the angle and light hacks and the trailing-space trim, `ED_LoadFromFile` with
+the skill and deathmatch filters); `Common/ComParse.cs` (`COM_Parse`, with C's signed `char`: bytes from 0x80 on are
+white space); `HunkStrings` (engine strings at offsets of their own; hashed by content); `GameHost` (the engine's VM
+host: the port's builtins, an error for one it does not have); builtins `lightstyle` (the state; the message to
+clients comes with messages) and `ambientsound` (the precache check; its signon message likewise); 40 builtins in
+all; `Cvars.SetValue` for integral values; the entity lump in `BrushLoader`. Mod_ForName differs in when, not what:
+C loads a model when precache_model first names it, inside the VM; the port's `ModelCache` loads at map load every
+model whose name is a string of progs.dat or a token of the entity lump, so that the VM path does not allocate; a
+model name built at run time would stop with an error. Where C has undefined behaviour on malformed text (strcpy
+into fixed buffers, a vector value with fewer than three components read past its end, atoi out of int, a quoted
+string open at the end of the text), the port stops with an error. Gate (`SpawnGateTests`): the 10 maps of the tapes
+and 80 spawn-only variants (`tools/captures.sh`: skills 0, 0.6, 2, 2.6, 3, 5, deathmatch 2 and coop with four
+client slots; negative skills cannot be set, `Cmd_StuffCmds_f` ends a `+` command at any `-`), inputs from the
+capture of the run (maxclients, cvars, rand seed; for the variants the cvars as the command line set them, since the
+capture records them after `SV_SpawnServer` has adjusted them); every entity, the edicts lane and the typed globals
+lane must match. All 90 green on the first complete run, 80 to 291 edicts per map. Windows and Linux references
+agree on all 80 variants. Level 1 (`SpawnParseTests`): `COM_Parse` on 10^5 random texts, `ED_ParseEpair` on 2·10^5
+strings, vectors and floats, `ED_ParseEdict` on 2·10^4 random entities of the game's progs.dat (all field defs as
+keys, with trailing spaces, the hacks, unknown keys, values of each type), each against the reference through the
+oracle (version 5: the progs image on the oracle's hunk, which `string_t` offsets need, as patch 0002 does for the
+engine). R7 (`tools/mutate.py`, group `spawn`): 20 of 20 detected, one known blind spot (sprite bounds in float: the
+three sprites of LibreQuake are 16×16, 32×32 and 64×64); two candidates shown not to be bad (underscore keys:
+LibreQuake's progs has no field whose name begins with one; setting both the coop and the deathmatch global: the
+other one is 0 either way). The first run of the group, with only the gate on the 10 maps and 50 variants, let 7
+survive (the parser's corner cases, the skill rounding and the coop reset, whose inputs the capture records after the
+adjustment); keys with trailing spaces then survived the first level-1 tests too and led to the `ED_ParseEdict` fuzz.
+Not in the gate yet: messages (signon, baseline), which no lane hashes; the two settling `SV_Physics` frames are cut 3.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)
