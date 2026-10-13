@@ -13,7 +13,9 @@ is updated). So the stream says, in order:
   'R'  what the builtin changed                                 (the replay applies it; the builtin is not run)
   'L'  what the VM changed up to its return to the engine       (checked like 'B')
 A builtin that runs QuakeC itself (touch functions from walkmove, for example) shows as nested 'E' ... 'L' between
-its 'B' and 'R'. Replaying the stream runs only the VM: cut 2, step 2 (docs/PLAN.md section C).
+its 'B' and 'R'. Linking is recorded as events too ('K' before SV_LinkEdict, 'k' after it with the leafs and the
+area node the edict went into, 'U' at SV_UnlinkEdict), so that the port links in the same order the reference did,
+whether the engine, a replayed builtin or the port's own code linked. Replaying the stream runs only the VM: cut 2, step 2 (docs/PLAN.md section C).
 
 Engine state the builtins read but the VM does not see is recorded too: the rand seed (engine and builtins draw
 from one stream) and sv.time at every entry and after every builtin; per map svs.maxclients, the cvars and the
@@ -39,6 +41,11 @@ File layout (all integers little-endian):
   'C'  u32 fnum
   'B'  u16 builtin  u32 fnum  u8 argc  u32 parm[3 * argc]  diff
   'R'  u16 builtin  u32 return[3]  u32 rand_seed  f64 sv.time  diff
+  'K'  u32 edict  u8 touch_triggers  diff                 SV_LinkEdict starts
+  'k'  u32 edict  u32 num_leafs  i16 leafnums[num_leafs]  i32 area node (-1: not linked)  u8 list (0 none, 1 solid,
+       2 trigger)  i32 previous edict in the list (-1: the head)  diff
+                                                          SV_LinkEdict returns (touch functions ran in between)
+  'U'  u32 edict                                          SV_UnlinkEdict
   diff:  u32 num_edicts  u32 n  n x { u32 word  u32 value }  u32 m  m x { i32 string offset  char text[]  NUL }
          u32 h  h x { u32 edict  u32 free  u32 freetime bits }
          word w < numglobals is global w; otherwise edict (w - numglobals) / entityfields,
@@ -47,7 +54,7 @@ File layout (all integers little-endian):
 #include "quakedef.h"
 #include "edict_capture.h"
 
-#define ECP_VERSION		4
+#define ECP_VERSION		6
 #define BUFFER_SIZE		(1 << 16)
 
 extern unsigned short	pr_crc;				// pr_edict.c
@@ -368,6 +375,57 @@ void EdictCapture_Builtin (int num, int fnum)
 	for (i = 0 ; i < pr_argc * 3 ; i++)
 		putword (OFS_PARM0 + i);
 	Diff (-1);
+}
+
+// world.c's areanode_t (not in a header), for finding the node a link belongs to; patch 0004 removes the static
+typedef struct edict_areanode_s
+{
+	int		axis;
+	float	dist;
+	struct edict_areanode_s	*children[2];
+	link_t	trigger_edicts;
+	link_t	solid_edicts;
+} edict_areanode_t;
+#define EDICT_AREA_NODES	32		// AREA_NODES
+extern edict_areanode_t	sv_areanodes[EDICT_AREA_NODES];
+
+void EdictCapture_Link (edict_t *ent, int touch)
+{
+	put8 ('K');
+	put32 (NUM_FOR_EDICT (ent));
+	put8 (touch);
+	Diff (-1);
+}
+
+void EdictCapture_Linked (edict_t *ent)
+{
+	link_t	*l;
+	int		i, node = -1, list = 0;
+
+	put8 ('k');
+	put32 (NUM_FOR_EDICT (ent));
+	put32 (ent->num_leafs);
+	for (i = 0 ; i < ent->num_leafs ; i++)
+		put16 (ent->leafnums[i]);
+	if (ent->area.prev)
+		for (l = ent->area.next ; node < 0 ; l = l->next)	// the list's head is the only link outside an edict
+			for (i = 0 ; i < EDICT_AREA_NODES ; i++)
+				if (l == &sv_areanodes[i].solid_edicts || l == &sv_areanodes[i].trigger_edicts)
+				{
+					node = i;
+					list = l == &sv_areanodes[i].solid_edicts ? 1 : 2;
+				}
+	put32 (node);
+	put8 (list);
+	put32 (node < 0 || ent->area.prev == &sv_areanodes[node].solid_edicts || ent->area.prev == &sv_areanodes[node].trigger_edicts
+		? -1 : NUM_FOR_EDICT (EDICT_FROM_AREA (ent->area.prev)));
+	Diff (-1);
+}
+
+void EdictCapture_Unlink (edict_t *ent)
+{
+	put8 ('U');
+	put32 (NUM_FOR_EDICT (ent));
 }
 
 void EdictCapture_BuiltinDone (int num)

@@ -1,0 +1,61 @@
+EDICT 0004: capture points around linking in world.c
+
+Category: harness hook, no change in results.
+SV_LinkEdict becomes SV_LinkEdict_ and gets a wrapper with a capture point before and after it, so that every exit
+(world, free edict, SOLID_NOT, end) is covered by one line; SV_UnlinkEdict gets one capture point; sv_areanodes loses
+its static so that the capture can name the area node an edict was linked into. The record mode -edictcapture
+(ref/src/edict_capture.c) uses them to replay linking in the port in the reference's order (docs/PLAN.md section C,
+cut 2, step 3c). The wrapper adds a call; the capture code only reads. Checked when added: the per-frame hashes of
+all 10 R9 maps are identical with and without the patch, with and without -edictcapture.
+
+--- a/world.c
++++ b/world.c
+@@ -20,6 +20,7 @@
+ // world.c -- world query functions
+ 
+ #include "quakedef.h"
++#include "edict_capture.h"	// EDICT
+ 
+ /*
+ 
+@@ -190,7 +191,7 @@
+ #define	AREA_DEPTH	4
+ #define	AREA_NODES	32
+ 
+-static	areanode_t	sv_areanodes[AREA_NODES];
++areanode_t	sv_areanodes[AREA_NODES];	// EDICT: not static, edict_capture.c names the node an edict is in
+ static	int			sv_numareanodes;
+ 
+ /*
+@@ -262,6 +263,7 @@
+ */
+ void SV_UnlinkEdict (edict_t *ent)
+ {
++	EDICT_CAPTURE_UNLINK (ent);	// EDICT
+ 	if (!ent->area.prev)
+ 		return;		// not linked in anywhere
+ 	RemoveLink (&ent->area);
+@@ -369,7 +371,7 @@
+ 
+ ===============
+ */
+-void SV_LinkEdict (edict_t *ent, qboolean touch_triggers)
++static void SV_LinkEdict_ (edict_t *ent, qboolean touch_triggers)	// EDICT: wrapped below
+ {
+ 	areanode_t	*node;
+ 
+@@ -470,6 +472,14 @@
+ 		SV_TouchLinks ( ent, sv_areanodes );
+ }
+ 
++// EDICT: capture points around every exit of SV_LinkEdict (ref/src/edict_capture.c)
++void SV_LinkEdict (edict_t *ent, qboolean touch_triggers)
++{
++	EDICT_CAPTURE_LINK (ent, touch_triggers);
++	SV_LinkEdict_ (ent, touch_triggers);
++	EDICT_CAPTURE_LINKED (ent);
++}
++
+ 
+ 
+ /*

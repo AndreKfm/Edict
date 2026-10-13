@@ -178,3 +178,22 @@ EDICT_EXPORT unsigned int EdictOracle_Builtin (int num, int argc, float *globals
 	*num_edicts = sv.num_edicts;
 	return edict_rand_state ();
 }
+
+// BOX_ON_PLANE_SIDE (mathlib.h), the way SV_FindTouchedLeafs calls it: the macro's axial fast path, else
+// BoxOnPlaneSide. signbits as Mod_LoadPlanes computes them.
+EDICT_EXPORT int EdictOracle_BoxOnPlaneSide (float *emins, float *emaxs, float *normal, float dist, int type)
+{
+	mplane_t	p;
+	int			j;
+
+	memset (&p, 0, sizeof (p));
+	for (j = 0 ; j < 3 ; j++)
+	{
+		p.normal[j] = normal[j];
+		if (normal[j] < 0)
+			p.signbits |= 1 << j;
+	}
+	p.dist = dist;
+	p.type = type;
+	return BOX_ON_PLANE_SIDE (emins, emaxs, &p);
+}

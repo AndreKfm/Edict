@@ -28,7 +28,7 @@ def builtin_names():
 def read(path):
     d = open(path, 'rb').read()
     version = struct.unpack_from('<I', d, 4)[0]
-    assert d[:4] == b'ECP1' and version in (1, 2, 3, 4), path
+    assert d[:4] == b'ECP1' and version in (1, 2, 3, 4, 5, 6), path
     p = 8; names = {}; state = 0; m = None
 
     def diff(p):                    # version 2: a state diff after E, L, B and R
@@ -65,6 +65,12 @@ def read(path):
         elif k == b'B':
             num, fnum, argc = struct.unpack_from('<HIB', d, p); p = diff(p + 7 + 12 * argc)
             yield ('builtin', m, state, (num, names.get(fnum, fnum)), None)
+        elif k == b'K':
+            p = diff(p + 5)
+        elif k == b'k':
+            nl, = struct.unpack_from('<I', d, p + 4); p = diff(p + 8 + 2 * nl + 5 + (4 if version >= 6 else 0))
+        elif k == b'U':
+            p += 4
         elif k == b'R':
             p = diff(p + 14 + (12 if version >= 3 else 0))
         else:
