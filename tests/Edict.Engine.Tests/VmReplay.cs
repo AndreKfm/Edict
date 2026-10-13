@@ -29,7 +29,7 @@ public sealed class ReplayDivergence(string message) : Exception(message);
 public sealed unsafe class VmReplay : IDisposable
 {
     public const int NumBuiltins = 79;      // pr_numbuiltins: pr_builtin[] compiled without QUAKE2
-    private const int Version = 7;
+    private const int Version = 8;
 
     private readonly byte[] _d;
     private int _p;
@@ -162,6 +162,7 @@ public sealed unsafe class VmReplay : IDisposable
                 case (byte)'K': DriveLink(); break;
                 case (byte)'U': DriveUnlink(); break;
                 case (byte)'S': SpawnPoint(); break;
+                case (byte)'H': ServerFrame(); break;
                 default: throw Fail($"record '{(char)k}' at the top level");
             }
         }
@@ -219,6 +220,28 @@ public sealed unsafe class VmReplay : IDisposable
         if (l.Edicts != r.Edicts)
             throw Fail($"spawn point: edicts lane {l.Edicts:x16}, the reference's {r.Edicts:x16} (every entity matches)");
         SpawnsHashed++;
+    }
+
+    /// <summary>host_frametime of the current server frame (from its 'H' record).</summary>
+    public double FrameTime { get; private set; }
+
+    /// <summary>Server frames the capture recorded ('H').</summary>
+    public int ServerFrames { get; private set; }
+
+    /// <summary>
+    /// Host_ServerFrame begins: the engine's changes since the last record (commands, SV_SpawnServer's own frames)
+    /// are applied, as at an engine entry.
+    /// </summary>
+    private void ServerFrame()
+    {
+        I32();                              // host_framecount
+        FrameTime = F64();
+        uint seed = (uint)I32();
+        double time = F64();
+        Apply();
+        _sv!.Rand.Srand(seed);
+        _sv.Time = time;
+        ServerFrames++;
     }
 
     private void Name()

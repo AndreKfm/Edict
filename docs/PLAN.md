@@ -399,6 +399,20 @@ survive (the parser's corner cases, the skill rounding and the coop reset, whose
 adjustment); keys with trailing spaces then survived the first level-1 tests too and led to the `ED_ParseEdict` fuzz.
 Not in the gate yet: messages (signon, baseline), which no lane hashes; the two settling `SV_Physics` frames are cut 3.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
+Steps (2026-10-13), each with its own gate, the capture replay localizing the first difference as in cut 2:
+(1) census of what a frame reaches; (2) the frame's server part up to physics and the client: `rand ()` per host
+frame, `SV_CheckForNewClients`/`SV_ConnectClient`, `SV_RunClients` with `SV_ReadClientMessage` on the tape's
+messages, the host commands the tape sends (`prespawn`, `name`, `color`, `spawn`, `begin`), `sv_user.c`; gated at
+each frame's first engine entry, where the client edict's words the port changed must be the recorded ones;
+(3) `SV_Physics` with every movetype the census found, gated by the replay running each frame's physics as the
+port's, plus a physics fuzz on the oracle's world; (4) the frame's end and the loop: the state effects of
+`SV_SendClientMessages`, `SV_SpawnServer`'s two settling frames and `SV_CreateBaseline`, `restart`/`changelevel`
+through `localcmd`; gate: the per-frame hash of every frame record, then ≥ 3 maps × 10 min on new tapes.
+Step 1 done (2026-10-13), from the captures (VM memory rebuilt from the diffs, live edicts at each frame's first
+entry, 10 maps × 4,000 frames): entity-frames by movetype none 2,403,973, step 2,101,720, toss 1,434,327, push
+1,068,041, noclip 49,135, walk 27,726 (the player), bounce 4,729, fly 2,157, flymissile 491; anglenoclip and
+angleclip never. The player walks fewer than 4,000 frames where it dies: QuakeC's `localcmd ("restart")` respawns the
+map, and the open-loop tape sends no new `spawn`, so the client stays connected but not spawned.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
@@ -470,6 +484,9 @@ per-entity, per-field first-divergence report, not only a frame hash.
   the patch and `-edictcapture`.
 - `0005` (2026-10-13, harness hook): one call after `ED_LoadFromFile` in `SV_SpawnServer` and the include, 2 lines,
   22 of the 30 hook lines used. Per-frame hashes of all 10 R9 maps unchanged with and without the patch.
+- `0006` (2026-10-13, harness hook): a capture point at the start of `Host_ServerFrame` and the include, 2 lines,
+  24 of the 30 hook lines used (capture version 8, record `'H'`). All 90 hash files of the corpus (10 maps × 4,000
+  frames, 80 spawn variants) identical with and without the patch.
 - State 2026-10-12: `0001` (`COM_FileBase` read before its argument; old/new compared on 21 paths, 0 differences),
   `0002` (string_t offsets, see §A.1). With both, the release build loads LibreQuake `start`, runs the QuakeC spawn
   functions and keeps running headless (client + server, `vid_null`).
