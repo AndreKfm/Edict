@@ -128,6 +128,9 @@ loads the map itself (`EdictOracle_LoadWorld`) and `WorldFuzzTests` drives the r
 `SV_Move`, `Mod_PointInLeaf`, `Mod_LeafPVS`, `PF_checkclient`, `PF_aim` and `SV_NewChaseDir` on it and the port's on
 the same edicts. It reports how often it reached the outcomes that matter (traces that hit an entity, checkclient
 finding a client, aim turning to a target, a chasing monster moving), so that a green run can be judged.
+The frame-0 gate (cut 2, step 4) compares state hashes, so the hash itself is checked first, on the reference's
+own state: at each spawn record of a capture the replay hashes its memory with the port's `StateHash` and requires
+the reference's spawn record from the `.edh` of the same run, lane by lane and entity by entity.
 
 Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after step 3c-3): about 77 s for a full run — build 6 s,
 engine tests 60 s (124 tests), exact tests 8 s, analyzer tests 3 s. The largest engine classes: `KnownBadVmTests`

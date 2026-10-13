@@ -29,7 +29,7 @@ public sealed class ReplayDivergence(string message) : Exception(message);
 public sealed unsafe class VmReplay : IDisposable
 {
     public const int NumBuiltins = 79;      // pr_numbuiltins: pr_builtin[] compiled without QUAKE2
-    private const int Version = 6;
+    private const int Version = 7;
 
     private readonly byte[] _d;
     private int _p;
@@ -61,6 +61,15 @@ public sealed unsafe class VmReplay : IDisposable
     private bool _drivingLink, _drivingUnlink;  // the next Link/Unlink hook is the one the replay itself started
     private int _drivenDepth;                   // inside a link the replay made for code the port does not have
     public long Links { get; private set; }
+
+    // the reference's hashes of the same run (.edh next to the capture): the spawn records are checked at 'S'
+    private readonly EdhFile _edh;
+    private int _spawns;
+    private StateHash? _hash;
+    private readonly List<byte[]> _styles = [];
+
+    /// <summary>Spawn points whose state hashed as the reference's (edicts and globals lanes, every entity).</summary>
+    public int SpawnsHashed { get; private set; }
 
     public long Entries { get; private set; }
     public long BuiltinCalls { get; private set; }
@@ -118,6 +127,7 @@ public sealed unsafe class VmReplay : IDisposable
         if (!_d.AsSpan(0, 4).SequenceEqual("ECP1"u8) || U32At(4) != Version)
             throw new InvalidDataException($"{file}: not an ECP1 version {Version} capture (run tools/captures.sh)");
         _p = 8;
+        _edh = new EdhFile(Path.ChangeExtension(file, ".edh"));
         _strings.Missing = ofs => Fail($"engine string at offset {ofs} is read, but the capture did not record it");
     }
 
@@ -151,9 +161,64 @@ public sealed unsafe class VmReplay : IDisposable
                 case (byte)'E': Enter(); break;
                 case (byte)'K': DriveLink(); break;
                 case (byte)'U': DriveUnlink(); break;
+                case (byte)'S': SpawnPoint(); break;
                 default: throw Fail($"record '{(char)k}' at the top level");
             }
         }
+    }
+
+    /// <summary>
+    /// The frame-0 point after ED_LoadFromFile: the engine's last changes are applied, then the state must hash as the
+    /// reference's spawn record (lanes and every entity). Checks the port's state hash (Edict.Harness) on the
+    /// reference's state, before the port spawns a map itself.
+    /// </summary>
+    private void SpawnPoint()
+    {
+        Server sv = _sv!;
+        uint seed = (uint)I32();
+        double time = F64();
+        int serverflags = I32();
+        _styles.Clear();
+        for (int i = 0; i < Server.MaxLightstyles; i++)
+        {
+            if (U8() == 0)
+            {
+                sv.SetLightstyle(i, null);
+                continue;
+            }
+            ReadOnlySpan<byte> text = Bytes();
+            byte[] s = GC.AllocateArray<byte>(text.Length + 1, pinned: true);
+            text.CopyTo(s);
+            _styles.Add(s);
+            sv.SetLightstyle(i, (byte*)Unsafe.AsPointer(ref s[0]));
+        }
+        Apply();
+        sv.Rand.Srand(seed);
+        sv.Time = time;
+        sv.ServerFlags = serverflags;
+
+        if (_spawns >= _edh.Spawns.Count)
+            throw Fail("a spawn point the .edh has no spawn record for");
+        EdhFile.Spawn r = _edh.Spawns[_spawns++];
+        if (r.Map != _map)
+            throw Fail($"spawn record {_spawns - 1} of the .edh is for {r.Map}");
+        _hash ??= new StateHash(_progs!);
+        bool active = sv.Active;
+        sv.Active = false;                  // ss_loading: the point is before sv.state = ss_active
+        StateHash.Lanes l = _hash.Of(sv);
+        sv.Active = active;
+        if (sv.NumEdicts != r.NumEdicts)
+            throw Fail($"spawn point: num_edicts {sv.NumEdicts}, the reference's {r.NumEdicts}");
+        for (int e = 0; e < r.NumEdicts; e++)
+            if (l.Entities[e] != r.Entities[e])
+                throw Fail($"spawn point: edict {e} hashes as {l.Entities[e]:x16}, the reference's as {r.Entities[e]:x16}");
+        if (l.GlobalsTyped != r.GlobalsTyped)
+            throw Fail($"spawn point: typed globals lane {l.GlobalsTyped:x16}, the reference's {r.GlobalsTyped:x16}");
+        if (l.GlobalsRaw != r.GlobalsRaw)
+            throw Fail($"spawn point: raw globals lane {l.GlobalsRaw:x16}, the reference's {r.GlobalsRaw:x16}");
+        if (l.Edicts != r.Edicts)
+            throw Fail($"spawn point: edicts lane {l.Edicts:x16}, the reference's {r.Edicts:x16} (every entity matches)");
+        SpawnsHashed++;
     }
 
     private void Name()
@@ -237,6 +302,7 @@ public sealed unsafe class VmReplay : IDisposable
         FreeMap();
         QFile f = _files.Find("progs.dat") ?? throw new FileNotFoundException("progs.dat");
         _progs = new Progs(f);
+        _hash = null;
         if (_progs.FileCrc != crc || _progs.NumGlobals != _numGlobals || _progs.EntityFields != _entityFields
             || _progs.NumStrings != _numStrings)
             throw Fail($"progs.dat differs from the capture's (crc {_progs.FileCrc} vs {crc})");

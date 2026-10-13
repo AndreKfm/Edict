@@ -29,7 +29,7 @@ public sealed class VmReplayTests(ITestOutputHelper output)
             Assert.Fail("first divergence: " + d.Message);
         }
         string stats = $"{map}: {replay.Entries} engine entries, {replay.QcCalls} QuakeC calls, " +
-                       $"{replay.BuiltinCalls} builtin calls ({replay.PortedBuiltinCalls} run by the port), {replay.Links} links, {replay.WordsChecked} words compared";
+                       $"{replay.BuiltinCalls} builtin calls ({replay.PortedBuiltinCalls} run by the port), {replay.Links} links, {replay.SpawnsHashed} spawn points hashed as the reference, {replay.WordsChecked} words compared";
         output.WriteLine(stats);
         Assert.True(replay.Entries > 0 && replay.BuiltinCalls > 0, "the capture replayed nothing: " + stats);
     }

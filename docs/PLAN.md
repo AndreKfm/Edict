@@ -352,6 +352,19 @@ Two candidates were shown not to be bad and dropped: `checkclient`'s interval wi
 double is an odd multiple of 2^-55, and with `sv.time` >= 1 the difference is a multiple of 2^-52, so the two
 never meet), and in the fuzz itself two targets mirrored sideways (`aim` drops the sideways component, so they give
 the same answer; the second target now sits above `v_forward` instead).
+Step 4 in two parts: 4a the gate's reference side and the port's state hash, 4b the port's spawn.
+Step 4a done (2026-10-13): `SV_SpawnServer` runs `SV_Physics` twice itself (to let everything settle) and then
+`SV_CreateBaseline`, so "frame 0, before `SV_Physics`" is the point right after `ED_LoadFromFile`. Patch `0005`
+puts one call there (`Edict_Spawned`): with `-edicthash` it writes a map record and a spawn record `'S'` (the three
+lanes and one hash per edict; `.edh` version 2), with `-edictcapture` a spawn record with the engine's last changes
+and the engine state the hash covers (rand seed, `sv.time`, `svs.serverflags`, the light styles; capture version
+7). `tools/captures.sh` writes the `.edh` of the same run next to each capture. Per-frame hashes of all 10 maps ×
+4,000 frames are unchanged by the patch, Windows and Linux agree on every frame and spawn record, and the captures
+are unchanged apart from the new records (and the cvar `cmdline`, which holds the output paths). The port's side:
+`Edict.Harness/StateHash.cs` builds the same canonical streams over the port's `Server` and hashes them with its own
+XXH64; `EdhFile` reads the spawn records. Checked before the port spawns anything itself: the capture replay hashes
+the reference's state at every spawn point (15 on the 10 maps, respawns included) and matches every lane and every
+entity; `StateHashTests` checks XXH64 against the reference's on every length up to 1,100.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)
@@ -422,6 +435,8 @@ per-entity, per-field first-divergence report, not only a frame hash.
   before and after it (one line covers every exit), one capture point in `SV_UnlinkEdict`, `sv_areanodes` no longer
   static, the include: 12 lines, 20 of the 30 hook lines used. Hashes of all 10 R9 maps unchanged with and without
   the patch and `-edictcapture`.
+- `0005` (2026-10-13, harness hook): one call after `ED_LoadFromFile` in `SV_SpawnServer` and the include, 2 lines,
+  22 of the 30 hook lines used. Per-frame hashes of all 10 R9 maps unchanged with and without the patch.
 - State 2026-10-12: `0001` (`COM_FileBase` read before its argument; old/new compared on 21 paths, 0 differences),
   `0002` (string_t offsets, see §A.1). With both, the release build loads LibreQuake `start`, runs the QuakeC spawn
   functions and keeps running headless (client + server, `vid_null`).

@@ -69,6 +69,21 @@ public sealed unsafe partial class Server
     /// <summary><c>sv.state == ss_active</c>; false while loading (spawn functions run).</summary>
     public bool Active { get; set; }
 
+    /// <summary><c>sv.paused</c>.</summary>
+    public bool Paused { get; set; }
+
+    /// <summary><c>svs.serverflags</c>: cross-level information (sigils).</summary>
+    public int ServerFlags { get; set; }
+
+    public const int MaxLightstyles = 64;             // MAX_LIGHTSTYLES
+    private readonly byte*[] _lightstyles;
+
+    /// <summary><c>sv.lightstyles[i]</c>: the string PF_lightstyle last set, or null.</summary>
+    public byte* Lightstyle(int i) => _lightstyles[i];
+
+    /// <summary>Sets <c>sv.lightstyles[i]</c> (PF_lightstyle; the replay, from the capture).</summary>
+    public void SetLightstyle(int i, byte* style) => _lightstyles[i] = style;
+
     /// <summary>pr_string_temp - pr_strings: where ftos and vtos write.</summary>
     public int StringTempOffset { get; }
 
@@ -94,6 +109,7 @@ public sealed unsafe partial class Server
         _modelPrecache = new byte*[MaxModels];
         _models = new Model*[MaxModels];
         _areaNodes = new AreaNode[AreaNodes];
+        _lightstyles = new byte*[MaxLightstyles];
         _checkPvs = new byte[MaxMapLeafs / 8];
         _decompressed = new byte[MaxMapLeafs / 8];
         _linkPrev = _linkNext = null!;     // sized by ClearWorld, when max_edicts is known
