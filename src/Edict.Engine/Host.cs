@@ -69,6 +69,23 @@ public sealed unsafe class Host : IDisposable
         _net = net;
         _rand.Srand(randSeed);
         _firstFrame = true;
+        InitializeTypes();
+    }
+
+    /// <summary>
+    /// Runs the type initializer of every engine type now, on the load path. The static readonly fields are mostly
+    /// preallocated exceptions, read only when thrown, so a type's first static read can come late: Server's came in
+    /// SV_SendServerinfo at the first client connect and allocated its 4,672 bytes of statics inside a frame.
+    /// </summary>
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026",
+        Justification = "the engine's own types; types a trimmer removed have no type initializer left to run")]
+    [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2059",
+        Justification = "the engine's own types; types a trimmer removed have no type initializer left to run")]
+    private static void InitializeTypes()
+    {
+        foreach (Type t in typeof(Host).Assembly.GetTypes())
+            if (!t.ContainsGenericParameters)
+                System.Runtime.CompilerServices.RuntimeHelpers.RunClassConstructor(t.TypeHandle);
     }
 
     private bool _firstFrame;

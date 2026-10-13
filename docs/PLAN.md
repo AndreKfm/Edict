@@ -504,6 +504,17 @@ in C; the port stops with an error, the fuzz compares the allowed overflow. SV_F
 with more than 8,189 leafs; the port stops. Not ported yet: dropping a client, saved games, a local client, any other
 console command.
 
+**P4: zero allocation, performance variants, all gates on `Host_Frame`** (section D; time-boxed). Steps
+(2026-10-13): (1) the allocation gate on the host loop; (2) a frame benchmark, the port against the reference on
+the same tapes; (3) variants, each through the loop gate (D1) before it is measured.
+Step 1 done (2026-10-13): `AllocationTests` runs the port's host loop on the 10 corpus tapes, without hashing, and
+measures the managed bytes the thread allocates around every host frame. The analyzer had already kept the server
+frame free of allocations; the one allocation found was a type initializer: `Server`'s static readonly fields are
+preallocated exceptions, read only when thrown, so the first static read came in SV_SendServerinfo at the first
+client connect and allocated 4,672 bytes inside frame 1. The host's constructor now runs the type initializers of
+all engine types on the load path. Gate: 0 bytes in every frame that spawns nothing (39,985 frames); the 15 spawn
+frames (map, restart, changelevel: the load path) allocate 2.6–7.4 MB each and are counted apart.
+
 ## D. Effort at 7 h/week (calendar weeks)
 
 Includes ~25 % overhead for the multi-model workflow (generation, gating, ranking per module).
