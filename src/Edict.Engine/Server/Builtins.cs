@@ -14,6 +14,8 @@ namespace Edict.Engine;
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public static unsafe class Builtins
 {
+    public const int SetOrigin = 2, SetModel = 3, SetSize = 4;
+    public const int TraceLine = 16, WalkMove = 32, DropToFloor = 34, CheckBottom = 40, PointContents = 41, MoveToGoal = 67;
     public const int MakeVectors = 1, Random = 7, Normalize = 9, Vlen = 12, VectoYaw = 13, PrecacheSound = 19,
         PrecacheModel = 20, Ftos = 26, Vtos = 27, Rint = 36, Floor = 37, Ceil = 38, Fabs = 43, Cvar = 45,
         ChangeYaw = 49, VectoAngles = 51, PrecacheFile = 68, CvarSet = 72, PrecacheModel2 = 75, PrecacheSound2 = 76,
@@ -26,7 +28,9 @@ public static unsafe class Builtins
     {
         MakeVectors or Random or Normalize or Vlen or VectoYaw or PrecacheSound or PrecacheModel or Ftos or Vtos or Rint
             or Floor or Ceil or Fabs or Cvar or ChangeYaw or VectoAngles or PrecacheFile or CvarSet or PrecacheModel2
-            or PrecacheSound2 or PrecacheFile2 or Spawn or Remove or Find or FindRadius or NextEnt or MakeStatic => true,
+            or PrecacheSound2 or PrecacheFile2 or Spawn or Remove or Find or FindRadius or NextEnt or MakeStatic
+            or SetOrigin or SetModel or SetSize
+            or TraceLine or WalkMove or DropToFloor or CheckBottom or PointContents or MoveToGoal => true,
         _ => false,
     };
 
@@ -59,6 +63,15 @@ public static unsafe class Builtins
             case FindRadius: PF_findradius(sv); break;
             case NextEnt: PF_nextent(sv); break;
             case MakeStatic: PF_makestatic(sv); break;
+            case SetOrigin: PF_setorigin(sv); break;
+            case SetSize: PF_setsize(sv); break;
+            case SetModel: PF_setmodel(sv); break;
+            case TraceLine: PF_traceline(sv); break;
+            case WalkMove: PF_walkmove(sv); break;
+            case DropToFloor: PF_droptofloor(sv); break;
+            case CheckBottom: *sv.G(OfsReturn) = sv.CheckBottom(GEdict(sv, OfsParm0)) ? 1 : 0; break;
+            case PointContents: *sv.G(OfsReturn) = sv.PointContents(*V(sv, OfsParm0)); break;
+            case MoveToGoal: sv.MoveToGoal(); break;
             default: throw sv.Vm.RunError(NotPorted);
         }
     }
@@ -229,6 +242,9 @@ public static unsafe class Builtins
     /// <summary>cvar_set (string, string).</summary>
     private static void PF_cvar_set(Server sv) => sv.Cvars.Set(S(sv, OfsParm0), S(sv, OfsParm1));
 
+    /// <summary>PF_changeyaw, for SV_StepDirection, which calls it directly.</summary>
+    internal static void RunChangeYaw(Server sv) => PF_changeyaw(sv);
+
     /// <summary>PF_changeyaw (sv_move.c): this was a major timewaster in progs, so it was converted to C.</summary>
     private static void PF_changeyaw(Server sv)
     {
@@ -264,7 +280,7 @@ public static unsafe class Builtins
         ent[EntVars.Angles + 1] = Mathlib.Anglemod(current + move);
     }
 
-    private const int OfsParm2 = QcVm.OfsParm0 + 6;
+    private const int OfsParm2 = QcVm.OfsParm0 + 6, OfsParm3 = QcVm.OfsParm0 + 9;
 
     /// <summary>RETURN_EDICT: the edict's byte offset (EDICT_TO_PROG).</summary>
     private static void ReturnEdict(Server sv, int n) => sv.Globals[OfsReturn] = n * sv.EdictSize;
@@ -358,4 +374,106 @@ public static unsafe class Builtins
     /// output comes with messages; what the VM sees, the freed entity, is here.
     /// </summary>
     private static void PF_makestatic(Server sv) => sv.Free(GEdict(sv, OfsParm0));
+
+    /// <summary>
+    /// setorigin (entity, origin): the only valid way to move an object without using the physics of the world;
+    /// directly changing origin would not set internal links correctly.
+    /// </summary>
+    private static void PF_setorigin(Server sv)
+    {
+        int e = GEdict(sv, OfsParm0);
+        *(Vec3*)(sv.Fields(e) + EntVars.Origin) = *V(sv, OfsParm1);
+        sv.LinkEdict(e, false);
+    }
+
+    /// <summary>
+    /// traceline (vector1, vector2, nomonsters, forent): the trace_* globals. nomonsters is converted to the int
+    /// move type by the call in C; a NULL trace entity becomes world.
+    /// </summary>
+    private static void PF_traceline(Server sv)
+    {
+        Vec3 v1 = *V(sv, OfsParm0), v2 = *V(sv, OfsParm1);
+        int nomonsters = CCast.I32(*sv.G(OfsParm2));
+        int ent = GEdict(sv, OfsParm3);
+
+        Trace trace = sv.Move(v1, default, default, v2, nomonsters, ent);
+
+        *sv.G(GlobalVars.TraceAllsolid) = trace.AllSolid ? 1 : 0;
+        *sv.G(GlobalVars.TraceStartsolid) = trace.StartSolid ? 1 : 0;
+        *sv.G(GlobalVars.TraceFraction) = trace.Fraction;
+        *sv.G(GlobalVars.TraceInwater) = trace.InWater ? 1 : 0;
+        *sv.G(GlobalVars.TraceInopen) = trace.InOpen ? 1 : 0;
+        *V(sv, GlobalVars.TraceEndpos) = trace.EndPos;
+        *V(sv, GlobalVars.TracePlaneNormal) = trace.Plane.Normal;
+        *sv.G(GlobalVars.TracePlaneDist) = trace.Plane.Dist;
+        sv.Globals[GlobalVars.TraceEnt] = trace.Ent >= 0 ? trace.Ent * sv.EdictSize : 0;
+    }
+
+    /// <summary>float droptofloor (): self moves down by up to 256 onto what is below it.</summary>
+    private static void PF_droptofloor(Server sv)
+    {
+        int ent = sv.Globals[GlobalVars.Self] / sv.EdictSize;
+        float* v = sv.Fields(ent);
+        Vec3 end = *(Vec3*)(v + EntVars.Origin);
+        end.Z -= 256;
+
+        Trace trace = sv.Move(*(Vec3*)(v + EntVars.Origin), *(Vec3*)(v + EntVars.Mins), *(Vec3*)(v + EntVars.Maxs), end,
+                              Server.MoveNormal, ent);
+
+        if (trace.Fraction == 1 || trace.AllSolid)
+            *sv.G(OfsReturn) = 0;
+        else
+        {
+            *(Vec3*)(v + EntVars.Origin) = trace.EndPos;
+            sv.LinkEdict(ent, false);
+            v[EntVars.Flags] = CCast.I32(v[EntVars.Flags]) | Server.FlOnGround;
+            ((int*)v)[EntVars.Groundentity] = trace.Ent * sv.EdictSize;
+            *sv.G(OfsReturn) = 1;
+        }
+    }
+
+    /// <summary>float walkmove (float yaw, float dist): self steps, if it is on the ground, flying or swimming.</summary>
+    private static void PF_walkmove(Server sv)
+    {
+        int ent = sv.Globals[GlobalVars.Self] / sv.EdictSize;
+        float yaw = *sv.G(OfsParm0);
+        float dist = *sv.G(OfsParm1);
+
+        if ((CCast.I32(sv.Fields(ent)[EntVars.Flags]) & (Server.FlOnGround | Server.FlFly | Server.FlSwim)) == 0)
+        {
+            *sv.G(OfsReturn) = 0;
+            return;
+        }
+
+        Vec3 move = Server.YawMove(yaw, dist);
+
+        // save program state, because SV_movestep may call other progs (pr_xfunction is the VM's: restored on return)
+        int oldself = sv.Globals[GlobalVars.Self];
+
+        *sv.G(OfsReturn) = sv.Movestep(ent, move, true) ? 1 : 0;
+
+        // restore program state
+        sv.Globals[GlobalVars.Self] = oldself;
+    }
+
+    /// <summary>setsize (entity, minvector, maxvector).</summary>
+    private static void PF_setsize(Server sv) => sv.SetMinMaxSize(GEdict(sv, OfsParm0), *V(sv, OfsParm1), *V(sv, OfsParm2));
+
+    /// <summary>setmodel (entity, model): the model must be precached; its bounds become the edict's.</summary>
+    private static void PF_setmodel(Server sv)
+    {
+        int e = GEdict(sv, OfsParm0);
+        int m = sv.Globals[OfsParm1];
+        int i = sv.ModelIndex(sv.String(m));     // check to see if model was properly precached
+
+        float* v = sv.Fields(e);
+        ((int*)v)[EntVars.Model] = m;
+        v[EntVars.Modelindex] = i;
+
+        Model* mod = sv.ModelAt(CCast.I32(v[EntVars.Modelindex]));
+        if (mod is not null)
+            sv.SetMinMaxSize(e, mod->Mins, mod->Maxs);
+        else
+            sv.SetMinMaxSize(e, default, default);
+    }
 }

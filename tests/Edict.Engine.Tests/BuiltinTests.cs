@@ -30,6 +30,15 @@ public sealed unsafe class BuiltinTests
         (delegate* unmanaged<byte*, float>)NativeLibrary.GetExport(Lib, "EdictOracle_QAtof");
 
     /// <summary>Engine strings at offsets the test chooses (cvar names for PF_cvar).</summary>
+    /// <summary>No QuakeC from engine code and no capture points: the builtins fuzzed here link nothing.</summary>
+    private sealed class NoHooks : IServerHooks
+    {
+        public void ExecuteProgram(int fnum) => throw new InvalidOperationException("no QuakeC from engine code here");
+        public void Link(int e, bool touchTriggers) { }
+        public void Linked(int e) { }
+        public void Unlink(int e) { }
+    }
+
     private sealed class TestStrings : IEngineStrings
     {
         private readonly Dictionary<int, nint> _s = [];
@@ -64,8 +73,11 @@ public sealed unsafe class BuiltinTests
     /// The first divergence over all cases, or null. <paramref name="call"/> runs a builtin on the port's side
     /// (default <see cref="Builtins.Call"/>; known-bad variants replace it).
     /// </summary>
-    internal static string? FirstDivergence(Action<Server, int>? call = null, int random = 50_000)
+    /// <param name="only">The builtins to fuzz (default all); a known-bad variant needs only its own.</param>
+    internal static string? FirstDivergence(Action<Server, int>? call = null, int random = 50_000, Func<int, bool>? only = null)
     {
+        Func<int, bool> want = only ?? (_ => true);
+        int N(int num, int count) => want(num) ? count : 0;
         call ??= Builtins.Call;
         using var f = new VmOpcodeFuzz(FuzzEdicts);
         int numStrings = f.Progs.NumStrings;
@@ -87,7 +99,9 @@ public sealed unsafe class BuiltinTests
                 cvarList.Add((name, Encoding.ASCII.GetBytes(CvarValue(ref rng))));
             }
             var sv = new Server(vm, f.Progs, (int*)f.PortGlobals, f.PortEdicts, f.Header, new Cvars(cvarList), strings,
-                                portTemp, tempOfs) { MaxEdicts = FuzzEdicts };
+                                portTemp, tempOfs) { MaxEdicts = FuzzEdicts, Hooks = new NoHooks() };
+            Model emptyWorld = default;                 // remove unlinks; nothing is linked in this fuzz
+            sv.ClearWorld(&emptyWorld);
             int numEdicts = 2;              // the reference's sv.num_edicts; the port's is set alongside
             sv.NumEdicts = numEdicts;
 
@@ -150,7 +164,7 @@ public sealed unsafe class BuiltinTests
             // one-vector builtins: edges in every component combination of two values, then random vectors
             int[] vectorBuiltins = [Builtins.MakeVectors, Builtins.Normalize, Builtins.Vlen, Builtins.VectoYaw, Builtins.VectoAngles];
             uint[] edgeBits = Rng.Edges;
-            foreach (int num in vectorBuiltins)
+            foreach (int num in vectorBuiltins.Where(want))
             {
                 for (int i = 0; i < edgeBits.Length; i++)
                     for (int j = 0; j < edgeBits.Length; j++)
@@ -177,7 +191,7 @@ public sealed unsafe class BuiltinTests
             }
 
             // one-float builtins
-            foreach (int num in new[] { Builtins.Fabs, Builtins.Floor, Builtins.Ceil, Builtins.Rint, Builtins.Ftos })
+            foreach (int num in new[] { Builtins.Fabs, Builtins.Floor, Builtins.Ceil, Builtins.Rint, Builtins.Ftos }.Where(want))
             {
                 IEnumerable<uint> inputs = edgeBits.Concat(Enumerable.Range(0, random).Select(_ => rng.Below(4) == 0
                     ? BitConverter.SingleToUInt32Bits(rng.Below(20000) / 8f - 1250)        // halves, tenths, integers
@@ -192,7 +206,7 @@ public sealed unsafe class BuiltinTests
             }
 
             // vtos: components below 1e30 (from 1e37 on PF_vtos overflows its 128-byte temp in C)
-            for (int n = 0; n < random; n++)
+            for (int n = 0; n < N(Builtins.Vtos, random); n++)
             {
                 f.Scramble(ref rng);
                 uint x = Small(rng.Float()), y = Small(rng.Float()), z = Small(rng.Float());
@@ -202,7 +216,7 @@ public sealed unsafe class BuiltinTests
             }
 
             // random: any seed
-            for (int n = 0; n < random; n++)
+            for (int n = 0; n < N(Builtins.Random, random); n++)
             {
                 f.Scramble(ref rng);
                 if (Run(Builtins.Random, 0, $"#{n}") is { } d)
@@ -210,7 +224,7 @@ public sealed unsafe class BuiltinTests
             }
 
             // cvar: C's Cvar_VariableValue is Q_atof (var->string); the oracle has the reference's Q_atof
-            for (int i = 0; i < CvarCount; i++)
+            for (int i = 0; i < N(Builtins.Cvar, CvarCount); i++)
             {
                 f.Scramble(ref rng);
                 f.Global(OfsParm0, (uint)(NameBase + i));
@@ -256,14 +270,14 @@ public sealed unsafe class BuiltinTests
                 _ => (rng.Next() >> 11) * (1.0 / 9007199254740992.0) * 5,
             };
 
-            for (int n = 0; n < random; n++)
+            for (int n = 0; n < N(Builtins.Spawn, random); n++)
             {
                 SetUpEdicts(Time());
                 if (Run(Builtins.Spawn, 0, $"spawn #{n}, time {sv.Time:R}") is { } d)
                     return d;
             }
             // remove (ED_Free); makestatic frees the same way but writes the signon buffer first, which the oracle has not
-            foreach (int num in new[] { Builtins.Remove })
+            foreach (int num in new[] { Builtins.Remove }.Where(want))
                 for (int n = 0; n < random / 4; n++)
                 {
                     SetUpEdicts(Time());
@@ -272,7 +286,7 @@ public sealed unsafe class BuiltinTests
                     if (Run(num, 1, $"edict {e}, time {sv.Time:R}") is { } d)
                         return d;
                 }
-            for (int n = 0; n < random / 4; n++)
+            for (int n = 0; n < N(Builtins.NextEnt, random / 4); n++)
             {
                 SetUpEdicts(Time());
                 int e = rng.Below(numEdicts);
@@ -283,7 +297,7 @@ public sealed unsafe class BuiltinTests
 
             // find: string fields with values from the strings block, empty and equal strings at other offsets
             int[] stringFields = [EntVars.Classname, EntVars.Model, EntVars.Netname, 3, Fields - 1];
-            for (int n = 0; n < random; n++)
+            for (int n = 0; n < N(Builtins.Find, random); n++)
             {
                 SetUpEdicts(Time());
                 int field = stringFields[rng.Below(stringFields.Length)];
@@ -298,7 +312,7 @@ public sealed unsafe class BuiltinTests
             }
 
             // findradius: centres, solids, free edicts and radii from edges and game-like values
-            for (int n = 0; n < random; n++)
+            for (int n = 0; n < N(Builtins.FindRadius, random); n++)
             {
                 SetUpEdicts(Time());
                 for (int e = 0; e < FuzzEdicts; e++)
@@ -320,7 +334,7 @@ public sealed unsafe class BuiltinTests
             }
 
             // changeyaw: self's angles[1], ideal_yaw and yaw_speed
-            for (int n = 0; n < random * 2; n++)
+            for (int n = 0; n < N(Builtins.ChangeYaw, random * 2); n++)
             {
                 f.Scramble(ref rng);
                 int ent = 1 + rng.Below(Edicts - 1);
@@ -378,6 +392,26 @@ public sealed unsafe class BuiltinTests
         FindradiusTakesNotSolid,// findradius includes SOLID_NOT
         NextentTakesFree,       // nextent returns free edicts too
     }
+
+    /// <summary>The builtins a known-bad variant changes: the fuzz runs only those for it.</summary>
+    internal static int[] Target(Mutation m) => m switch
+    {
+        Mutation.RandomBy32768 => [Builtins.Random],
+        Mutation.VectoyawInFloat => [Builtins.VectoYaw],
+        Mutation.RintFloatSum => [Builtins.Rint],
+        Mutation.NormalizeInDouble => [Builtins.Normalize],
+        Mutation.MakevectorsRuntimeSin => [Builtins.MakeVectors],
+        Mutation.AnglemodInFloat or Mutation.ChangeyawStrictBound => [Builtins.ChangeYaw],
+        Mutation.CvarWithAtof => [Builtins.Cvar],
+        Mutation.PrecacheNoReturn => [Builtins.PrecacheSound, Builtins.PrecacheModel, Builtins.PrecacheSound2, Builtins.PrecacheModel2],
+        Mutation.FtosAlwaysFixed => [Builtins.Ftos],
+        Mutation.AllocNoRelax or Mutation.AllocFloatTime or Mutation.AllocFromOne => [Builtins.Spawn],
+        Mutation.FreeKeepsOrigin => [Builtins.Remove],
+        Mutation.FindTakesFree => [Builtins.Find],
+        Mutation.FindradiusFloatCentre or Mutation.FindradiusTakesNotSolid => [Builtins.FindRadius],
+        Mutation.NextentTakesFree => [Builtins.NextEnt],
+        _ => throw new ArgumentOutOfRangeException(nameof(m)),
+    };
 
     // ED_Alloc with the mistakes above (the port's Server.Alloc otherwise)
     private static int MutantAlloc(Server sv, Mutation m)

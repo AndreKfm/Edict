@@ -16,7 +16,8 @@ public sealed class KnownBadBuiltinTests
     private static string? Run(BuiltinTests.Mutation m)
     {
         Action<Server, int> call = BuiltinTests.Mutant(m);
-        if (BuiltinTests.FirstDivergence(call) is { } fuzz)
+        int[] target = BuiltinTests.Target(m);
+        if (BuiltinTests.FirstDivergence(call, only: target.Contains) is { } fuzz)
             return "builtin fuzz: " + fuzz;
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         foreach (string map in VmReplay.Maps())

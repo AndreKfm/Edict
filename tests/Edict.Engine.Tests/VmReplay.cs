@@ -14,7 +14,7 @@ namespace Edict.Engine.Tests;
 public sealed class ReplayDivergence(string message) : Exception(message);
 
 /// <summary>
-/// Replays a VM capture (ref/src/edict_capture.c, version 4) through the port (cut 2, steps 2 and 3): the engine's
+/// Replays a VM capture (ref/src/edict_capture.c, version 6) through the port (cut 2, steps 2 and 3): the engine's
 /// changes come from the capture and are applied; the port's VM runs; the builtins the port has
 /// (<see cref="Builtins.Has"/>) run too, the others are replayed from the capture. At every boundary the words that
 /// changed must be exactly the ones that changed in the reference: up to a builtin call and up to the return to the
@@ -22,11 +22,14 @@ public sealed class ReplayDivergence(string message) : Exception(message);
 /// ported builtins the rand seed afterwards and the text of strings they return are checked as well. Also checked:
 /// the order of QuakeC calls, builtin numbers and argument counts, and that every engine string read was recorded.
 /// Two NaN words count as equal (docs/adr/D8); the opcode fuzz checks that copies keep NaN bits.
+/// Linking (step 3c): a link the reference made from code the port does not have yet is made by the port at the same
+/// point ('K'), and what follows from it is checked like the port's own work: the touch functions it runs, the leafs
+/// and the area node ('k'), the fields it sets. Links the port's own code makes must come in the reference's order.
 /// </summary>
 public sealed unsafe class VmReplay : IDisposable
 {
     public const int NumBuiltins = 79;      // pr_numbuiltins: pr_builtin[] compiled without QUAKE2
-    private const int Version = 4;
+    private const int Version = 6;
 
     private readonly byte[] _d;
     private int _p;
@@ -52,6 +55,12 @@ public sealed unsafe class VmReplay : IDisposable
     private readonly ReplayStrings _strings = new();
     private readonly Dictionary<int, string> _names = [];
     private readonly Stack<string> _where = new();
+    private readonly List<BrushModelSet> _otherModels = [];
+    private readonly Dictionary<string, nint> _modelsByName = [];
+    private readonly List<nint> _ownModels = [];               // alias and sprite models, allocated here
+    private bool _drivingLink, _drivingUnlink;  // the next Link/Unlink hook is the one the replay itself started
+    private int _drivenDepth;                   // inside a link the replay made for code the port does not have
+    public long Links { get; private set; }
 
     public long Entries { get; private set; }
     public long BuiltinCalls { get; private set; }
@@ -140,6 +149,8 @@ public sealed unsafe class VmReplay : IDisposable
                 case (byte)'M': NewMap(); break;
                 case (byte)'F': Name(); break;
                 case (byte)'E': Enter(); break;
+                case (byte)'K': DriveLink(); break;
+                case (byte)'U': DriveUnlink(); break;
                 default: throw Fail($"record '{(char)k}' at the top level");
             }
         }
@@ -174,6 +185,13 @@ public sealed unsafe class VmReplay : IDisposable
         _progs = null;
         _world?.Dispose();
         _world = null;
+        foreach (BrushModelSet m in _otherModels)
+            m.Dispose();
+        _otherModels.Clear();
+        foreach (nint m in _ownModels)
+            NativeMemory.Free((void*)m);
+        _ownModels.Clear();
+        _modelsByName.Clear();
         foreach (nint p in _ownStrings)
             NativeMemory.Free((void*)p);
         _ownStrings.Clear();
@@ -243,11 +261,21 @@ public sealed unsafe class VmReplay : IDisposable
         string worldName = $"maps/{_map}.bsp";
         byte[] wn = Encoding.Latin1.GetBytes(worldName);
         _world = BrushLoader.Load(_files.Find(wn) ?? throw new FileNotFoundException(worldName), wn);
+        var names = new nint[_world.Count];
         var models = new nint[_world.Count];
-        models[0] = (nint)OwnString(wn);
+        names[0] = (nint)OwnString(wn);
+        models[0] = (nint)_world.World;
+        _modelsByName[worldName] = (nint)_world.World;
         for (int i = 1; i < _world.Count; i++)
-            models[i] = (nint)OwnString(Encoding.Latin1.GetBytes($"*{i}"));
-        _sv.InitPrecache(_progs.Strings, models);
+        {
+            names[i] = (nint)OwnString(Encoding.Latin1.GetBytes($"*{i}"));
+            models[i] = (nint)(_world.Models + i);
+            _modelsByName[$"*{i}"] = models[i];
+        }
+        _sv.InitPrecache(_progs.Strings, names, models);
+        _sv.ModelSource = new Models(this);
+        _sv.Hooks = new Hooks(this);
+        _sv.ClearWorld(_world.World);
 
         _vm = _makeVm(_progs, (nint)_globals, (nint)_edicts, _header);
     }
@@ -406,7 +434,11 @@ public sealed unsafe class VmReplay : IDisposable
         }
     }
 
-    private void Enter()
+    /// <summary>
+    /// An entry into QuakeC. From the engine (<paramref name="portRun"/> false): its changes since the last boundary
+    /// are applied. From the port's own engine code (a touch function the port's SV_LinkEdict runs): checked.
+    /// </summary>
+    private void Enter(bool portRun = false, int portFnum = -1)
     {
         int fnum = I32();
         I32();                              // host_framecount
@@ -414,10 +446,29 @@ public sealed unsafe class VmReplay : IDisposable
         I32(); I32();                       // self, other: in the diff too
         uint seed = (uint)I32();
         double time = F64();
-        Apply();
         Server sv = _sv!;
-        sv.Rand.Srand(seed);                // the engine's draws since the last boundary
-        sv.Time = time;
+        if (portRun)
+        {
+            if (fnum != portFnum)
+                throw Fail($"the port's engine runs {FunctionName(portFnum)}, the reference ran {FunctionName(fnum)}");
+            // Inside a link the replay made for unported code, that code may have drawn from rand and moved the clock
+            // before linking (SV_NewChaseDir, _Host_Frame): the capture's values hold. In the port's own code, the
+            // port's must be the reference's.
+            if (_drivenDepth > 0)
+            {
+                sv.Rand.Srand(seed);
+                sv.Time = time;
+            }
+            else if (sv.Rand.Seed != seed)
+                throw Fail($"entering {FunctionName(fnum)}: rand seed 0x{sv.Rand.Seed:X8}, the reference's 0x{seed:X8}");
+            Check($"the port's engine entering {FunctionName(fnum)}");
+        }
+        else
+        {
+            Apply();
+            sv.Rand.Srand(seed);            // the engine's draws since the last boundary
+            sv.Time = time;
+        }
         bool wasActive = sv.Active;
         sv.Active = state == 1;             // ss_active
         Entries++;
@@ -465,6 +516,16 @@ public sealed unsafe class VmReplay : IDisposable
                 Enter();                    // QuakeC run by a replayed builtin (touch, think)
                 continue;
             }
+            if (k is (byte)'K' or (byte)'U')
+            {
+                if (ported)
+                    throw Fail($"{name} links in the reference (record '{(char)k}'), the port's did not");
+                if (k == (byte)'K')
+                    DriveLink();
+                else
+                    DriveUnlink();
+                continue;
+            }
             if (k != (byte)'R' || U16() != num)
                 throw Fail($"{name}: expected its return record, found '{(char)k}'");
             _p += 12;                       // return[3]: in the diff
@@ -482,6 +543,156 @@ public sealed unsafe class VmReplay : IDisposable
                 throw Fail($"after {name}: sv.time {_sv.Time:R}, the reference's {time:R}");
             Check($"return of {name}");
             return;
+        }
+    }
+
+    /// <summary>A link made by code the port does not have: the port makes it now ('K'; the hooks check the rest).</summary>
+    private void DriveLink()
+    {
+        int e = I32();
+        bool touch = U8() != 0;
+        Apply();
+        _drivingLink = true;
+        _drivenDepth++;
+        try
+        {
+            _sv!.LinkEdict(e, touch);
+        }
+        finally
+        {
+            _drivenDepth--;
+        }
+        if (_drivingLink)
+            throw Fail($"the port's SV_LinkEdict did not reach its capture point for edict {e}");
+    }
+
+    private void DriveUnlink()
+    {
+        int e = I32();
+        _drivingUnlink = true;
+        _sv!.UnlinkEdict(e);
+    }
+
+    private void HookLink(int e, bool touch)
+    {
+        Links++;
+        if (_drivingLink)
+        {
+            _drivingLink = false;
+            return;
+        }
+        byte k = Next();
+        if (k != (byte)'K')
+            throw Fail($"the port links edict {e}, the reference's next record is '{(char)k}'");
+        int re = I32();
+        bool rt = U8() != 0;
+        if (re != e || rt != touch)
+            throw Fail($"the port links edict {e} (touch {touch}), the reference linked edict {re} (touch {rt})");
+        Check($"linking edict {e}");
+    }
+
+    private void HookLinked(int e)
+    {
+        byte k = Next();
+        if (k != (byte)'k')
+            throw Fail($"the port's SV_LinkEdict of edict {e} returns, the reference's next record is '{(char)k}'");
+        int re = I32();
+        if (re != e)
+            throw Fail($"the port's SV_LinkEdict of edict {e} returns, the reference's of edict {re}");
+        EdictHeader* h = _sv!.EdictNum(e);
+        int n = I32();
+        if (n != h->NumLeafs)
+            throw Fail($"edict {e} touches {h->NumLeafs} leafs, in the reference {n}");
+        for (int i = 0; i < n; i++)
+        {
+            short leaf = (short)U16();
+            if (leaf != h->LeafNums[i])
+                throw Fail($"edict {e} leaf {i} is {h->LeafNums[i]}, in the reference {leaf}");
+        }
+        int node = I32();
+        var list = (AreaList)U8();
+        int prev = I32();
+        (int Node, AreaList List) port = _sv.AreaOf(e);
+        if (port.Node != node || port.List != list)
+            throw Fail($"edict {e} is linked in area node {port.Node} ({port.List}), in the reference {node} ({list})");
+        int portPrev = _sv.PreviousInArea(e);
+        if (portPrev != prev)
+            throw Fail($"edict {e} follows edict {portPrev} in its area list (-1: the head), in the reference edict {prev}");
+        Check($"edict {e} linked");
+    }
+
+    private void HookUnlink(int e)
+    {
+        if (_drivingUnlink)
+        {
+            _drivingUnlink = false;
+            return;
+        }
+        byte k = Next();
+        if (k != (byte)'U')
+            throw Fail($"the port unlinks edict {e}, the reference's next record is '{(char)k}'");
+        int re = I32();
+        if (re != e)
+            throw Fail($"the port unlinks edict {e}, the reference unlinked edict {re}");
+    }
+
+    private void HookExecuteProgram(int fnum)
+    {
+        byte k = Next();
+        if (k != (byte)'E')
+            throw Fail($"the port's engine runs {FunctionName(fnum)}, the reference's next record is '{(char)k}'");
+        Enter(portRun: true, portFnum: fnum);
+    }
+
+    private sealed class Hooks(VmReplay r) : IServerHooks
+    {
+        public void ExecuteProgram(int fnum) => r.HookExecuteProgram(fnum);
+        public void Link(int e, bool touchTriggers) => r.HookLink(e, touchTriggers);
+        public void Linked(int e) => r.HookLinked(e);
+        public void Unlink(int e) => r.HookUnlink(e);
+    }
+
+    /// <summary>
+    /// Mod_ForName for the replay: brush models through BrushLoader, alias models with WinQuake's fixed bounds of
+    /// +-16, sprites with +-maxwidth/2 and +-maxheight/2 (integer division) from the sprite header.
+    /// </summary>
+    private sealed class Models(VmReplay r) : IModelSource
+    {
+        public Model* ForName(byte* name)
+        {
+            string n = Encoding.Latin1.GetString(MemoryMarshal.CreateReadOnlySpanFromNullTerminated(name));
+            if (r._modelsByName.TryGetValue(n, out nint known))
+                return (Model*)known;
+            byte[] nb = Encoding.Latin1.GetBytes(n);
+            QFile file = r._files.Find(nb) ?? throw r.Fail($"Mod_NumForName: {n} not found");
+            Model* m;
+            ReadOnlySpan<byte> d = file.Span;
+            if (d[..4].SequenceEqual("IDPO"u8))
+            {
+                m = (Model*)NativeMemory.AllocZeroed((nuint)sizeof(Model));
+                m->Type = ModelType.Alias;
+                r._ownModels.Add((nint)m);
+                m->Mins = new Vec3(-16, -16, -16);
+                m->Maxs = new Vec3(16, 16, 16);
+            }
+            else if (d[..4].SequenceEqual("IDSP"u8))
+            {
+                int width = BinaryPrimitives.ReadInt32LittleEndian(d[16..]), height = BinaryPrimitives.ReadInt32LittleEndian(d[20..]);
+                m = (Model*)NativeMemory.AllocZeroed((nuint)sizeof(Model));
+                r._ownModels.Add((nint)m);
+                m->Type = ModelType.Sprite;
+                m->Mins = new Vec3(-width / 2, -width / 2, -height / 2);
+                m->Maxs = new Vec3(width / 2, width / 2, height / 2);
+            }
+            else
+            {
+                BrushModelSet set = BrushLoader.Load(file, nb);
+                r._otherModels.Add(set);
+                m = set.World;
+            }
+            m->Name.Set(nb);
+            r._modelsByName[n] = (nint)m;
+            return m;
         }
     }
 

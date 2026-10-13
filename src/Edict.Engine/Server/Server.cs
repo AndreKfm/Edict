@@ -17,6 +17,16 @@ public unsafe interface IEngineStrings
 }
 
 /// <summary>
+/// Models by name for precache_model (<c>Mod_ForName (name, true)</c>): brush models with their hulls, alias and
+/// sprite models with the bounds WinQuake gives them. The engine around the server supplies it.
+/// </summary>
+public unsafe interface IModelSource
+{
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    Model* ForName(byte* name);
+}
+
+/// <summary>
 /// The server state the builtins work on (server.h <c>sv</c> and the globals around it), as far as cut 2 has ported
 /// it: the VM and its memory, the rand stream, the clock, cvars, the string temp of ftos/vtos and the precache lists.
 /// Edict headers, area nodes and messages come with steps 3b and 3c.
@@ -24,6 +34,10 @@ public unsafe interface IEngineStrings
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public sealed unsafe partial class Server
 {
+    private static readonly HostErrorException NoPrecache = new("no precache");
+    private static readonly HostErrorException BackwardsMinsMaxs = new("backwards mins/maxs");
+    private readonly Model*[] _models;
+
     public const int MaxModels = 256, MaxSounds = 256;
     public const int StringTempSize = 128;            // pr_string_temp[128]
 
@@ -78,6 +92,9 @@ public sealed unsafe partial class Server
             throw new InvalidOperationException("the port's edict header does not fit the reference's");
         _soundPrecache = new byte*[MaxSounds];
         _modelPrecache = new byte*[MaxModels];
+        _models = new Model*[MaxModels];
+        _areaNodes = new AreaNode[AreaNodes];
+        _linkPrev = _linkNext = null!;     // sized by ClearWorld, when max_edicts is known
     }
 
     /// <summary><c>pr_strings + ofs</c>.</summary>
@@ -96,14 +113,52 @@ public sealed unsafe partial class Server
     /// the world, models 2.. the inline models "*1", "*2", ... (strings that live as long as the map).
     /// </summary>
     [NoAllocUnchecked("map load")]
-    public void InitPrecache(byte* empty, ReadOnlySpan<nint> models)
+    public void InitPrecache(byte* empty, ReadOnlySpan<nint> names, ReadOnlySpan<nint> models)
     {
         Array.Clear(_soundPrecache);
         Array.Clear(_modelPrecache);
+        Array.Clear(_models);
         _soundPrecache[0] = empty;
         _modelPrecache[0] = empty;
-        for (int i = 0; i < models.Length; i++)
-            _modelPrecache[1 + i] = (byte*)models[i];
+        for (int i = 0; i < names.Length; i++)
+        {
+            _modelPrecache[1 + i] = (byte*)names[i];
+            _models[1 + i] = (Model*)models[i];
+        }
+    }
+
+    /// <summary>Where precache_model finds models (Mod_ForName with crash set: a missing model is a Sys_Error).</summary>
+    public IModelSource ModelSource { get; set; } = null!;
+
+    /// <summary>sv.models[i].</summary>
+    public Model* ModelAt(int i) => (uint)i < MaxModels ? _models[i] : null;
+
+    /// <summary>PF_setmodel's lookup: the index of the precached name, or a PR_RunError ("no precache").</summary>
+    public int ModelIndex(byte* m)
+    {
+        int i;
+        for (i = 0; i < MaxModels && _modelPrecache[i] is not null; i++)
+            if (Same(_modelPrecache[i], m))
+                return i;
+        throw Vm.RunError(NoPrecache);
+    }
+
+    /// <summary>
+    /// SetMinMaxSize: mins, maxs and size, then SV_LinkEdict without touching triggers. The rotate flag is ignored as
+    /// in C ("FIXME: implement rotation properly again").
+    /// </summary>
+    public void SetMinMaxSize(int e, in Vec3 min, in Vec3 max)
+    {
+        for (int i = 0; i < 3; i++)
+            if (Vec3.At(min, i) > Vec3.At(max, i))
+                throw Vm.RunError(BackwardsMinsMaxs);
+
+        float* v = Fields(e);
+        *(Vec3*)(v + EntVars.Mins) = min;
+        *(Vec3*)(v + EntVars.Maxs) = max;
+        *(Vec3*)(v + EntVars.Size) = Vec3.Subtract(max, min);
+
+        LinkEdict(e, false);
     }
 
     private static bool Same(byte* a, byte* b) => CString.Strcmp(a, b) == 0;
@@ -136,7 +191,7 @@ public sealed unsafe partial class Server
         throw Vm.RunError(SoundOverflow);
     }
 
-    /// <summary>PF_precache_model's list. Loading the model (Mod_ForName) comes with setmodel, step 3c.</summary>
+    /// <summary>PF_precache_model's list and sv.models: a new name loads its model (Mod_ForName).</summary>
     public void PrecacheModel(byte* s)
     {
         if (Active)
@@ -147,6 +202,9 @@ public sealed unsafe partial class Server
             if (_modelPrecache[i] is null)
             {
                 _modelPrecache[i] = s;
+                _models[i] = ModelSource.ForName(s);
+                if (_clip is not null)
+                    _clip.Models[i] = _models[i];
                 return;
             }
             if (Same(_modelPrecache[i], s))

@@ -114,6 +114,7 @@ public sealed unsafe class ClipWorld : IDisposable
     }
 
     /// <summary><c>sv.models</c>: index to model, null where nothing is precached.</summary>
+    [NoAlloc(Constraints.All)]
     public Model** Models => _models;
 
     /// <summary>

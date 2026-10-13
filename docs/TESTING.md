@@ -112,3 +112,18 @@ that, and found a real difference the replay could not see (which NaN `OP_MUL_V`
 Builtins (cut 2, step 3a): the replay runs the ported builtins inside the captured game (level 2) and the builtin
 fuzz runs them against `pr_builtins[num] ()` in the oracle (level 1). As with the VM, the game alone was not
 enough: cvar values in a game are integers, so `atof` instead of `Q_atof` passed the replay.
+World and movement (cut 2, step 3c): engine code has no seam to swap a known-bad copy in from a test, so R7 there is
+done at source level by `tools/mutate.py`: it copies the tree once, applies one textual change per mutant, builds and
+runs the given test classes, and reports each mutant as detected, survived or a known blind spot (listed in the tool
+with its reason; one that becomes detected is reported so that it can be moved out). A survived mutant, a mutant
+whose text no longer matches or one that does not build makes the run fail.
+
+```sh
+EDICT_ORACLE=<path> python3 -I tools/mutate.py <work dir> [link] [move]
+```
+
+Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock): about 65 s for a full run — build 3 s, engine tests 49 s,
+exact tests 8 s, analyzer tests 6 s. The largest engine classes: `KnownBadVmTests` 21 s, `VmReplayTests` 12 s,
+`TraceGateTests` 12 s, `BuiltinTests` 12 s. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
+they change (0.2 s; 132 s when each ran the whole fuzz). `tools/mutate.py` is not part of the suite (one build per
+mutant).

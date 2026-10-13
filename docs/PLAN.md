@@ -305,6 +305,29 @@ builtin fuzz sets reference headers through `EdictOracle_EdictHeader` and puts E
 (freetime 2 and its neighbours, `sv.time - freetime` at 0.5 and one ulp off, NaN). R7: 8 more builtin mutants
 (alloc without the two-second rule, with a float time difference, from edict 1; free keeping origin; find and
 nextent taking free edicts; findradius with a float centre or taking SOLID_NOT), all detected; 18 in all.
+Steps 3c-1 and 3c-2 done (2026-10-13): the world and movement. `Server/World.cs`: areanodes (`SV_CreateAreaNode`),
+the area lists as index links (prev/next arrays, one solid and one trigger head per node, so that the order of a
+list is C's), `SV_UnlinkEdict`, `SV_LinkEdict` (absmin/absmax, item boxes grown by 15, `SV_FindTouchedLeafs` with
+`MAX_ENT_LEAFS`, `SV_TouchLinks` running touch functions), `ED_Free` now unlinks; `Mathlib`: `BOX_ON_PLANE_SIDE`
+and `BoxOnPlaneSide`. `Server/Move.cs`: `SV_Move` over the hull traces of phase 1 (`SV_ClipMoveToEntity`,
+`SV_MoveBounds`, `SV_ClipToLinks`), `SV_PointContents`, and `sv_move.c` (`SV_CheckBottom`, `SV_movestep`,
+`SV_StepDirection`, `SV_NewChaseDir`, `SV_MoveToGoal`). Builtins setorigin, setsize, setmodel (model bounds from the
+loaded models: brush models from the BSP, alias models and sprites from their headers), traceline, droptofloor,
+walkmove, movetogoal; 36 builtins ported in all. Patch `0004` adds three capture points around linking; capture
+version 6 records `'K'` before `SV_LinkEdict`, `'k'` after it (leafs, area node, list and the previous edict in it)
+and `'U'` at `SV_UnlinkEdict`. The replay links in the port wherever the reference linked: inside a ported builtin
+the port's own code links and the record checks it; for an engine or replayed caller the replay drives the port's
+`SV_LinkEdict` (touch functions inside it run as port code) and checks leafs, node, list and position in the list.
+About 201,000 links and 318,000 ported builtin calls on the 10 maps, all matching. Level 1: a `BoxOnPlaneSide`
+fuzz against the oracle (2·10^6 boxes and planes, planes through box corners, all plane types). R7 at source level
+(`tools/mutate.py`, `docs/TESTING.md`): 13 linking mutants all detected (the order of a solid list only through the
+previous-edict check, the strict comparisons in `BoxOnPlaneSide` only through the fuzz); of 10 movement mutants 6
+detected and 4 known blind spots, each with its reason in the tool: the one-unit margin of `SV_MoveBounds` (only a
+preselection), the missile box (`MOVE_MISSILE` comes from physics), own missiles in `SV_ClipToLinks` (likewise), and
+`SV_NewChaseDir` with a float `abs` (needs two deltas that truncate to the same integer in one call). All four need
+`SV_Move`/`SV_NewChaseDir` fuzzed on a world inside the oracle, which comes with cut 3. Not every candidate was
+bad: `SV_CheckBottom`'s midpoint in float instead of double gives the same bits (halving is exact) and was dropped.
+Step 3c-3 next: `checkclient` (PVS, `PF_newcheckclient`'s state) and `aim`.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)
@@ -371,6 +394,10 @@ per-entity, per-field first-divergence report, not only a frame hash.
 - `0003` (2026-10-13, harness hook): five capture macros and two braces in `PR_ExecuteProgram`, 8 of the 30 hook
   lines. All 10 R9 maps × 4,000 frames hash identically with and without the patch and with and without
   `-edictcapture`; release and ASan write byte-identical capture files.
+- `0004` (2026-10-13, harness hook): `SV_LinkEdict` becomes `SV_LinkEdict_` with a wrapper holding a capture point
+  before and after it (one line covers every exit), one capture point in `SV_UnlinkEdict`, `sv_areanodes` no longer
+  static, the include: 12 lines, 20 of the 30 hook lines used. Hashes of all 10 R9 maps unchanged with and without
+  the patch and `-edictcapture`.
 - State 2026-10-12: `0001` (`COM_FileBase` read before its argument; old/new compared on 21 paths, 0 differences),
   `0002` (string_t offsets, see §A.1). With both, the release build loads LibreQuake `start`, runs the QuakeC spawn
   functions and keeps running headless (client + server, `vid_null`).

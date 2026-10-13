@@ -6,15 +6,19 @@ using System.Runtime.InteropServices;
 namespace Edict.Engine;
 
 /// <summary>
-/// The part of <c>edict_t</c> in front of the progs fields, as far as ported: the free flag and freetime. The port
-/// lays it out its own way inside the reference's header size (docs/adr/D7); area links, leafs and the baseline come
-/// with step 3c.
+/// The part of <c>edict_t</c> in front of the progs fields, as far as ported: the free flag, freetime and the world
+/// leafs the edict touches. The port lays it out its own way inside the reference's header size (docs/adr/D7); the
+/// area link lives in the server's link lists, the baseline comes with messages.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
-public struct EdictHeader
+public unsafe struct EdictHeader
 {
+    public const int MaxEntLeafs = 16;                // MAX_ENT_LEAFS
+
     public int Free;                                  // qboolean
     public float FreeTime;                            // sv.time when the object was freed
+    public int NumLeafs;
+    public fixed short LeafNums[MaxEntLeafs];
 }
 
 /// <summary>Edict allocation and numbering (pr_edict.c, progs.h).</summary>
@@ -94,12 +98,11 @@ public sealed unsafe partial class Server
         return i;
     }
 
-    /// <summary>
-    /// ED_Free: marks the edict free and clears the fields the client sees. Unlinking it from the world (the first
-    /// statement in C) comes with the area nodes in step 3c.
-    /// </summary>
+    /// <summary>ED_Free: unlinks the edict from the world, marks it free and clears the fields the client sees.</summary>
     public void Free(int n)
     {
+        UnlinkEdict(n);         // unlink from world bsp
+
         EdictHeader* ed = EdictNum(n);
         float* v = Fields(n);
 
