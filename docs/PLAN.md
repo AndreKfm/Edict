@@ -492,6 +492,14 @@ Recommendation: stay on `net10.0`. From P1 on, run the benchmark project against
 (`--runtimes net10.0 net11.0`) and the corpus on both. Switch only if the corpus is green on both and the gain on
 `Host_Frame` exceeds 5 % — expected single-digit percent, not a deciding factor. Revisit with .NET 12 (LTS, Nov 2027).
 
+Measured 2026-10-13 (.NET 11 RC1 SDK `11.0.100-rc.1.26425.128`, a copy of the tree retargeted to `net11.0`, C# 15):
+builds without warnings, analyzers included; all gates green (94 engine tests: hull traces, VM replay, VM opcode
+fuzz; 34 Exact tests). Hull trace benchmark (BenchmarkDotNet 0.15.8 in-process on both runtimes, Ryzen 9 3900X):
+.NET 11 is 1.02–1.06× slower than .NET 10.0.9 in every variant (packed: 214.0 vs 209.3 ns on `start`, 246.2 vs
+239.8 on `lq_e0m3`), 0 B on both. No reason to switch; repeat at GA and with a frame benchmark (P4). The run also
+exposed a phase-0 harness race: two Exact test classes reseeded the oracle's `rand` in parallel; .NET 10's timing
+had hidden it. Fixed with a non-parallel collection.
+
 ## H. Licensing
 
 - Edict is GPLv2 (derivative of WinQuake). No relicensing, no dual license.

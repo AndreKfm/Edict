@@ -6,6 +6,7 @@ using static Edict.Exact.Tests.Differential;
 namespace Edict.Exact.Tests;
 
 /// <summary>CCast, CRand and CString against the oracle.</summary>
+[Collection(OracleStateCollection.Name)]
 public sealed class CBasicsTests
 {
     private static readonly float[] FloatEdges =

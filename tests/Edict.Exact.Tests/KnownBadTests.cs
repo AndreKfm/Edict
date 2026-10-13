@@ -9,6 +9,7 @@ namespace Edict.Exact.Tests;
 /// docs/TESTING.md R7: deliberately wrong implementations that the differential comparison must reject, run over the
 /// same inputs the real tests use. A known-bad variant that passes means the suite is blind there.
 /// </summary>
+[Collection(OracleStateCollection.Name)]
 public sealed class KnownBadTests
 {
     private static void MustDiverge(string variant, Func<string?> firstDivergence)
