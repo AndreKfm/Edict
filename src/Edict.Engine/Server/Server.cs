@@ -116,12 +116,14 @@ public sealed unsafe partial class Server
         _checkPvs = new byte[MaxMapLeafs / 8];
         _decompressed = new byte[MaxMapLeafs / 8];
         _linkPrev = _linkNext = null!;     // sized by ClearWorld, when max_edicts is known
+        InitClients();
     }
 
     /// <summary><c>pr_strings + ofs</c>.</summary>
     public byte* String(int ofs) =>
         (uint)ofs < (uint)_numStrings ? Progs.Strings + ofs
         : ofs == StringTempOffset ? _stringTemp
+        : ClientNameAt(ofs) is int c and >= 0 ? Clients[c].NamePtr
         : EngineStrings.Get(ofs);
 
     public float* G(int ofs) => (float*)(Globals + ofs);

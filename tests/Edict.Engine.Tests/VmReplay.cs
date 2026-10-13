@@ -29,7 +29,7 @@ public sealed class ReplayDivergence(string message) : Exception(message);
 public sealed unsafe class VmReplay : IDisposable
 {
     public const int NumBuiltins = 79;      // pr_numbuiltins: pr_builtin[] compiled without QUAKE2
-    private const int Version = 8;
+    private const int Version = 9;
 
     private readonly byte[] _d;
     private int _p;
@@ -61,6 +61,16 @@ public sealed unsafe class VmReplay : IDisposable
     private bool _drivingLink, _drivingUnlink;  // the next Link/Unlink hook is the one the replay itself started
     private int _drivenDepth;                   // inside a link the replay made for code the port does not have
     public long Links { get; private set; }
+
+    private int[] _clientNames = [];             // the reference's offsets of the client names, from the map record
+    private readonly bool _portClients;
+    private readonly TapeNet? _tape;
+    private Client[]? _clients;                  // svs.clients: they outlive a map
+    private bool _checkFrameStart;               // the next engine entry follows the port's server frame start
+    private int _frameStart;                     // its frame
+
+    /// <summary>Server frames whose start (connect, messages, commands, movement) ran as the port's code.</summary>
+    public int PortFrameStarts { get; private set; }
 
     // the reference's hashes of the same run (.edh next to the capture): the spawn records are checked at 'S'
     private readonly EdhFile _edh;
@@ -115,10 +125,17 @@ public sealed unsafe class VmReplay : IDisposable
 
     /// <param name="ported">Which builtins run as the port's code; default: all the port has.</param>
     /// <param name="call">How a ported builtin runs; default <see cref="Builtins.Call"/> (known-bad variants replace it).</param>
+    /// <param name="clients">
+    /// The port runs each server frame's start itself (cut 3, step 2): connecting, the tape's messages, the host
+    /// commands, the clients' movement; checked at the frame's next engine entry.
+    /// </param>
     public VmReplay(string file, QFileSystem files, Func<Progs, nint, nint, int, IVm>? makeVm = null, Func<int, bool>? ported = null,
-                    Action<Server, int>? call = null)
+                    Action<Server, int>? call = null, bool clients = false)
     {
         _call = call ?? Builtins.Call;
+        _portClients = clients;
+        if (clients)
+            _tape = new TapeNet(Path.ChangeExtension(file, ".etp"));
         _makeVm = makeVm ?? ((p, g, e, h) => new PortVm(_sv!.Vm));
         _ported = ported ?? Builtins.Has;
         _file = file;
@@ -234,7 +251,7 @@ public sealed unsafe class VmReplay : IDisposable
     /// </summary>
     private void ServerFrame()
     {
-        I32();                              // host_framecount
+        int frame = I32();                  // host_framecount
         FrameTime = F64();
         uint seed = (uint)I32();
         double time = F64();
@@ -242,6 +259,48 @@ public sealed unsafe class VmReplay : IDisposable
         _sv!.Rand.Srand(seed);
         _sv.Time = time;
         ServerFrames++;
+        if (_portClients)
+        {
+            _sv.FrameTime = FrameTime;
+            _tape!.FrameCount = frame;
+            _where.Push($"server frame {frame}");
+            _sv.ServerFrameStart();
+            _where.Pop();
+            _checkFrameStart = true;
+            _frameStart = frame;
+            PortFrameStarts++;
+        }
+    }
+
+    /// <summary>
+    /// After the port's server frame start, before the next engine entry's changes are applied: every word the port
+    /// changed since the last boundary must have the value the reference recorded, and every change the reference made
+    /// to a client edict the port must have made too (the rest, the physics' globals before StartFrame, is applied).
+    /// </summary>
+    private void CheckFrameStart()
+    {
+        int p = _p;
+        int numEdicts = (int)U32At(p);
+        int n = (int)U32At(p + 4);
+        var recorded = new Dictionary<int, int>(n);
+        for (int i = 0; i < n; i++)
+            recorded[(int)U32At(p + 8 + 8 * i)] = (int)U32At(p + 12 + 8 * i);
+        int clientFirst = _numGlobals + _entityFields, clientEnd = _numGlobals + (1 + _sv!.MaxClients) * _entityFields;
+        int end = _numGlobals + Math.Max(numEdicts, _sv.NumEdicts) * _entityFields;
+        for (int w = 0; w < end; w++)
+        {
+            int port = Word(w), before = _shadow[w];
+            bool has = recorded.TryGetValue(w, out int rec);
+            if (!VmOpcodeFuzz.Same((uint)port, (uint)before, nanClass: true))
+            {
+                if (!has)
+                    throw Fail($"the port's server frame {_frameStart} start changed {WordName(w)} to {Value(port)} (before: {Value(before)}); the reference did not change it");
+                if (!VmOpcodeFuzz.Same((uint)port, (uint)rec, nanClass: true))
+                    throw Fail($"the port's server frame {_frameStart} start set {WordName(w)} to {Value(port)}, the reference to {Value(rec)} (before: {Value(before)})");
+            }
+            else if (has && w >= clientFirst && w < clientEnd && !VmOpcodeFuzz.Same((uint)rec, (uint)before, nanClass: true))
+                throw Fail($"the reference's server frame {_frameStart} start set {WordName(w)} to {Value(rec)}, the port left it at {Value(before)}");
+        }
     }
 
     private void Name()
@@ -279,8 +338,10 @@ public sealed unsafe class VmReplay : IDisposable
             throw new InvalidDataException($"{file}: no map record first");
         string map = Encoding.Latin1.GetString(d, p, 64).TrimEnd('\0');
         p += 64;
-        int header = I(p + 12), maxClients = I(p + 28), numCvars = I(p + 32);
-        p += 36;
+        int header = I(p + 12), maxClients = I(p + 28);
+        p += 32 + 4 * maxClients;           // then the client name offsets (version 9)
+        int numCvars = I(p);
+        p += 4;
         var cvars = new List<(byte[], byte[])>();
         for (int i = 0; i < numCvars; i++)
             cvars.Add((Z(), Z()));
@@ -354,6 +415,9 @@ public sealed unsafe class VmReplay : IDisposable
         _numStrings = I32();
         int stringTempOffset = I32();
         int maxClients = I32();
+        _clientNames = new int[maxClients];
+        for (int i = 0; i < maxClients; i++)
+            _clientNames[i] = I32();        // svs.clients[i].name - pr_strings: where netname points
         int numCvars = I32();
         var cvars = new List<(byte[], byte[])>();
         for (int i = 0; i < numCvars; i++)
@@ -385,6 +449,11 @@ public sealed unsafe class VmReplay : IDisposable
             MaxEdicts = maxEdicts,
             MaxClients = maxClients,
         };
+        if (_clients is null || _clients.Length != maxClients)
+            _clients = [.. Enumerable.Range(0, maxClients).Select(_ => new Client())];
+        _sv.Clients = _clients;
+        _sv.SetClientNameOffsets(_clientNames);
+        _sv.Net = _tape;
 
         // SV_SpawnServer's precache entries: "" first, then the world and its inline models
         string worldName = $"maps/{_map}.bsp";
@@ -594,6 +663,11 @@ public sealed unsafe class VmReplay : IDisposable
         }
         else
         {
+            if (_checkFrameStart)
+            {
+                _checkFrameStart = false;
+                CheckFrameStart();
+            }
             Apply();
             sv.Rand.Srand(seed);            // the engine's draws since the last boundary
             sv.Time = time;

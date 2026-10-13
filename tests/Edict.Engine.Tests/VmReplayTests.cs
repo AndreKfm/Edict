@@ -33,4 +33,26 @@ public sealed class VmReplayTests(ITestOutputHelper output)
         output.WriteLine(stats);
         Assert.True(replay.Entries > 0 && replay.BuiltinCalls > 0, "the capture replayed nothing: " + stats);
     }
+
+    /// <summary>
+    /// Cut 3, step 2: the port runs the start of every server frame (new clients, the tape's messages, the host
+    /// commands, SV_ClientThink); what it changed must be what the reference recorded by the frame's next entry.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(MapNames))]
+    public void Server_frame_start_matches_the_reference(string map)
+    {
+        using var files = new QFileSystem(TraceCorpus.DataDirectory);
+        using var replay = new VmReplay(Path.Combine(VmReplay.Directory, map + ".ecp"), files, clients: true);
+        try
+        {
+            replay.Run();
+        }
+        catch (ReplayDivergence d)
+        {
+            Assert.Fail("first divergence: " + d.Message);
+        }
+        output.WriteLine($"{map}: {replay.PortFrameStarts} server frame starts run by the port, {replay.Entries} engine entries");
+        Assert.True(replay.PortFrameStarts > 0, "no server frame ran");
+    }
 }

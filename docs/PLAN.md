@@ -413,6 +413,23 @@ entry, 10 maps × 4,000 frames): entity-frames by movetype none 2,403,973, step 
 1,068,041, noclip 49,135, walk 27,726 (the player), bounce 4,729, fly 2,157, flymissile 491; anglenoclip and
 angleclip never. The player walks fewer than 4,000 frames where it dies: QuakeC's `localcmd ("restart")` respawns the
 map, and the open-loop tape sends no new `spawn`, so the client stays connected but not spawned.
+Step 2 done (2026-10-13): `Server/Clients.cs` — `client_t` (clients outlive a map, as svs.clients),
+`SV_CheckForNewClients`, `SV_ConnectClient` (SetNewParms), `SV_SendServerinfo`, `SV_RunClients`,
+`SV_ReadClientMessage` and `SV_ReadClientMove`, `Cmd_TokenizeString` and the client commands of the tape
+(`prespawn`, `name`, `color`, `spawn` with ClientConnect and PutClientInServer, `begin`), `SV_WriteClientdataToMessage`
+(its state: damage and fixangle cleared, idealpitch) and `SV_SetIdealPitch`; `Server/User.cs` — `sv_user.c`
+(`SV_ClientThink`, air, water and noclip moves, friction, acceleration) and `V_CalcRoll`; `Common/SizeBuf.cs` —
+`sizebuf_t` with `MSG_Write*`/`MSG_Read*`, written in full because overflows are state; `Edict.Harness/TapeNet.cs`
+— the tape driver. Two things found on the way: C's `SV_ReadClientMessage` never tests its `while (ret == 1)` (every
+message ends in `goto nextmsg`), so it reads all pending messages; and `netname` holds the offset of the client's
+name buffer, which the capture now records per map (capture version 9) so that the port uses the reference's offset
+and copies of netname compare word for word. Gate (`VmReplayTests.Server_frame_start_matches_the_reference`): at
+every `'H'` record the port runs the frame's start itself on the run's tape; at the frame's next engine entry every
+word the port changed must be the recorded value and every change the reference made to a client edict the port
+must have made. 4,000 frames on each of the 10 maps, green on the first run, Windows and Linux. R7 (`clients`, 25
+mutants): 18 detected; 7 known blind spots, each with its reason in the tool: the tapes never send an upmove, a
+color other than 0 0, or a backward walk out of a teleporter, and SV_WriteClientdataToMessage runs only once per spawn
+until SV_SendClientMessages is ported (damage, idealpitch).
 
 ## D. Effort at 7 h/week (calendar weeks)
 
