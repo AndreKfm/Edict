@@ -12,19 +12,18 @@
 import os, shutil, subprocess, sys
 
 # group: (test classes, [(name, file, old, new), ...])
-# Not a known-bad variant, shown rather than assumed: SV_CheckBottom's midpoint (mins + maxs)*0.5 in float instead of
-# double. Halving is exact in both, and rounding the exact value to float gives the same bits (denormals included).
+# Not known-bad variants, shown rather than assumed:
+# - SV_CheckBottom's midpoint (mins + maxs)*0.5 in float instead of double. Halving is exact in both, and rounding the
+#   exact value to float gives the same bits (denormals included).
+# - PF_checkclient's interval with > instead of >=: sv.time - sv.lastchecktime == 0.1 cannot hold. 0.1 as a double is
+#   an odd multiple of 2^-55; with sv.time >= 1 (it starts at 1) the difference is exact and a multiple of 2^-52.
 
 # Known blind spots: mutants the gates do not detect yet, each with the reason; reported, not counted as failures.
 # They are run like the others, so that one that becomes detected shows (then move it out of here).
 KNOWN = {
-    'MoveBounds without the unit': 'the move box only preselects; absmin/absmax are already one unit larger. Needs a '
-        'SV_Move fuzz on a world in the oracle (cut 3)',
-    'missile box 14': 'MOVE_MISSILE comes from SV_PushEntity (physics, not ported yet); the ported callers never pass it',
-    'ClipToLinks clips against own missiles': 'missiles move in physics (not ported); a traceline through its own '
-        'missile does not occur in the captures',
-    'NewChaseDir with a float abs': 'needs |deltax| and |deltay| that truncate to the same int and rand () & 1 == 0 in the '
-        'same call; not in the captures. Needs a SV_NewChaseDir fuzz on a world in the oracle (cut 3)',
+    'aim: target centre in float': 'equivalent except on denormals: origin + 0.5*(mins + maxs) rounded once from double '
+        'is the correctly rounded float sum (53 >= 2*24 + 2 bits make the double rounding innocuous), and halving in float '
+        'is exact unless the sum is denormal. Needs denormal coordinates with an odd last bit',
 }
 MUTANTS = {
     'link': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.BoxOnPlaneSideTests'], [
@@ -55,7 +54,7 @@ MUTANTS = {
         ('free unlinks after clearing', 'src/Edict.Engine/Server/Edicts.cs',
          'UnlinkEdict(n);         // unlink from world bsp\n', ''),
     ]),
-    'move': (['Edict.Engine.Tests.VmReplayTests'], [
+    'move': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.WorldFuzzTests'], [
         ('ClipToLinks: <= keeps the later entity', 'src/Edict.Engine/Server/Move.cs',
          'trace.Fraction < clip.Trace.Fraction', 'trace.Fraction <= clip.Trace.Fraction'),
         ('MoveBounds without the unit', 'src/Edict.Engine/Server/Move.cs',
@@ -77,6 +76,36 @@ MUTANTS = {
          "if (((int*)t)[EntVars.Owner] == clip.PassEdict * EdictSize)\n                    continue;   // don't clip against own missiles", ''),
         ('ClipToLinks: points interact', 'src/Edict.Engine/Server/Move.cs',
          'if (clip.PassEdict >= 0 && Fields(clip.PassEdict)[EntVars.Size] != 0 && t[EntVars.Size] == 0)\n                continue;   // points never interact', ''),
+    ]),
+    'check': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.WorldFuzzTests'], [
+        ('PointInLeaf: d >= 0 goes to the front', 'src/Edict.Engine/Server/CheckClient.cs',
+         'if (d > 0)', 'if (d >= 0)'),
+        ('checkclient: leaf index without the -1', 'src/Edict.Engine/Server/CheckClient.cs',
+         'int l = PointInLeaf(view) - 1;', 'int l = PointInLeaf(view);'),
+        ('checkclient: PVS bits from the top', 'src/Edict.Engine/Server/CheckClient.cs',
+         '(_checkPvs[l >> 3] & (1 << (l & 7)))', '(_checkPvs[l >> 3] & (0x80 >> (l & 7)))'),
+        ('checkclient: lastchecktime in float', 'src/Edict.Engine/Server/CheckClient.cs',
+         'LastCheckTime = Time;', 'LastCheckTime = (float)Time;'),
+        ('checkclient: health < 0', 'src/Edict.Engine/Server/CheckClient.cs',
+         '|| Fields(ent)[EntVars.Health] <= 0)', '|| Fields(ent)[EntVars.Health] < 0)'),
+        ('newcheckclient: notarget ignored', 'src/Edict.Engine/Server/CheckClient.cs',
+         'if ((CCast.I32(f[EntVars.Flags]) & FlNoTarget) != 0)\n                continue;', ''),
+        ('newcheckclient: PVS from the origin', 'src/Edict.Engine/Server/CheckClient.cs',
+         'Vec3 org = Vec3.Add(*(Vec3*)(v + EntVars.Origin), *(Vec3*)(v + EntVars.ViewOfs));',
+         'Vec3 org = *(Vec3*)(v + EntVars.Origin);'),
+        ('LeafPvs: zero runs one short', 'src/Edict.Engine/Server/CheckClient.cs',
+         'int c = vis[i + 1];', 'int c = vis[i + 1] - 1;'),
+        ('aim: start 16 up', 'src/Edict.Engine/Server/Builtins.cs',
+         'start.Z += 20;', 'start.Z += 16;'),
+        ('aim: <= keeps the later target', 'src/Edict.Engine/Server/Builtins.cs',
+         'if (dist < bestdist)', 'if (dist <= bestdist)'),
+        ('aim: pitch kept', 'src/Edict.Engine/Server/Builtins.cs',
+         '            end.Z = dir.Z;\n', ''),
+        ('aim: no straight trace', 'src/Edict.Engine/Server/Builtins.cs',
+         'if (tr.Ent >= 0 && sv.Fields(tr.Ent)[EntVars.Takedamage] == DamageAim', 'if (false && tr.Ent >= 0 && sv.Fields(tr.Ent)[EntVars.Takedamage] == DamageAim'),
+        ('aim: target centre in float', 'src/Edict.Engine/Server/Builtins.cs',
+         'end.X = (float)(cv[EntVars.Origin] + 0.5 * (cv[EntVars.Mins] + cv[EntVars.Maxs]));',
+         'end.X = cv[EntVars.Origin] + 0.5f * (cv[EntVars.Mins] + cv[EntVars.Maxs]);'),
     ]),
 }
 

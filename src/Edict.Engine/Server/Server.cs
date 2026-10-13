@@ -94,6 +94,8 @@ public sealed unsafe partial class Server
         _modelPrecache = new byte*[MaxModels];
         _models = new Model*[MaxModels];
         _areaNodes = new AreaNode[AreaNodes];
+        _checkPvs = new byte[MaxMapLeafs / 8];
+        _decompressed = new byte[MaxMapLeafs / 8];
         _linkPrev = _linkNext = null!;     // sized by ClearWorld, when max_edicts is known
     }
 

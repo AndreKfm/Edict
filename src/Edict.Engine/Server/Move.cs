@@ -411,7 +411,7 @@ public sealed unsafe partial class Server
     }
 
     /// <summary>SV_NewChaseDir: rand draws as in C, the first one on every call.</summary>
-    private void NewChaseDir(int actor, int enemy, float dist)
+    internal void NewChaseDir(int actor, int enemy, float dist)
     {
         float* a = Fields(actor);
         float d1, d2, tdir;

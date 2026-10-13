@@ -14,7 +14,7 @@ namespace Edict.Engine;
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public static unsafe class Builtins
 {
-    public const int SetOrigin = 2, SetModel = 3, SetSize = 4;
+    public const int SetOrigin = 2, SetModel = 3, SetSize = 4, CheckClient = 17, Aim = 44;
     public const int TraceLine = 16, WalkMove = 32, DropToFloor = 34, CheckBottom = 40, PointContents = 41, MoveToGoal = 67;
     public const int MakeVectors = 1, Random = 7, Normalize = 9, Vlen = 12, VectoYaw = 13, PrecacheSound = 19,
         PrecacheModel = 20, Ftos = 26, Vtos = 27, Rint = 36, Floor = 37, Ceil = 38, Fabs = 43, Cvar = 45,
@@ -29,7 +29,7 @@ public static unsafe class Builtins
         MakeVectors or Random or Normalize or Vlen or VectoYaw or PrecacheSound or PrecacheModel or Ftos or Vtos or Rint
             or Floor or Ceil or Fabs or Cvar or ChangeYaw or VectoAngles or PrecacheFile or CvarSet or PrecacheModel2
             or PrecacheSound2 or PrecacheFile2 or Spawn or Remove or Find or FindRadius or NextEnt or MakeStatic
-            or SetOrigin or SetModel or SetSize
+            or SetOrigin or SetModel or SetSize or CheckClient or Aim
             or TraceLine or WalkMove or DropToFloor or CheckBottom or PointContents or MoveToGoal => true,
         _ => false,
     };
@@ -72,6 +72,8 @@ public static unsafe class Builtins
             case CheckBottom: *sv.G(OfsReturn) = sv.CheckBottom(GEdict(sv, OfsParm0)) ? 1 : 0; break;
             case PointContents: *sv.G(OfsReturn) = sv.PointContents(*V(sv, OfsParm0)); break;
             case MoveToGoal: sv.MoveToGoal(); break;
+            case CheckClient: ReturnEdict(sv, sv.CheckClient()); break;
+            case Aim: PF_aim(sv); break;
             default: throw sv.Vm.RunError(NotPorted);
         }
     }
@@ -407,6 +409,90 @@ public static unsafe class Builtins
         *V(sv, GlobalVars.TracePlaneNormal) = trace.Plane.Normal;
         *sv.G(GlobalVars.TracePlaneDist) = trace.Plane.Dist;
         sv.Globals[GlobalVars.TraceEnt] = trace.Ent >= 0 ? trace.Ent * sv.EdictSize : 0;
+    }
+
+    private const float DamageAim = 2;                // DAMAGE_AIM
+
+    /// <summary>
+    /// vector aim (entity, missilespeed): v_forward if a trace along it hits something to aim at, else the direction
+    /// to the target closest to v_forward (cosine at least sv_aim) that a trace reaches, with v_forward's pitch
+    /// replaced; teammates are skipped under teamplay. The target's centre is in double:
+    /// <c>origin + 0.5*(mins + maxs)</c>.
+    /// </summary>
+    private static void PF_aim(Server sv)
+    {
+        int ent = GEdict(sv, OfsParm0);
+        float* ev = sv.Fields(ent);
+        Vec3 start, dir, end, bestdir;
+        Trace tr;
+        float dist, bestdist;
+        int bestent;
+        Vec3 forward = *V(sv, GlobalVars.VForward);
+        float teamplay, aim;
+        fixed (byte* name = "teamplay\0"u8)
+            teamplay = sv.Cvars.Value(name);
+        fixed (byte* name = "sv_aim\0"u8)
+            aim = sv.Cvars.Value(name);
+
+        start = *(Vec3*)(ev + EntVars.Origin);
+        start.Z += 20;
+
+        // try sending a trace straight
+        dir = forward;
+        end = new Vec3(start.X + 2048 * dir.X, start.Y + 2048 * dir.Y, start.Z + 2048 * dir.Z);
+        tr = sv.Move(start, default, default, end, Server.MoveNormal, ent);
+        if (tr.Ent >= 0 && sv.Fields(tr.Ent)[EntVars.Takedamage] == DamageAim
+            && (teamplay == 0 || ev[EntVars.Team] <= 0 || ev[EntVars.Team] != sv.Fields(tr.Ent)[EntVars.Team]))
+        {
+            *V(sv, OfsReturn) = forward;
+            return;
+        }
+
+        // try all possible entities
+        bestdir = dir;
+        bestdist = aim;
+        bestent = -1;
+
+        for (int check = 1; check < sv.NumEdicts; check++)
+        {
+            float* cv = sv.Fields(check);
+            if (cv[EntVars.Takedamage] != DamageAim)
+                continue;
+            if (check == ent)
+                continue;
+            if (teamplay != 0 && ev[EntVars.Team] > 0 && ev[EntVars.Team] == cv[EntVars.Team])
+                continue;   // don't aim at teammate
+            end.X = (float)(cv[EntVars.Origin] + 0.5 * (cv[EntVars.Mins] + cv[EntVars.Maxs]));
+            end.Y = (float)(cv[EntVars.Origin + 1] + 0.5 * (cv[EntVars.Mins + 1] + cv[EntVars.Maxs + 1]));
+            end.Z = (float)(cv[EntVars.Origin + 2] + 0.5 * (cv[EntVars.Mins + 2] + cv[EntVars.Maxs + 2]));
+            dir = Vec3.Subtract(end, start);
+            Mathlib.VectorNormalize(ref dir);
+            dist = Vec3.Dot(dir, *V(sv, GlobalVars.VForward));
+            if (dist < bestdist)
+                continue;   // to far to turn
+            tr = sv.Move(start, default, default, end, Server.MoveNormal, ent);
+            if (tr.Ent == check)
+            {   // can shoot at this one
+                bestdist = dist;
+                bestent = check;
+            }
+        }
+
+        if (bestent >= 0)
+        {
+            float* bv = sv.Fields(bestent);
+            dir = Vec3.Subtract(*(Vec3*)(bv + EntVars.Origin), *(Vec3*)(ev + EntVars.Origin));
+            dist = Vec3.Dot(dir, *V(sv, GlobalVars.VForward));
+            Vec3 f = *V(sv, GlobalVars.VForward);
+            end = new Vec3(f.X * dist, f.Y * dist, f.Z * dist);
+            end.Z = dir.Z;
+            Mathlib.VectorNormalize(ref end);
+            *V(sv, OfsReturn) = end;
+        }
+        else
+        {
+            *V(sv, OfsReturn) = bestdir;
+        }
     }
 
     /// <summary>float droptofloor (): self moves down by up to 256 onto what is below it.</summary>

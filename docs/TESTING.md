@@ -119,11 +119,18 @@ with its reason; one that becomes detected is reported so that it can be moved o
 whose text no longer matches or one that does not build makes the run fail.
 
 ```sh
-EDICT_ORACLE=<path> python3 -I tools/mutate.py <work dir> [link] [move]
+EDICT_ORACLE=<path> python3 -I tools/mutate.py <work dir> [link] [move] [check]
 ```
 
-Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock): about 65 s for a full run — build 3 s, engine tests 49 s,
-exact tests 8 s, analyzer tests 6 s. The largest engine classes: `KnownBadVmTests` 21 s, `VmReplayTests` 12 s,
-`TraceGateTests` 12 s, `BuiltinTests` 12 s. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
+The game alone was again not enough for linking, movement and the PVS: R7 found blind spots where the tapes never go
+(missiles against monsters, owners, ties between targets, notarget clients). Level 1 got a world for that: the oracle
+loads the map itself (`EdictOracle_LoadWorld`) and `WorldFuzzTests` drives the reference's `SV_LinkEdict`,
+`SV_Move`, `Mod_PointInLeaf`, `Mod_LeafPVS`, `PF_checkclient`, `PF_aim` and `SV_NewChaseDir` on it and the port's on
+the same edicts. It reports how often it reached the outcomes that matter (traces that hit an entity, checkclient
+finding a client, aim turning to a target, a chasing monster moving), so that a green run can be judged.
+
+Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after step 3c-3): about 77 s for a full run — build 6 s,
+engine tests 60 s (124 tests), exact tests 8 s, analyzer tests 3 s. The largest engine classes: `KnownBadVmTests`
+25 s, `VmReplayTests` 16 s, `TraceGateTests` 12 s, `BuiltinTests` 12 s; `WorldFuzzTests` 2 s. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
 they change (0.2 s; 132 s when each ran the whole fuzz). `tools/mutate.py` is not part of the suite (one build per
-mutant).
+mutant; all 36 mutants of the three groups in 449 s).

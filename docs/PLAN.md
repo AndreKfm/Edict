@@ -324,10 +324,34 @@ fuzz against the oracle (2·10^6 boxes and planes, planes through box corners, a
 previous-edict check, the strict comparisons in `BoxOnPlaneSide` only through the fuzz); of 10 movement mutants 6
 detected and 4 known blind spots, each with its reason in the tool: the one-unit margin of `SV_MoveBounds` (only a
 preselection), the missile box (`MOVE_MISSILE` comes from physics), own missiles in `SV_ClipToLinks` (likewise), and
-`SV_NewChaseDir` with a float `abs` (needs two deltas that truncate to the same integer in one call). All four need
-`SV_Move`/`SV_NewChaseDir` fuzzed on a world inside the oracle, which comes with cut 3. Not every candidate was
-bad: `SV_CheckBottom`'s midpoint in float instead of double gives the same bits (halving is exact) and was dropped.
-Step 3c-3 next: `checkclient` (PVS, `PF_newcheckclient`'s state) and `aim`.
+`SV_NewChaseDir` with a float `abs` (needs two deltas that truncate to the same integer in one call). All four needed
+`SV_Move`/`SV_NewChaseDir` fuzzed on a world inside the oracle; that came with step 3c-3 and detects all four. Not
+every candidate was bad: `SV_CheckBottom`'s midpoint in float instead of double gives the same bits (halving is
+exact) and was dropped.
+Step 3c-3 done (2026-10-13): `Server/CheckClient.cs` — `Mod_PointInLeaf`, `Mod_DecompressVis`/`Mod_LeafPVS` (stops
+with an error where C would read past the visibility lump or write past its buffer), `PF_newcheckclient` and
+`PF_checkclient` with `sv.lastcheck`, `sv.lastchecktime` (double) and `checkpvs` as server state; `PF_aim` (the
+target's centre in double, teamplay and `sv_aim` as cvar values), `Mathlib.VectorNormalize`. 38 builtins ported.
+Level 2: the replay runs both as port code, about 606,000 ported builtin calls on the 10 maps, all matching;
+`checkclient` returns a client in 4,344 of its 287,740 calls, `aim` is called 163 times. That was not enough: of 14
+mutants the replay detected 7. Level 1 therefore got a world (oracle version 3, new entry points only, no hook
+lines): `EdictOracle_LoadWorld` loads a map with `Mod_LoadBrushModel` onto the oracle's own hunk (with
+`COM_Init`'s byte order setup, which the loader reads through) and runs `SV_ClearWorld`; `EdictOracle_LinkEdict`,
+`EdictOracle_Move`, `EdictOracle_PointInLeaf`, `EdictOracle_LeafPvs`, `EdictOracle_CheckState`,
+`EdictOracle_NewChaseDir` and `EdictOracle_AimCvars` call the reference's code on it. `WorldFuzzTests`, per map:
+the PVS of every leaf, 40,000 `Mod_PointInLeaf` points (half on node planes), then 40 rounds of 23 random entities
+(all solid types, brush models, items, monsters, owners, free edicts) linked on both sides, with 1,500 `SV_Move`
+calls, 150 `checkclient` calls (notarget, dead and free clients, the state at the 0.1 s boundary), 60 `aim` calls
+(teamplay, `sv_aim` from -1 to 1, two targets at the same angle) and up to 40 `SV_NewChaseDir` calls (deltas that
+truncate alike) per round; 2 s for all maps. It found no difference in the port; the two failures on the way were
+in the harness (the byte order pointers, a port header not reset like the reference's). R7 (`tools/mutate.py`, groups `move`
+and `check` now include the world fuzz): link 13 of 13, move 10 of 10 detected (the four blind spots of 3c-2
+included); check 12 of 13 detected, and one known blind spot: `aim`'s target centre in float differs only on
+denormal coordinates (rounding the double sum to float is innocuous, 53 >= 2·24 + 2, and halving is exact otherwise).
+Two candidates were shown not to be bad and dropped: `checkclient`'s interval with `>` instead of `>=` (0.1 as a
+double is an odd multiple of 2^-55, and with `sv.time` >= 1 the difference is a multiple of 2^-52, so the two
+never meet), and in the fuzz itself two targets mirrored sideways (`aim` drops the sideways component, so they give
+the same answer; the second target now sits above `v_forward` instead).
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)

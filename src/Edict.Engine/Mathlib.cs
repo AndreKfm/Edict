@@ -21,6 +21,28 @@ public static class Mathlib
         return (float)Math.Sqrt(length);
     }
 
+    /// <summary>
+    /// <c>VectorNormalize</c>: the sum of squares in float, <c>sqrt</c> in double stored to float, then each component
+    /// times <c>1/length</c> in float. Returns the length; a zero vector stays as it is.
+    /// </summary>
+    public static float VectorNormalize(ref Vec3 v)
+    {
+        float length, ilength;
+
+        length = v.X * v.X + v.Y * v.Y + v.Z * v.Z;
+        length = (float)Math.Sqrt(length);
+
+        if (length != 0)
+        {
+            ilength = 1 / length;
+            v.X *= ilength;
+            v.Y *= ilength;
+            v.Z *= ilength;
+        }
+
+        return length;
+    }
+
     private static readonly SysErrorException BopsError = new("BoxOnPlaneSide:  Bad signbits");
 
     /// <summary>
