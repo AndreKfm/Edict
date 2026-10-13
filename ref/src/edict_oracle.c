@@ -16,7 +16,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	5
+#define ORACLE_VERSION	6
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);
@@ -230,7 +230,8 @@ extern byte		checkpvs[MAX_MAP_LEAFS/8];	// pr_cmds.c
 
 static model_t	oracle_world;
 static int		oracle_mark = -1;
-static char		*oracle_hunk_strings;	// a pr_strings on the hunk: string_t offsets to hunk strings must fit an int
+static char		*oracle_hunk_strings;
+static int		oracle_progs_mark = -1;	// above a progs image (EdictOracle_Progs): a world loaded after it keeps it	// a pr_strings on the hunk: string_t offsets to hunk strings must fit an int
 
 // The oracle's own hunk, set up once (with COM_Init's byte order setup, which the model loader reads through);
 // oracle_mark is the low mark above Memory_Init's zone. -1 if there is no memory.
@@ -264,7 +265,7 @@ EDICT_EXPORT int EdictOracle_LoadWorld (void *bsp, const char *name)
 
 	if (OracleHunk () < 0)
 		return -1;
-	Hunk_FreeToLowMark (oracle_mark);
+	Hunk_FreeToLowMark (oracle_progs_mark >= 0 ? oracle_progs_mark : oracle_mark);	// a progs loaded first stays
 	memset (&oracle_world, 0, sizeof (oracle_world));
 	strcpy (oracle_world.name, name);
 	COM_FileBase (oracle_world.name, loadname);
@@ -423,7 +424,6 @@ EDICT_EXPORT int EdictOracle_ParseEpair (int type, char *s, float *out, char *te
 	return r;
 }
 
-static int		oracle_progs_mark = -1;
 
 // A progs.dat image copied onto the oracle's hunk and set up as PR_LoadProgs points into it (little-endian, so no
 // swapping), for ED_ParseEdict's field and function lookups. Frees what the hunk held above the world's mark.
@@ -471,3 +471,62 @@ EDICT_EXPORT int EdictOracle_String (int ofs, char *out, int size)
 
 // Frees the strings ED_ParseEdict allocated since EdictOracle_Progs.
 EDICT_EXPORT void EdictOracle_ProgsReset (void) { Hunk_FreeToLowMark (oracle_progs_mark); }
+
+/*
+==============================================================================
+Physics on a world (level 1 for sv_phys.c)
+
+SV_Physics itself on caller edicts and globals, with the world of EdictOracle_LoadWorld and the progs image of
+EdictOracle_Progs (loaded first) for the QuakeC it calls: the caller points every function it calls (StartFrame,
+PlayerPreThink, PlayerPostThink, think, touch, blocked) at a function that does nothing.
+==============================================================================
+*/
+
+extern cvar_t	sv_gravity, sv_maxvelocity, sv_nostep;	// sv_phys.c
+extern edict_t	*sv_player;							// sv_user.c
+
+static client_t	oracle_clients[MAX_SCOREBOARD];
+static byte		oracle_datagram[MAX_DATAGRAM];
+
+// maxclients client slots, active as given; the cvar values SV_Physics reads (nothing registers them here).
+EDICT_EXPORT void EdictOracle_PhysicsSetup (int maxclients, int *active, float gravity, float maxvelocity, float nostep)
+{
+	int		i;
+
+	memset (oracle_clients, 0, sizeof (oracle_clients));
+	for (i = 0 ; i < maxclients ; i++)
+		oracle_clients[i].active = active[i];
+	svs.clients = oracle_clients;
+	svs.maxclients = maxclients;
+	sv_gravity.value = gravity;
+	sv_maxvelocity.value = maxvelocity;
+	sv_nostep.value = nostep;
+	memset (sv.sound_precache, 0, sizeof (sv.sound_precache));	// SV_StartSound finds nothing precached
+	sv.datagram.data = oracle_datagram;
+	sv.datagram.maxsize = sizeof (oracle_datagram);
+	sv.datagram.cursize = 0;
+}
+
+// One SV_Physics on the given globals and edicts at sv.time with host_frametime; sv.time and num_edicts come back.
+EDICT_EXPORT void EdictOracle_Physics (float *globals, void *edicts, int *num_edicts, int max_edicts, double *time,
+	double frametime)
+{
+	extern int	localstack_used, pr_depth;	// pr_exec.c
+
+	pr_globals = globals;
+	pr_global_struct = (globalvars_t *)globals;
+	sv.edicts = edicts;
+	sv.num_edicts = *num_edicts;
+	sv.max_edicts = max_edicts;
+	sv.time = *time;
+	host_frametime = frametime;
+	sv.active = true;
+	sv.state = ss_active;
+	sv_player = EDICT_NUM (1);
+	sv.datagram.cursize = 0;
+	pr_depth = 0;
+	localstack_used = 0;
+	SV_Physics ();
+	*num_edicts = sv.num_edicts;
+	*time = sv.time;
+}
