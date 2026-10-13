@@ -513,7 +513,24 @@ frame free of allocations; the one allocation found was a type initializer: `Ser
 preallocated exceptions, read only when thrown, so the first static read came in SV_SendServerinfo at the first
 client connect and allocated 4,672 bytes inside frame 1. The host's constructor now runs the type initializers of
 all engine types on the load path. Gate: 0 bytes in every frame that spawns nothing (39,985 frames); the 15 spawn
-frames (map, restart, changelevel: the load path) allocate 2.6–7.4 MB each and are counted apart.
+frames (map, restart, changelevel: the load path) allocate 2.6–7.4 MB each and are counted apart. The long runs are
+in the gate too (129,595 frames more, 0 bytes).
+Step 2 done (2026-10-13): `FrameBenchmarks` (BenchmarkDotNet, one invocation is a whole tape after frame 0, a fresh
+host and the spawn in the iteration setup) and `edict_ref -edictframetime` (the reference's frames 1 to n−1 as one
+`clock ()` interval, without hashing; a harness file, no hook line). Ryzen 9 3900X, Windows, .NET 10.0.9, the
+reference as in D2 (clang 23, x86-64-v2, no LTO):
+
+| Tape | Frames | Reference | Port | Port / reference |
+|---|---|---|---|---|
+| `lq_e0m3`, ten-minute run | 43,199 | 13.6 µs/frame (7 runs, 13.57–13.73) | 9.78 µs | **0.72** |
+| `lq_e0m3`, corpus | 3,999 | 14.5 µs (±0.25: 58 ms in `clock ()` ticks of 1 ms) | 11.1 µs | 0.77 |
+| `start`, corpus | 3,999 | 4.5 µs (±0.25) | 4.88 µs | 1.08 |
+
+The ten-minute run is the comparison that counts: on 4,000 frames the reference's interval is 18–58 ms, and Windows'
+`clock ()` counts milliseconds. The reference's time includes its console output (Con_Printf to stdout, e.g. sounds
+that are not precached), which the port does not write. BenchmarkDotNet reports 32 B per invocation of the long run
+(none for the others); the allocation gate measures 0 on the host's thread for all its frames, so they come from
+another thread of the runtime.
 
 ## D. Effort at 7 h/week (calendar weeks)
 

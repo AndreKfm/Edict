@@ -29,7 +29,7 @@ public sealed unsafe class LoopGateTests
     internal static string? FirstDivergence(string map, string edhPath, string tapePath, out int frames, out int spawns)
     {
         string capture = Path.Combine(VmReplay.Directory, map + ".ecp");
-        VmReplay.SpawnInputs inputs = VmReplay.FirstSpawn(capture);
+        SpawnInputs inputs = VmReplay.FirstSpawn(capture);
         var edh = new EdhFile(edhPath);
         string emgPath = Path.ChangeExtension(edhPath, ".emg");
         EmgFile? emg = File.Exists(emgPath) ? new EmgFile(emgPath) : null;

@@ -21,10 +21,13 @@ Arguments (besides Quake's own):
                      record VM entries, QuakeC calls and builtin calls (edict_capture.c)
   -edicttracebench <file> <reps>
                      the same point: check the corpus file against the map, time reps passes over it, exit
+  -edictframetime    time host frames 1 to n-1 as one interval (clock (); frame 0 runs the +map command) and
+                     print it; for the frame benchmark, run without -edicthash and -edictcapture
 The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
 */
 #include "quakedef.h"
 #include "errno.h"
+#include <time.h>
 #include "edict_hash.h"
 #include "edict_traces.h"
 #include "edict_capture.h"
@@ -226,7 +229,8 @@ static int ArgValue (char *name, int fallback)
 int main (int argc, char **argv)
 {
 	static quakeparms_t	parms;
-	int		frames, frame, before, i, traces, bench;
+	int		frames, frame, before, i, traces, bench, timed;
+	clock_t	start = 0;
 
 	COM_InitArgv (argc, argv);
 
@@ -245,6 +249,7 @@ int main (int argc, char **argv)
 	traces = COM_CheckParm ("-edicttraces");
 	if (traces && traces >= com_argc - 3)
 		Sys_Error ("-edicttraces <file> <count> <seed>");
+	timed = COM_CheckParm ("-edictframetime") != 0;
 	bench = COM_CheckParm ("-edicttracebench");
 	if (bench && bench >= com_argc - 2)
 		Sys_Error ("-edicttracebench <file> <reps>");
@@ -264,6 +269,8 @@ int main (int argc, char **argv)
 
 	for (frame = 0 ; frame < frames ; frame++)
 	{
+		if (timed && frame == 1)
+			start = clock ();
 		edict_clock += host_framerate.value;
 		before = host_framecount;
 		Host_Frame (host_framerate.value);
@@ -287,6 +294,12 @@ int main (int argc, char **argv)
 		}
 	}
 
+	if (timed && frame > 1)
+	{
+		double	seconds = (double)(clock () - start) / CLOCKS_PER_SEC;
+
+		printf ("edict: %d host frames in %.6f s, %.3f us per frame\n", frame - 1, seconds, seconds * 1e6 / (frame - 1));
+	}
 	EdictHash_Close ();
 	EdictCapture_Close ();
 	fflush (stdout);

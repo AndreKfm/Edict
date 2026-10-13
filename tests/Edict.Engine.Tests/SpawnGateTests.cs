@@ -41,7 +41,7 @@ public sealed unsafe class SpawnGateTests
         private readonly int* _globals;
         private readonly byte* _edicts, _temp;
 
-        public Spawned(string map, VmReplay.SpawnInputs inputs)
+        public Spawned(string map, SpawnInputs inputs)
         {
             Files = new QFileSystem(TraceCorpus.DataDirectory);
             QFile f = Files.Find("progs.dat") ?? throw new FileNotFoundException("progs.dat");
@@ -101,7 +101,7 @@ public sealed unsafe class SpawnGateTests
     /// <param name="capture">A capture whose first map record and first entry give the inputs; its .edh the hashes.</param>
     internal static string? FirstDivergence(string capture, out string what)
     {
-        VmReplay.SpawnInputs inputs = VmReplay.FirstSpawn(capture);
+        SpawnInputs inputs = VmReplay.FirstSpawn(capture);
         string name = Path.GetFileNameWithoutExtension(capture);
         string variant = name.Contains('.') ? name[(name.IndexOf('.') + 1)..] : "";
         if (PreSpawn.TryGetValue(variant, out var set))
