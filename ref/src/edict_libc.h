@@ -28,6 +28,7 @@ int edict_strcmp (const char *a, const char *b);
 // seed = seed * 214013 + 2531011, result (seed >> 16) & 0x7fff. glibc's rand is a different generator.
 int edict_rand (void);
 void edict_srand (unsigned int seed);
+unsigned int edict_rand_state (void);	// the seed as it is now (record mode, edict_capture.c)
 
 // sin, cos, atan, atan2: fdlibm algorithms (edict_libm.c). Results of libm differ between C libraries in the
 // last bit; sqrt, floor, ceil and fabs are exact in IEEE arithmetic and stay with the C library.

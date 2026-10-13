@@ -28,7 +28,7 @@ def builtin_names():
 def read(path):
     d = open(path, 'rb').read()
     version = struct.unpack_from('<I', d, 4)[0]
-    assert d[:4] == b'ECP1' and version in (1, 2), path
+    assert d[:4] == b'ECP1' and version in (1, 2, 3), path
     p = 8; names = {}; state = 0; m = None
 
     def diff(p):                    # version 2: a state diff after E, L, B and R
@@ -44,11 +44,16 @@ def read(path):
         k = d[p:p+1]; p += 1
         if k == b'M':
             m = d[p:p+64].split(b'\0')[0].decode(); p += 64 + (24 if version >= 2 else 0); names = {}
+            if version >= 3:
+                p += 4
+                ncvars, = struct.unpack_from('<I', d, p); p += 4
+                for _ in range(2 * ncvars):
+                    p = d.index(b'\0', p) + 1
         elif k == b'F':
             fnum, = struct.unpack_from('<I', d, p); p += 4
             e = d.index(b'\0', p); names[fnum] = d[p:e].decode('latin-1'); p = e + 1
         elif k == b'E':
-            fnum, frame, state, self_, other = struct.unpack_from('<IIBII', d, p); p = diff(p + 17)
+            fnum, frame, state, self_, other = struct.unpack_from('<IIBII', d, p); p = diff(p + 17 + (12 if version >= 3 else 0))
             yield ('enter', m, state, names.get(fnum, fnum), frame)
         elif k == b'L':
             p = diff(p + 16)
@@ -59,7 +64,7 @@ def read(path):
             num, fnum, argc = struct.unpack_from('<HIB', d, p); p = diff(p + 7 + 12 * argc)
             yield ('builtin', m, state, (num, names.get(fnum, fnum)), None)
         elif k == b'R':
-            p = diff(p + 14)
+            p = diff(p + 14 + (12 if version >= 3 else 0))
         else:
             raise SystemExit('%s: bad record %r at %d' % (path, k, p - 1))
 

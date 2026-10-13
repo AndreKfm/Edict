@@ -49,18 +49,19 @@ static void put64 (edict_u64 v)
 	put32 ((unsigned int)v); put32 ((unsigned int)(v >> 32));
 }
 
+// Every NaN hashes as the same bits: which NaN float arithmetic produces is not part of the state (docs/adr/D8).
 static void putfloat (float f)
 {
 	unsigned int bits;
 	memcpy (&bits, &f, 4);
-	put32 (bits);
+	put32 (f != f ? 0x7fc00000u : bits);
 }
 
 static void putdouble (double d)
 {
 	edict_u64 bits;
 	memcpy (&bits, &d, 8);
-	put64 (bits);
+	put64 (d != d ? 0x7ff8000000000000ull : bits);
 }
 
 static void putstring (const char *s)

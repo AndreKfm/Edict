@@ -32,6 +32,11 @@ void edict_srand (unsigned int seed)
 	rand_seed = seed;
 }
 
+unsigned int edict_rand_state (void)
+{
+	return rand_seed;
+}
+
 /*
 ==============================================================================
 sprintf with pinned NaN and infinity output
@@ -59,7 +64,7 @@ static int PinnedSpecial (char *out, const char *spec, double v, char conv)
 	for ( ; *p >= '0' && *p <= '9' ; p++)
 		width = width * 10 + (*p - '0');
 
-	if (signbit (v))
+	if (v == v && signbit (v))	// infinities only: the sign of a NaN is not part of the state (docs/adr/D8)
 		body[n++] = '-';
 	else if (plus)
 		body[n++] = '+';

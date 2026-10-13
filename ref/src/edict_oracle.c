@@ -127,5 +127,32 @@ EDICT_EXPORT void EdictOracle_VmRun (dstatement_t *statements, int numstatements
 	localstack_used = 0;
 	pr_xfunction = NULL;
 	pr_xstatement = 0;
-	PR_ExecuteProgram (fnum);
+	if (fnum >= 0)
+		PR_ExecuteProgram (fnum);
+}
+
+/*
+==============================================================================
+Builtins on caller-provided memory (level 1 for pr_cmds.c)
+
+One builtin, pr_builtins[num] () itself, on globals, strings and edicts set up as for EdictOracle_VmRun. Only for
+builtins that read nothing but this memory and the rand stream: rand is seeded with seed first, and the seed
+afterwards is returned. pr_string_temp points to strings + stringtemp (ftos, vtos write there).
+==============================================================================
+*/
+
+extern builtin_t	*pr_builtins;	// pr_cmds.c
+extern int			pr_argc;		// pr_exec.c
+
+EDICT_EXPORT unsigned int EdictOracle_Builtin (int num, int argc, float *globals, int numglobals, char *strings,
+	int numstrings, int stringtemp, void *edicts, int entityfields, int active, unsigned int seed)
+{
+	extern char	*pr_string_temp;
+
+	EdictOracle_VmRun (NULL, 0, NULL, 0, globals, numglobals, strings, numstrings, edicts, entityfields, active, -1);
+	pr_string_temp = strings + stringtemp;
+	pr_argc = argc;
+	srand (seed);
+	pr_builtins[num] ();
+	return edict_rand_state ();
 }
