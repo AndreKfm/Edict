@@ -28,7 +28,7 @@ def builtin_names():
 def read(path):
     d = open(path, 'rb').read()
     version = struct.unpack_from('<I', d, 4)[0]
-    assert d[:4] == b'ECP1' and version in (1, 2, 3, 4, 5, 6, 7), path
+    assert d[:4] == b'ECP1' and version in (1, 2, 3, 4, 5, 6, 7, 8), path
     p = 8; names = {}; state = 0; m = None
 
     def diff(p):                    # version 2: a state diff after E, L, B and R
@@ -71,6 +71,9 @@ def read(path):
             nl, = struct.unpack_from('<I', d, p + 4); p = diff(p + 8 + 2 * nl + 5 + (4 if version >= 6 else 0))
         elif k == b'U':
             p += 4
+        elif k == b'H':             # version 8: Host_ServerFrame begins
+            p = diff(p + 24)
+            yield ('frame', m, state, None, None)
         elif k == b'S':             # version 7: the frame-0 point after ED_LoadFromFile
             p += 16
             for _ in range(64):

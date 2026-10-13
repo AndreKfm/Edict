@@ -48,6 +48,8 @@ File layout (all integers little-endian):
   'U'  u32 edict                                          SV_UnlinkEdict
   'S'  u32 rand_seed  f64 sv.time  u32 svs.serverflags  64 x { u8 set  [char style[] NUL] }  diff
                                                           after ED_LoadFromFile (patch 0005): the frame-0 state
+  'H'  u32 host_framecount  f64 host_frametime  u32 rand_seed  f64 sv.time  diff
+                                                          Host_ServerFrame begins (patch 0006)
   diff:  u32 num_edicts  u32 n  n x { u32 word  u32 value }  u32 m  m x { i32 string offset  char text[]  NUL }
          u32 h  h x { u32 edict  u32 free  u32 freetime bits }
          word w < numglobals is global w; otherwise edict (w - numglobals) / entityfields,
@@ -56,7 +58,7 @@ File layout (all integers little-endian):
 #include "quakedef.h"
 #include "edict_capture.h"
 
-#define ECP_VERSION		7
+#define ECP_VERSION		8
 #define BUFFER_SIZE		(1 << 16)
 
 extern unsigned short	pr_crc;				// pr_edict.c
@@ -439,6 +441,16 @@ void EdictCapture_Spawn (void)
 		if (sv.lightstyles[i])
 			putname (sv.lightstyles[i]);
 	}
+	Diff (-1);
+}
+
+// Host_ServerFrame begins (patch 0006): in a frame that spawns a map, after SV_SpawnServer's own two SV_Physics.
+void EdictCapture_ServerFrame (void)
+{
+	put8 ('H');
+	put32 (host_framecount);
+	putdouble (host_frametime);
+	putengine ();
 	Diff (-1);
 }
 

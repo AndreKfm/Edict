@@ -23,6 +23,7 @@ void EdictCapture_Link (struct edict_s *ent, int touch);	// SV_LinkEdict, before
 void EdictCapture_Linked (struct edict_s *ent);			// SV_LinkEdict, after
 void EdictCapture_Unlink (struct edict_s *ent);			// SV_UnlinkEdict
 void EdictCapture_Spawn (void);							// after ED_LoadFromFile (through Edict_Spawned)
+void EdictCapture_ServerFrame (void);					// Host_ServerFrame begins (patch 0006)
 
 #define EDICT_CAPTURE_ENTER(f)			(edict_capture ? EdictCapture_Enter (f) : (void)0)
 #define EDICT_CAPTURE_LEAVE(f)			(edict_capture ? EdictCapture_Leave (f) : (void)0)
@@ -32,5 +33,6 @@ void EdictCapture_Spawn (void);							// after ED_LoadFromFile (through Edict_Sp
 #define EDICT_CAPTURE_LINK(e, t)		(edict_capture ? EdictCapture_Link (e, t) : (void)0)
 #define EDICT_CAPTURE_LINKED(e)			(edict_capture ? EdictCapture_Linked (e) : (void)0)
 #define EDICT_CAPTURE_UNLINK(e)			(edict_capture ? EdictCapture_Unlink (e) : (void)0)
+#define EDICT_CAPTURE_SERVERFRAME()		(edict_capture ? EdictCapture_ServerFrame () : (void)0)
 
 #endif
