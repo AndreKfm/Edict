@@ -31,10 +31,11 @@ Lockstep in one process also means both sides see the same MXCSR state and the s
 
 ## Capture (input set c)
 
-The reference has a record mode (`-edictcapture <dir>`, under `#ifdef EDICT_HASH`) that writes, per instrumented
-function, its arguments and results as fixed-size binary records while a tape plays. The capture points are a list
-in `ref/edict_capture.h`, one macro line per function; adding a point does not touch id's code beyond that line.
-Captured records feed level 1 (inputs) and level 2 (call tapes).
+The reference has a record mode (`-edictcapture <file>`) that writes, per instrumented function, its arguments and
+results as binary records while a tape plays. The capture points are macros in `ref/src/edict_capture.h`, one line
+per point in id's code (`ref/patches/0003`); they test one int and do nothing without the option. Captured records
+feed level 1 (inputs) and level 2 (call tapes). Version 1 records VM entries, QuakeC calls and builtin calls with
+raw argument and return words (the census of `docs/PLAN.md` section C, cut 2); state snapshots follow with the VM.
 
 ## Oracle library
 

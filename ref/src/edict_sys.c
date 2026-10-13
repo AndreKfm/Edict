@@ -15,6 +15,8 @@ Arguments (besides Quake's own):
   -edicttraces <file> <count> <seed>
                      after the first frame with a running map, write the hull trace corpus (edict_traces.c)
                      instead of continuing, then exit
+  -edictcapture <file>
+                     record VM entries, QuakeC calls and builtin calls (edict_capture.c)
   -edicttracebench <file> <reps>
                      the same point: check the corpus file against the map, time reps passes over it, exit
 The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
@@ -23,6 +25,7 @@ The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the 
 #include "errno.h"
 #include "edict_hash.h"
 #include "edict_traces.h"
+#include "edict_capture.h"
 
 #define EDICT_FRAMETIME	"0.013889"	// 72 Hz, the rate Host_FilterTime is built around
 
@@ -156,6 +159,7 @@ void Sys_Error (char *error, ...)
 	va_list         argptr;
 
 	EdictHash_Close ();
+	EdictCapture_Close ();
 	fflush (stdout);
 	fprintf (stderr, "Sys_Error: ");
 	va_start (argptr,error);
@@ -177,6 +181,7 @@ void Sys_Printf (char *fmt, ...)
 void Sys_Quit (void)
 {
 	EdictHash_Close ();
+	EdictCapture_Close ();
 	fflush (stdout);
 	exit (0);
 }
@@ -245,6 +250,10 @@ int main (int argc, char **argv)
 	if (i && i < com_argc - 1)
 		EdictHash_Open (com_argv[i + 1], COM_CheckParm ("-edictperent") ? EDH_FLAG_PER_ENTITY : 0);
 
+	i = COM_CheckParm ("-edictcapture");
+	if (i && i < com_argc - 1)
+		EdictCapture_Open (com_argv[i + 1]);
+
 	Host_Init (&parms);
 	Cvar_Set ("host_framerate", EDICT_FRAMETIME);
 
@@ -274,6 +283,7 @@ int main (int argc, char **argv)
 	}
 
 	EdictHash_Close ();
+	EdictCapture_Close ();
 	fflush (stdout);
 	return 0;
 }

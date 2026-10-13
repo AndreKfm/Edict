@@ -18,7 +18,7 @@ for p in "$REF"/patches/*.patch; do
   patch -s -p1 -d "$OUT/src" < "$p" || { echo "patch failed: $p"; exit 1; }
 done
 cp "$REF"/src/*.c "$REF"/src/*.h "$OUT/src/"
-FILES="edict_sys edict_hash edict_traces edict_xxh64 edict_libc edict_libm edict_oracle cl_demo cl_input cl_main cl_parse cl_tent chase cmd common console crc cvar draw host host_cmd keys
+FILES="edict_sys edict_hash edict_traces edict_capture edict_xxh64 edict_libc edict_libm edict_oracle cl_demo cl_input cl_main cl_parse cl_tent chase cmd common console crc cvar draw host host_cmd keys
  mathlib edict_menu model nonintel net_loop net_main edict_tape net_vcr pr_cmds pr_edict pr_exec
  r_aclip r_alias r_bsp r_draw r_edge r_efrag r_light r_main r_misc r_part r_sky r_sprite r_surf r_vars
  d_edge d_fill d_init d_modech d_part d_polyse d_scan d_sky d_sprite d_surf d_vars d_zpoint

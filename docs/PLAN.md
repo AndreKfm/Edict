@@ -230,6 +230,22 @@ State 2026-10-12: **gate met** (P1 kill rule not reached: 100 % on the first ful
 
 **Cut 2:** `PR_LoadProgs`, VM, builtins, `ED_LoadFromFile`, `SV_SpawnServer`, areanodes. Gate: frame-0 hash
 (edicts + typed globals after spawn, before `SV_Physics`) per map.
+Steps (agreed 2026-10-13), each with its own gate: (1) a census of what spawn and the first frames reach, from a
+VM record mode; (2) `PR_LoadProgs` and `PR_ExecuteProgram` with all 66 opcodes, gated by replaying recorded calls in
+isolation (level 2, globals and edicts compared before and after); (3) builtins in census order, edicts,
+`ED_LoadFromFile`, areanodes and linking, each builtin against its recorded calls; (4) `SV_SpawnServer` and the
+frame-0 hash per map.
+Step 1 done (2026-10-13): `-edictcapture <file>` (`ref/src/edict_capture.c`, hooks in `ref/patches/0003`), census by
+`tools/ecp.py census` over the 10 R9 maps × 4,000 tape frames. 48 of the 79 table entries are reached, 17 during
+spawn, 39 during frames; 770 QuakeC functions. Spawn: `precache_sound` (8,047 calls), `precache_model` (3,515),
+`setmodel`, `setsize`, `makestatic`/`precache_*2` aliases, `random`, `remove`, `ambientsound`, `fabs`, `setorigin`,
+`lightstyle`, `makevectors`, `spawn`, `droptofloor`, `cvar_set`. Frames add above all `checkclient` (287,740),
+`cvar` (200,154), `makevectors`, `random`, `movetogoal`, `vlen`, `traceline`, `normalize`, `vectoyaw`, the
+`WriteByte`/`WriteCoord` message builtins, `find`, `sound`, `walkmove`, `changeyaw`, and 20 rarer ones. Never
+reached on the corpus (30 of entries 1–78; not needed for the gates until a tape reaches them): 15 `PF_Fixme` slots,
+`break`, `error`, `objerror`, `coredump`, `traceon`, `traceoff`, `eprint`, `nextent`, `WriteChar`, `WriteShort`,
+`WriteLong`, `WriteAngle`, `WriteString`, `WriteEntity`, `precache_file` (#68, #77), `setspawnparms`. LibreQuake's
+progs.dat carries no names for its builtins; the tool names them from `pr_builtin[]` as compiled (without QUAKE2).
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)
@@ -293,6 +309,9 @@ per-entity, per-field first-divergence report, not only a frame hash.
   `Sys_FloatTime`, net driver table, `SV_ReadClientMessage` (record mode). Target: ≤ 30 changed code lines in id
   files for harness hooks, checked by CI. Undefined-behaviour and 64-bit patches are outside that budget but each
   needs evidence that results do not change.
+- `0003` (2026-10-13, harness hook): five capture macros and two braces in `PR_ExecuteProgram`, 8 of the 30 hook
+  lines. All 10 R9 maps × 4,000 frames hash identically with and without the patch and with and without
+  `-edictcapture`; release and ASan write byte-identical capture files.
 - State 2026-10-12: `0001` (`COM_FileBase` read before its argument; old/new compared on 21 paths, 0 differences),
   `0002` (string_t offsets, see §A.1). With both, the release build loads LibreQuake `start`, runs the QuakeC spawn
   functions and keeps running headless (client + server, `vid_null`).
