@@ -31,6 +31,7 @@ File layout (all integers little-endian):
   header  "ECP1"  u32 version
   'M'  char map[64]  u32 progs_crc  u32 numglobals  u32 entityfields  u32 edict_header_bytes  u32 max_edicts
        u32 numstrings  i32 string_temp (pr_string_temp - pr_strings)  u32 maxclients
+       i32 name x maxclients (svs.clients[i].name - pr_strings: netname points there)          version 9
                                                           also when the same map spawns again (restart after death)
        u32 numcvars  numcvars x { char name[] NUL  char string[] NUL }
                                                           before the first record on a new map; resets the shadow
@@ -58,7 +59,7 @@ File layout (all integers little-endian):
 #include "quakedef.h"
 #include "edict_capture.h"
 
-#define ECP_VERSION		8
+#define ECP_VERSION		9
 #define BUFFER_SIZE		(1 << 16)
 
 extern unsigned short	pr_crc;				// pr_edict.c
@@ -212,6 +213,8 @@ static void NewMap (void)
 	put32 (progs->numstrings);
 	put32 (pr_string_temp - pr_strings);
 	put32 (svs.maxclients);
+	for (n = 0 ; n < svs.maxclients ; n++)
+		put32 ((int)(svs.clients[n].name - pr_strings));
 	for (n = 0, var = cvar_vars ; var ; var = var->next)
 		n++;
 	put32 (n);
