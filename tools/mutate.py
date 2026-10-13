@@ -284,6 +284,15 @@ MUTANTS = {
         ('lightstyle: sent while loading too', 'src/Edict.Engine/Server/Builtins.cs', '        if (!sv.Active)\n            return;\n        for (int j = 0; j < sv.MaxClients; j++)',
          '        for (int j = 0; j < sv.MaxClients; j++)'),
     ]),
+    # the performance variants of P4: each mutant is the variant done wrong, which its gate must see
+    'perf': (['method:Edict.Engine.Tests.BuiltinTests.Pure_builtins_match_the_reference_on_edge_and_random_inputs',
+              'method:Edict.Engine.Tests.LoopGateTests.Loop_hashes_as_the_reference_every_frame',
+              'method:Edict.Engine.Tests.WorldFuzzTests.World_matches_the_reference'], [
+        ('cvar cache: hit not confirmed', 'src/Edict.Engine/Server/Cvars.cs',
+         'if (c >= 0 && Is(name, _vars[c].Name))', 'if (c >= 0)'),
+        ('point cache: z not compared', 'src/Edict.Engine/Server/Move.cs',
+         ' && _pointKeys[k + 2] == z)', ')'),
+    ]),
     'spawn': (['Edict.Engine.Tests.SpawnGateTests', 'Edict.Engine.Tests.SpawnParseTests'], [
         ('COM_Parse: unsigned char', 'src/Edict.Engine/Common/ComParse.cs',
          'while ((c = (sbyte)*data) <= \' \')', 'while ((c = *data) <= \' \')'),

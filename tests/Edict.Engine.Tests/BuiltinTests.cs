@@ -228,6 +228,13 @@ public sealed unsafe class BuiltinTests
             {
                 f.Scramble(ref rng);
                 f.Global(OfsParm0, (uint)(NameBase + i));
+                if (i % 4 == 3)
+                {   // the name in the string temp, which ftos rewrites: other names at the same address
+                    byte[] name = cvarList[i].Item1;
+                    name.CopyTo(new Span<byte>(portTemp, name.Length));
+                    portTemp[name.Length] = 0;
+                    f.Global(OfsParm0, (uint)tempOfs);
+                }
                 call(sv, Builtins.Cvar);
                 byte[] value = cvarList[i].Item2;
                 float reference;

@@ -93,6 +93,7 @@ public sealed unsafe partial class Server
     public void ClearWorld(Model* world)
     {
         _world = world;
+        ClearPointCache();
         _linkPrev = new int[MaxEdicts + 2 * AreaNodes];
         _linkNext = new int[MaxEdicts + 2 * AreaNodes];
         Array.Fill(_linkPrev, -1);

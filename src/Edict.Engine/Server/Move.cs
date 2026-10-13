@@ -195,10 +195,46 @@ public sealed unsafe partial class Server
         return clip.Trace;
     }
 
-    /// <summary>SV_PointContents: the world's hull 0 contents, currents counted as water.</summary>
+    // SV_PointContents's answers by the point's bits: the world's hull 0 does not change while a server runs (a new map
+    // is a new Server, and ClearWorld empties the cache), so the contents are a function of the point. A monster that
+    // stands still asks for the same origin in every frame (SV_CheckWaterTransition). Keyed by the bits, so -0 and +0
+    // are different keys, which is stricter than the walk needs.
+    private const int PointCacheSize = 1024;
+    private uint[] _pointKeys = null!;          // x, y, z bits per entry
+    private int[] _pointContents = null!;       // 1 = empty entry (contents are never positive)
+
+    [NoAllocUnchecked("map load")]
+    private void ClearPointCache()
+    {
+        _pointKeys ??= new uint[3 * PointCacheSize];
+        _pointContents ??= new int[PointCacheSize];
+        Array.Fill(_pointContents, 1);
+    }
+
+    /// <summary>
+    /// SV_PointContents: the world's hull 0 contents, currents counted as water. Over the packed nodes (the same planes
+    /// and children, one load per visit) and through the point cache: SV_CheckWaterTransition calls it for every step
+    /// monster in every frame.
+    /// </summary>
     public int PointContents(in Vec3 p)
     {
-        int cont = HullTrace.HullPointContents((Hull*)&_world->Hulls, 0, p);
+        Vec3 q = p;
+        uint x = *(uint*)&q.X, y = *(uint*)&q.Y, z = *(uint*)&q.Z;
+        int slot = (int)(((x * 0x9E3779B1u) ^ (y * 0x85EBCA77u) ^ (z * 0xC2B2AE3Du)) >> 22);     // 10 bits: PointCacheSize
+        int k = 3 * slot;
+        if (_pointContents[slot] != 1 && _pointKeys[k] == x && _pointKeys[k + 1] == y && _pointKeys[k + 2] == z)
+            return _pointContents[slot];
+        int cont = WorldContents(p);
+        _pointKeys[k] = x;
+        _pointKeys[k + 1] = y;
+        _pointKeys[k + 2] = z;
+        _pointContents[slot] = cont;
+        return cont;
+    }
+
+    internal int WorldContents(in Vec3 p)
+    {
+        int cont = HullTrace.PackedPointContents((Hull*)&_world->Hulls, 0, p);
         if (cont <= ContentsCurrent0 && cont >= ContentsCurrentDown)
             cont = Bsp.ContentsWater;
         return cont;

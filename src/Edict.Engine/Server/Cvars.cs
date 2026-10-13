@@ -26,11 +26,20 @@ public sealed unsafe class Cvars
 
     private readonly Cvar[] _vars;
 
+    // Cvar_FindVar's answers by the address of the name asked for (QuakeC passes its string constants): a hit is
+    // confirmed by comparing the name, so a string whose text changed at the same address (ftos's buffer) is looked up
+    // again. Exact: cvar names are unique (Cvar_RegisterVariable refuses a second one) and the list never changes.
+    private const int CacheSize = 64;
+    private readonly nint[] _cacheName;
+    private readonly int[] _cacheIndex;
+
     /// <summary>The cvars with their names and values, in the reference's list order (load path).</summary>
     [NoAllocUnchecked("load path: builds the table once")]
     public Cvars(IReadOnlyList<(byte[] Name, byte[] Value)> vars)
     {
         _vars = new Cvar[vars.Count];
+        _cacheName = new nint[CacheSize];
+        _cacheIndex = new int[CacheSize];
         for (int i = 0; i < vars.Count; i++)
         {
             _vars[i] = new Cvar(vars[i].Name);
@@ -67,20 +76,37 @@ public sealed unsafe class Cvars
     /// <summary><c>Cvar_FindVar</c>: the first cvar with this name (Q_strcmp), or -1.</summary>
     private int Find(byte* name)
     {
+        int slot = (int)(((nuint)name >> 2) % CacheSize);
+        if (_cacheName[slot] == (nint)name)
+        {
+            int c = _cacheIndex[slot];
+            if (c >= 0 && Is(name, _vars[c].Name))
+                return c;
+        }
+        int found = -1;
         for (int i = 0; i < _vars.Length; i++)
             if (Is(name, _vars[i].Name))
-                return i;
-        return -1;
+            {
+                found = i;
+                break;
+            }
+        if (found >= 0)
+        {
+            _cacheName[slot] = (nint)name;
+            _cacheIndex[slot] = found;
+        }
+        return found;
     }
 
-    /// <summary><c>Cvar_VariableValue</c>: 0 for an unknown name, otherwise Q_atof of the string.</summary>
+    /// <summary>
+    /// <c>Cvar_VariableValue</c>: 0 for an unknown name, otherwise Q_atof of the string. That is the value field: Store
+    /// sets it as Q_atof of the same string (Cvar_Set does too), and in a dedicated server only client and renderer
+    /// code writes a value directly (menu.c, r_misc.c, view.c).
+    /// </summary>
     public float VariableValue(byte* name)
     {
         int i = Find(name);
-        if (i < 0)
-            return 0;
-        fixed (byte* s = _vars[i].String)
-            return CAtof.QAtof(new ReadOnlySpan<byte>(s, Length(s)));
+        return i < 0 ? 0 : _vars[i].Value;
     }
 
     /// <summary><c>Cvar_VariableString</c>: the value's text, "" for an unknown name.</summary>

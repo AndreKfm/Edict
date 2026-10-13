@@ -199,10 +199,13 @@ public sealed unsafe class WorldFuzzTests
         }
     }
 
-    // Mod_PointInLeaf: random points, and points exactly on node planes (d == 0 takes the back side)
+    // Mod_PointInLeaf: random points, and points exactly on node planes (d == 0 takes the back side). On the same
+    // points SV_PointContents through its cache against the walk without it (which the trace corpus gates against the
+    // reference's hull 0 contents): each point, an earlier one again, and an earlier one's x and y with this z.
     private static string? Points(Server sv, Model* w, string map)
     {
         var rng = new Rng(VmOpcodeFuzz.MapSeed(map));
+        var earlier = new Vec3[64];
         for (int n = 0; n < 40_000; n++)
         {
             Vec3 p = Point(ref rng, w);
@@ -218,6 +221,17 @@ public sealed unsafe class WorldFuzzTests
             int q = sv.PointInLeaf(p);
             if (q != r)
                 return $"Mod_PointInLeaf ({Hex(p.X)}, {Hex(p.Y)}, {Hex(p.Z)}): port leaf {q}, reference leaf {r}";
+
+            Vec3 again = earlier[rng.Below(earlier.Length)];
+            Vec3 column = earlier[rng.Below(earlier.Length)];
+            column.Z = p.Z;
+            earlier[n % earlier.Length] = p;
+            foreach (Vec3 c in (ReadOnlySpan<Vec3>)[p, again, column, p])
+            {
+                int cached = sv.PointContents(c), walked = sv.WorldContents(c);
+                if (cached != walked)
+                    return $"SV_PointContents ({Hex(c.X)}, {Hex(c.Y)}, {Hex(c.Z)}): {cached} through the cache, {walked} without it";
+            }
         }
         return null;
     }

@@ -71,9 +71,11 @@ public sealed unsafe class TraceGateTests
                 Hull* hull = (Hull*)System.Runtime.CompilerServices.Unsafe.AsPointer(ref world->Hulls[h]);
                 int s = HullTrace.HullPointContents(hull, hull->FirstClipNode, t.Start);
                 int e = HullTrace.HullPointContents(hull, hull->FirstClipNode, t.End);
-                Assert.True(s == t.ContentsStart[h] && e == t.ContentsEnd[h],
-                            $"first divergence: {map} trace {i}, hull {h}: contents at start port {s}, reference {t.ContentsStart[h]}; " +
-                            $"at end port {e}, reference {t.ContentsEnd[h]}; inputs: {Bits.Inputs(t)}");
+                int ps = HullTrace.PackedPointContents(hull, hull->FirstClipNode, t.Start);
+                int pe = HullTrace.PackedPointContents(hull, hull->FirstClipNode, t.End);
+                Assert.True(s == t.ContentsStart[h] && e == t.ContentsEnd[h] && ps == s && pe == e,
+                            $"first divergence: {map} trace {i}, hull {h}: contents at start port {s} (packed {ps}), reference {t.ContentsStart[h]}; " +
+                            $"at end port {e} (packed {pe}), reference {t.ContentsEnd[h]}; inputs: {Bits.Inputs(t)}");
             }
         }
     }

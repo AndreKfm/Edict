@@ -531,6 +531,20 @@ The ten-minute run is the comparison that counts: on 4,000 frames the reference'
 that are not precached), which the port does not write. BenchmarkDotNet reports 32 B per invocation of the long run
 (none for the others); the allocation gate measures 0 on the host's thread for all its frames, so they come from
 another thread of the runtime.
+Step 3, first variants (2026-10-13). Profile (dotnet-trace CPU sampling on the ten-minute run): SV_Physics 73 %,
+of it SV_Physics_Step 46 % and in that SV_CheckWaterTransition 28 % — SV_PointContents for every step monster in
+every frame, the walk down the world's hull 0; the VM 23 %, SV_SendClientMessages 19 % (SV_WriteEntitiesToClient
+13 %). Three exact variants, each with the test that sees it done wrong (R7 group `perf`, `--only` per mutant):
+
+| Variant | Why it is exact | Gate that sees it done wrong | Long run |
+|---|---|---|---|
+| SV_PointContents over the packed nodes | the same planes, children and operations in another layout | the trace corpus's hull contents, now for the packed walk too | 420 → 400 ms |
+| cvar: the lookup cached by the name's address, a hit confirmed by the name; the value field instead of Q_atof of the string | names are unique and the list fixed; Store sets the value as Q_atof of the same string, and in a dedicated server only client and renderer code writes a value directly | the builtin fuzz, now with names rewritten at one address (the ftos buffer): an unconfirmed hit is detected | 400 → 377 ms |
+| SV_PointContents cached by the point's bits (1,024 entries) | the world's hull 0 does not change while a server runs; a new map is a new Server, ClearWorld empties the cache | the world fuzz: each of its 40,000 points per map, an earlier one again and one with an earlier point's x and y, through the cache and without it; a key without z is detected | 377 → 304 ms |
+
+Each variant passed the loop gate (10 corpus runs, the long run of `lq_e0m3`) and the allocation gate. Result
+(BenchmarkDotNet, as in step 2): the ten-minute run 7.07 µs per frame (reference 13.6, **0.52**), `lq_e0m3` corpus
+8.20 µs (0.57), `start` 4.32 µs (0.96).
 
 ## D. Effort at 7 h/week (calendar weeks)
 
