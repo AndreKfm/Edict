@@ -67,12 +67,17 @@ EDICT_ORACLE=<path> dotnet run --project tests/Edict.Exact.Tests -c Release
 # phase-1 gate (module level): trace corpus from the reference, then the port against it
 sh tools/traces.sh ~/edict-ref data/traces
 dotnet run --project tests/Edict.Engine.Tests -c Release
+# cut 2 (VM): captures from the reference, then replay and opcode fuzz (the fuzz needs EDICT_ORACLE)
+sh tools/captures.sh ~/edict-ref data/captures
+EDICT_ORACLE=<path> dotnet run --project tests/Edict.Engine.Tests -c Release
 # benchmarks (gate-passing variants only, R8)
 dotnet run --project bench/Edict.Benchmarks -c Release -- --filter "*HullTrace*"
 ```
 
-The engine tests read the corpus from `EDICT_TRACES` and the game data from `EDICT_DATA` (defaults: `data/traces` and
-`data/libreq-v0.09-beta` in the checkout); with `--artifacts-path` outside the checkout (WSL) set both.
+The engine tests read the corpus from `EDICT_TRACES`, the VM captures from `EDICT_CAPTURES` and the game data from
+`EDICT_DATA` (defaults: `data/traces`, `data/captures` and `data/libreq-v0.09-beta` in the checkout); with
+`--artifacts-path` outside the checkout (WSL) set all three. Tests that call the oracle share one non-parallel
+collection (`OracleCollection`).
 
 In WSL, build the C# side with `--artifacts-path` outside the checkout, so that Windows and Linux builds do not share
 `obj/`.
@@ -92,10 +97,15 @@ summed in another order (bit-identical on 10^7 arguments), .NET's `ToString("F1"
 like the C libraries), and Q_atof with a reordered addition (differences stay below what the float conversion keeps).
 Not every reordering changes bits; which optimizations are permitted is measured, not argued.
 
-Level 2 so far (`tests/Edict.Engine.Tests`, 70 tests, identical results on Windows and Linux): the hull trace corpus
+Level 2 so far (`tests/Edict.Engine.Tests`, hull traces: 70 tests, identical results on Windows and Linux): the hull trace corpus
 (10 maps × 10^5 traces, `docs/PLAN.md` section C), the loader dump, R7 with 7 known-bad copies of
 `SV_RecursiveHullCheck`. The corpus is a level-2 tape in all but name: it records calls at the module boundary with
 their inputs and results, and the port replays each call in isolation. A first corpus of uniform random traces passed
 the port but also three known-bad variants; how the generator was changed is in `docs/PLAN.md` section C. A corpus
 whose inputs a game would rarely produce at random needs the same check: R7 decides whether it is good enough, not
 its size.
+
+VM (cut 2, step 2; `docs/PLAN.md` section C): level 1 is the opcode fuzz against `PR_ExecuteProgram` in the oracle,
+level 2 the replay of VM captures, 94 engine tests in all. The captures replayed green on the first run but saw
+only 4 of 10 known-bad VM variants: a game run produces the common values, not the edges. The fuzz was added for
+that, and found a real difference the replay could not see (which NaN `OP_MUL_V` returns). Both levels are needed.

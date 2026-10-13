@@ -24,4 +24,17 @@ public static class CString
             i++;
         }
     }
+
+    /// <summary><see cref="Strcmp(ReadOnlySpan{byte}, ReadOnlySpan{byte})"/> on two zero-terminated strings.</summary>
+    public static unsafe int Strcmp(byte* a, byte* b)
+    {
+        int i = 0;
+        while (true)
+        {
+            int x = a[i], y = b[i];
+            if (x == 0 || x != y)
+                return x - y;
+            i++;
+        }
+    }
 }

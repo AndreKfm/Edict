@@ -14,6 +14,7 @@ before anything depends on them.
 | D4 | Target `net10.0` (LTS). .NET 11 is evaluated as a benchmark variant, not adopted by default (§G). | `net11.0` from day one | .NET 11 is STS, GA Nov 2026; one of its breaking changes touches float→int casts. |
 | D5 | The `[NoAlloc]` analyzer is copied as source from Prism (analyzer + annotations + its tests), renamed to `Edict.NoAlloc.*`, with no "HotPath"/"Archfacts" names left: namespace `Edict.NoAlloc`, diagnostic prefix `NA` instead of `HP`, `noalloc-allowlist.toml`, MSBuild property `EdictNoAllocInjectAttributes`. Prism's transitive verifier and benchmarks are not copied. | NuGet / project reference into Prism | Requested; Edict builds from a single checkout and evolves the analyzer independently. Without the verifier, the per-member rule "every callee must carry a matching marker" (NA008) still composes; what is lost is the report of exemption chains, which is acceptable at this scale. |
 | D6 | Zero runtime dependencies in `Edict.Engine`. Anything from the BCL that is in the hot path must be allowlisted for the `[NoAlloc]` analyzer or replaced by own code. | Use BCL collections/formatting | BCL formatting, `string`, `List<T>` and `Math.Sin` are either allocating or not bit-pinned. |
+| D7 | The port's edicts use the reference's stride (`pr_edict_size`, with the x64 C header size), so entity offsets and field pointers are numerically identical ([adr/D7](adr/D7-edict-stride-as-in-c.md), 2026-10-13). | Free stride, entities compared by index (B.2 before) | Recorded VM calls compare word for word, untyped temporaries included; no translation layer. |
 
 ## A. Ground-truth attack — where "frame-exact" degrades to "approximately exact"
 
@@ -85,6 +86,7 @@ before anything depends on them.
 | Edict free-list reuse | `ED_Alloc`: reuse if `free && (freetime < 2 \|\| sv.time - freetime > 0.5)`; scan from `maxclients+1` | hash includes free edicts | Port literally; free edicts stay in the hash (their fields are not cleared until reuse). |
 | Area list order | `SV_ClipToLinks` keeps the first entity on equal `fraction`; list insertion order decides `trace.ent` and touch order | diagnostic lane: ordered areanode lists | Intrusive index lists with identical insertion points. |
 | Wall clock | `Sys_FloatTime`, `host_frametime` | two identical runs must hash identically | Virtual clock; `host_framerate` fixed so `host_frametime` is the same double every frame. |
+| NaN operand order | `OP_MUL_V`: clang compiles `a0*b0 + b1*a1`, then `b2*a2 + sum` (clang 18 and 23); with two NaN operands x86 returns the first, so the order picks the NaN | oracle opcode fuzz with NaN payloads (`VmOpcodeTests`) | Mirror the measured order where it differs; every other opcode keeps C's source order (measured). A compiler that commutes differently shows in R9 and in the fuzz. |
 | Denormals | MXCSR FTZ/DAZ | startup probe on both sides (`1e-40f * 1f != 0`) | Neither side sets FTZ/DAZ; assert, don't assume. |
 
 ### A.3 Hash-scope traps
@@ -92,8 +94,8 @@ before anything depends on them.
 - `string_t` values are address-dependent → hash string **content**, never offsets.
 - Entity references are byte offsets with layout-dependent stride (`EDICT_TO_PROG`) → hash as **index**. The
   stride is `pr_edict_size = progs->entityfields * 4 + sizeof (edict_t) - sizeof(entvars_t)` (`pr_edict.c:1021`),
-  not rounded up: on x64 edicts can be misaligned for the pointer members of `edict_t`; on the C# side the stride
-  is free to differ.
+  not rounded up: on x64 edicts can be misaligned for the pointer members of `edict_t`. The port uses the same
+  stride (D7), so offsets are equal too; the hash keeps hashing entities as indices.
 - Untyped globals (`OP_ADDRESS` temporaries) contain layout-dependent offsets → the gate covers only `ddef`-typed
   globals; raw globals are a diagnostic lane.
 - `edict_t` has padding; never `memcpy` structs into the hash. Walk `progs->fielddefs` and `globaldefs`.
@@ -115,7 +117,8 @@ exactness lanes (framebuffer hash, paintbuffer hash) and the same rule.
 
 - **Edicts:** one `NativeMemory.AlignedAlloc(MAX_EDICTS * stride, 64)`. Header struct (`free`, `freetime`, leafs as
   `[InlineArray]`, baseline, area links as int indices) + `EntVars` (`StructLayout(Sequential, Pack = 4)`, mirrors
-  `progdefs.h`, checked against `PROGHEADER_CRC`) + extra progs fields. Accessors return `ref`:
+  `progdefs.h`, checked against `PROGHEADER_CRC`) + extra progs fields; the stride is the reference's (D7): the
+  header takes exactly the bytes of the x64 C header. Accessors return `ref`:
   `ref Edict E(int i)`, `ref float F(int i, int word)`, `ref Vec3 V(int i, int word)`.
 - **QuakeC globals/stack:** `float*` into native memory; `localstack`, `pr_stack` native.
 - **Strings:** `byte*`/`ReadOnlySpan<byte>` into the progs block plus an engine-string table. `System.String` only
@@ -246,6 +249,30 @@ reached on the corpus (30 of entries 1–78; not needed for the gates until a ta
 `break`, `error`, `objerror`, `coredump`, `traceon`, `traceoff`, `eprint`, `nextent`, `WriteChar`, `WriteShort`,
 `WriteLong`, `WriteAngle`, `WriteString`, `WriteEntity`, `precache_file` (#68, #77), `setspawnparms`. LibreQuake's
 progs.dat carries no names for its builtins; the tool names them from `pr_builtin[]` as compiled (without QUAKE2).
+Step 2 done (2026-10-13): `src/Edict.Engine/Progs` — `Progs` (`PR_LoadProgs`, CRC-16 as `crc.c`), `QcVm`
+(`PR_ExecuteProgram`, `PR_EnterFunction`, `PR_LeaveFunction`, all 66 opcodes; builtins, strings and `sv.state`
+through a struct host type parameter; `[NoAlloc]`, errors as preallocated exceptions), `ProgDefs` (offsets
+generated from `progdefs.q1`). Edicts use the reference's stride (D7; the header is 108 bytes on x64, the same with
+the MSVC and the System V ABI — `EdictOracle_EdictHeaderBytes` against the captures).
+Two gates, both on Windows and Linux:
+- Level 2, capture replay (`VmReplayTests`): capture version 2 records at every engine entry, builtin call,
+  builtin return and return to the engine what changed in the VM's memory (globals and fields of the edicts in
+  use), against a shadow copy. The replay applies what the engine and the builtins changed and requires the port's
+  VM to change exactly what the reference's VM changed, word for word; builtins do not run, nested QuakeC (touch,
+  think from builtins) is replayed too. `tools/captures.sh`: 10 maps × spawn + 4,000 tape frames, 105 MB; replay
+  6.7 s for all maps, 15,000–91,000 engine entries and 28,000–89,000 builtin calls per map, 4.6·10^10 words
+  compared. Green on the first run. The enter hook moved in front of `PR_EnterFunction`, which already writes
+  globals (parameter copies); hashes unchanged.
+- Level 1, opcode fuzz (`VmOpcodeTests`): `EdictOracle_VmRun` runs `PR_ExecuteProgram` itself on statements, globals,
+  strings and edicts the test provides; every opcode except the calls, on all pairs of 32 edge values (signed
+  zeros, NaN payloads, infinities, denormals, the int boundaries), on random words and game-like coordinates, on
+  empty strings at nonzero offsets, and `OP_STATE` on edge, random and frame times; memory compared byte for byte.
+  Found one difference: the NaN choice of `OP_MUL_V` (row "NaN operand order" in A.2), fixed.
+- R7 (`KnownBadVmTests`, 10 mutants of a copy of the VM): the replay alone detected 4 (no local save, one-word
+  return, `<` for `<=`, sign-only `NE_S`); the game never produces -0.0 in a condition, NaN in a comparison, an empty
+  string at a nonzero offset, nor a frame equal to its new value with the other sign of zero. The fuzz detects all 10.
+  `nextthink` in float instead of double differs only at tiny times (2.9·10^-7 s): on 4,000 frame times from a run
+  0 differences, because within one binade the rounding window lies at the same place relative to the float grid.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)
