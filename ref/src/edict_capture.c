@@ -16,8 +16,9 @@ A builtin that runs QuakeC itself (touch functions from walkmove, for example) s
 its 'B' and 'R'. Replaying the stream runs only the VM: cut 2, step 2 (docs/PLAN.md section C).
 
 Engine state the builtins read but the VM does not see is recorded too: the rand seed (engine and builtins draw
-from one stream) and sv.time at every entry and after every builtin, and per map the cvars and the offset of
-pr_string_temp, where ftos and vtos write.
+from one stream) and sv.time at every entry and after every builtin; per map svs.maxclients, the cvars and the
+offset of pr_string_temp, where ftos and vtos write; and in every diff the edict headers' free flag and freetime
+that changed (ED_Alloc reads them).
 
 Words are raw 32-bit values. With the reference's edict stride in the port (docs/adr/D7) entity offsets and field
 pointers are equal on both sides. String offsets are not, for strings outside the progs string block (allocated
@@ -27,7 +28,8 @@ and after every builtin whose return value points to pr_string_temp (ftos, vtos)
 File layout (all integers little-endian):
   header  "ECP1"  u32 version
   'M'  char map[64]  u32 progs_crc  u32 numglobals  u32 entityfields  u32 edict_header_bytes  u32 max_edicts
-       u32 numstrings  i32 string_temp (pr_string_temp - pr_strings)
+       u32 numstrings  i32 string_temp (pr_string_temp - pr_strings)  u32 maxclients
+                                                          also when the same map spawns again (restart after death)
        u32 numcvars  numcvars x { char name[] NUL  char string[] NUL }
                                                           before the first record on a new map; resets the shadow
   'F'  u32 fnum  char name[]  NUL                         first use of a function: its name from the progs
@@ -38,13 +40,14 @@ File layout (all integers little-endian):
   'B'  u16 builtin  u32 fnum  u8 argc  u32 parm[3 * argc]  diff
   'R'  u16 builtin  u32 return[3]  u32 rand_seed  f64 sv.time  diff
   diff:  u32 num_edicts  u32 n  n x { u32 word  u32 value }  u32 m  m x { i32 string offset  char text[]  NUL }
+         u32 h  h x { u32 edict  u32 free  u32 freetime bits }
          word w < numglobals is global w; otherwise edict (w - numglobals) / entityfields,
          field word (w - numglobals) % entityfields
 */
 #include "quakedef.h"
 #include "edict_capture.h"
 
-#define ECP_VERSION		3
+#define ECP_VERSION		4
 #define BUFFER_SIZE		(1 << 16)
 
 extern unsigned short	pr_crc;				// pr_edict.c
@@ -57,11 +60,13 @@ static unsigned char	buffer[BUFFER_SIZE];
 static int				buffered;
 
 static char				map_name[64];		// the map the tables below are for
+static int				last_state;			// sv.state at the last entry: active, then loading is a new spawn
 static unsigned char	*named;				// [numfunctions]: name already written
 static unsigned int		*shadow;			// [numglobals + max_edicts * entityfields]
 static unsigned char	*global_string;		// [numglobals]: covered by an ev_string globaldef
 static unsigned char	*field_string;		// [entityfields]: covered by an ev_string fielddef
 static int				*changed;			// scratch: indices of the words of one diff
+static unsigned int		*shadow_header;		// [2 * max_edicts]: free, freetime bits
 
 static void Flush (void)
 {
@@ -174,10 +179,11 @@ static void NewMap (void)
 	int		i, n = strlen (sv.name);
 	int		words = progs->numglobals + sv.max_edicts * progs->entityfields;
 
-	free (named); free (shadow); free (global_string); free (field_string); free (changed);
+	free (named); free (shadow); free (global_string); free (field_string); free (changed); free (shadow_header);
 	named = Alloc (progs->numfunctions);
 	shadow = Alloc (words * 4);
 	changed = Alloc (words * sizeof (int));
+	shadow_header = Alloc (sv.max_edicts * 2 * 4);
 	global_string = Alloc (progs->numglobals);
 	field_string = Alloc (progs->entityfields);
 	MarkStrings (global_string, progs->numglobals, pr_globaldefs, progs->numglobaldefs);
@@ -194,6 +200,7 @@ static void NewMap (void)
 	put32 (sv.max_edicts);
 	put32 (progs->numstrings);
 	put32 (pr_string_temp - pr_strings);
+	put32 (svs.maxclients);
 	for (n = 0, var = cvar_vars ; var ; var = var->next)
 		n++;
 	put32 (n);
@@ -206,8 +213,9 @@ static void NewMap (void)
 
 static void CheckMap (void)
 {
-	if (!named || strncmp (map_name, sv.name, sizeof (map_name)))
+	if (!named || strncmp (map_name, sv.name, sizeof (map_name)) || (sv.state == ss_loading && last_state == ss_active))
 		NewMap ();
+	last_state = sv.state;
 }
 
 static unsigned int *Word (int w)
@@ -231,6 +239,23 @@ static qboolean IsString (int w)
 static qboolean EngineString (int ofs)
 {
 	return ofs < 0 || ofs >= progs->numstrings;
+}
+
+// Whether edict e's free flag or freetime differs from the shadow; with update, the shadow takes the new values.
+static qboolean HeaderChanged (int e, qboolean update)
+{
+	edict_t			*ed = EDICT_NUM (e);
+	unsigned int	f = ed->free, t;
+
+	memcpy (&t, &ed->freetime, 4);
+	if (f == shadow_header[2 * e] && t == shadow_header[2 * e + 1])
+		return false;
+	if (update)
+	{
+		shadow_header[2 * e] = f;
+		shadow_header[2 * e + 1] = t;
+	}
+	return true;
 }
 
 // The words that differ from the shadow, the engine strings they name, and extra (unless -1): a string offset
@@ -268,6 +293,19 @@ static void Diff (int extra)
 			putstring ((int)shadow[changed[i]]);
 	if (extra != -1)
 		putstring (extra);
+
+	// edict headers: free and freetime
+	for (n = 0, w = 0 ; w < sv.num_edicts ; w++)
+		if (HeaderChanged (w, 0))
+			n++;
+	put32 (n);
+	for (w = 0 ; w < sv.num_edicts ; w++)
+		if (HeaderChanged (w, 1))
+		{
+			put32 (w);
+			put32 (shadow_header[2 * w]);
+			put32 (shadow_header[2 * w + 1]);
+		}
 }
 
 static void Name (int fnum)

@@ -144,15 +144,37 @@ afterwards is returned. pr_string_temp points to strings + stringtemp (ftos, vto
 extern builtin_t	*pr_builtins;	// pr_cmds.c
 extern int			pr_argc;		// pr_exec.c
 
+// The header fields of edict n in an edict area laid out by the reference (free, freetime); set, then read back.
+EDICT_EXPORT void EdictOracle_EdictHeader (void *edicts, int entityfields, int n, int set, int *free, float *freetime)
+{
+	edict_t	*e = (edict_t *)((byte *)edicts + n * (entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t)));
+
+	if (set)
+	{
+		memset (e, 0, sizeof (edict_t) - sizeof (entvars_t));	// unlinked (area.prev NULL: SV_UnlinkEdict returns)
+		e->free = *free;
+		e->freetime = *freetime;
+	}
+	*free = e->free;
+	*freetime = e->freetime;
+}
+
+// num_edicts in and out; maxclients, max_edicts and time as the server has them.
 EDICT_EXPORT unsigned int EdictOracle_Builtin (int num, int argc, float *globals, int numglobals, char *strings,
-	int numstrings, int stringtemp, void *edicts, int entityfields, int active, unsigned int seed)
+	int numstrings, int stringtemp, void *edicts, int entityfields, int active, unsigned int seed, int *num_edicts,
+	int max_edicts, int maxclients, double time)
 {
 	extern char	*pr_string_temp;
 
 	EdictOracle_VmRun (NULL, 0, NULL, 0, globals, numglobals, strings, numstrings, edicts, entityfields, active, -1);
 	pr_string_temp = strings + stringtemp;
 	pr_argc = argc;
+	sv.num_edicts = *num_edicts;
+	sv.max_edicts = max_edicts;
+	svs.maxclients = maxclients;
+	sv.time = time;
 	srand (seed);
 	pr_builtins[num] ();
+	*num_edicts = sv.num_edicts;
 	return edict_rand_state ();
 }
