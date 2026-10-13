@@ -360,7 +360,9 @@ lanes and one hash per edict; `.edh` version 2), with `-edictcapture` a spawn re
 and the engine state the hash covers (rand seed, `sv.time`, `svs.serverflags`, the light styles; capture version
 7). `tools/captures.sh` writes the `.edh` of the same run next to each capture. Per-frame hashes of all 10 maps ×
 4,000 frames are unchanged by the patch, Windows and Linux agree on every frame and spawn record, and the captures
-are unchanged apart from the new records (and the cvar `cmdline`, which holds the output paths). The port's side:
+differ from version 6 only by the new records (and the cvar `cmdline`, which holds the output paths): on 8 maps
+removing them gives the old file byte for byte; on `lq_e0m6` and `lq_e0m7` the spawn record also takes over engine
+changes after the last spawn function (entities freed by `ED_LoadFromFile`) that version 6 had in the next diff. The port's side:
 `Edict.Harness/StateHash.cs` builds the same canonical streams over the port's `Server` and hashes them with its own
 XXH64; `EdhFile` reads the spawn records. Checked before the port spawns anything itself: the capture replay hashes
 the reference's state at every spawn point (15 on the 10 maps, respawns included) and matches every lane and every
