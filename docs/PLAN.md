@@ -15,6 +15,7 @@ before anything depends on them.
 | D5 | The `[NoAlloc]` analyzer is copied as source from Prism (analyzer + annotations + its tests), renamed to `Edict.NoAlloc.*`, with no "HotPath"/"Archfacts" names left: namespace `Edict.NoAlloc`, diagnostic prefix `NA` instead of `HP`, `noalloc-allowlist.toml`, MSBuild property `EdictNoAllocInjectAttributes`. Prism's transitive verifier and benchmarks are not copied. | NuGet / project reference into Prism | Requested; Edict builds from a single checkout and evolves the analyzer independently. Without the verifier, the per-member rule "every callee must carry a matching marker" (NA008) still composes; what is lost is the report of exemption chains, which is acceptable at this scale. |
 | D6 | Zero runtime dependencies in `Edict.Engine`. Anything from the BCL that is in the hot path must be allowlisted for the `[NoAlloc]` analyzer or replaced by own code. | Use BCL collections/formatting | BCL formatting, `string`, `List<T>` and `Math.Sin` are either allocating or not bit-pinned. |
 | D7 | The port's edicts use the reference's stride (`pr_edict_size`, with the x64 C header size), so entity offsets and field pointers are numerically identical ([adr/D7](adr/D7-edict-stride-as-in-c.md), 2026-10-13). | Free stride, entities compared by index (B.2 before) | Recorded VM calls compare word for word, untyped temporaries included; no translation layer. |
+| D8 | The bits of NaN results of float arithmetic are not state: such a result must be NaN on both sides; copies keep all bits; hash and NaN text are sign- and payload-free ([adr/D8](adr/D8-nan-bits-are-not-state.md), 2026-10-13). | Reproduce clang's operand order per expression with explicit NaN rules | LLVM leaves NaN payload and sign unspecified; clang and RyuJIT commute, vectorize and fold freely. |
 
 ## A. Ground-truth attack — where "frame-exact" degrades to "approximately exact"
 
@@ -86,7 +87,7 @@ before anything depends on them.
 | Edict free-list reuse | `ED_Alloc`: reuse if `free && (freetime < 2 \|\| sv.time - freetime > 0.5)`; scan from `maxclients+1` | hash includes free edicts | Port literally; free edicts stay in the hash (their fields are not cleared until reuse). |
 | Area list order | `SV_ClipToLinks` keeps the first entity on equal `fraction`; list insertion order decides `trace.ent` and touch order | diagnostic lane: ordered areanode lists | Intrusive index lists with identical insertion points. |
 | Wall clock | `Sys_FloatTime`, `host_frametime` | two identical runs must hash identically | Virtual clock; `host_framerate` fixed so `host_frametime` is the same double every frame. |
-| NaN operand order | `OP_MUL_V`: clang compiles `a0*b0 + b1*a1`, then `b2*a2 + sum` (clang 18 and 23); with two NaN operands x86 returns the first, so the order picks the NaN | oracle opcode fuzz with NaN payloads (`VmOpcodeTests`) | Mirror the measured order where it differs; every other opcode keeps C's source order (measured). A compiler that commutes differently shows in R9 and in the fuzz. |
+| NaN results | `OP_MUL_V`, the sums of squares in `PF_normalize`/`PF_vlen`/`PF_vectoangles`, `AngleVectors`: with NaN operands clang's (and RyuJIT's) operand order and folds decide which NaN comes out | opcode and builtin fuzz with NaN payloads | Not state (D8): NaN results compare as a class; copies bit for bit. Port in C's source order. |
 | Denormals | MXCSR FTZ/DAZ | startup probe on both sides (`1e-40f * 1f != 0`) | Neither side sets FTZ/DAZ; assert, don't assume. |
 
 ### A.3 Hash-scope traps
@@ -267,12 +268,31 @@ Two gates, both on Windows and Linux:
   strings and edicts the test provides; every opcode except the calls, on all pairs of 32 edge values (signed
   zeros, NaN payloads, infinities, denormals, the int boundaries), on random words and game-like coordinates, on
   empty strings at nonzero offsets, and `OP_STATE` on edge, random and frame times; memory compared byte for byte.
-  Found one difference: the NaN choice of `OP_MUL_V` (row "NaN operand order" in A.2), fixed.
+  Found one difference: which NaN `OP_MUL_V` returns for two NaN operands; with the builtin fuzz this became D8.
 - R7 (`KnownBadVmTests`, 10 mutants of a copy of the VM): the replay alone detected 4 (no local save, one-word
   return, `<` for `<=`, sign-only `NE_S`); the game never produces -0.0 in a condition, NaN in a comparison, an empty
   string at a nonzero offset, nor a frame equal to its new value with the other sign of zero. The fuzz detects all 10.
   `nextthink` in float instead of double differs only at tiny times (2.9·10^-7 s): on 4,000 frame times from a run
   0 differences, because within one binade the rounding window lies at the same place relative to the float grid.
+Step 3 in three parts: 3a builtins on VM memory, rand and cvars; 3b edicts (`spawn`, `remove`, `find`,
+`findradius`); 3c the world (areanodes, linking, `setorigin`/`setsize`/`setmodel`, `traceline`, `droptofloor`,
+`walkmove`, `movetogoal`, `checkclient`), with engine-side links recorded as events so area lists form in the same
+order.
+Step 3a done (2026-10-13): `src/Edict.Engine/Server` — `Server` (rand stream, `sv.time`, state, string temp,
+precache lists), `Cvars` (`Cvar_VariableValue` as Q_atof of the string on every call, `Cvar_Set` into fixed
+buffers), `Builtins`: makevectors, random, normalize, vlen, vectoyaw, vectoangles, fabs, floor, ceil, rint, ftos,
+vtos, changeyaw, cvar, cvar_set, precache_sound/model/file (and their `*2` aliases); `Mathlib.Anglemod`,
+`AngleVectors`. The print builtins and `lightstyle` stay replayed: their effect is message output, not ported yet.
+Capture version 3 adds the rand seed and `sv.time` at entries and builtin returns, the cvars and the
+`pr_string_temp` offset per map. The replay is hybrid: ported builtins run as the port's code, and their changes,
+the rand seed afterwards and the text they return must match; the others are replayed. About 285,000 ported
+builtin calls on the 10 maps, all matching. Level 1: `EdictOracle_Builtin` runs `pr_builtins[num] ()` on test
+memory; the builtin fuzz (edge and random vectors and floats, angles on and off multiples of 45°, any rand seed,
+self's yaw fields, cvar values against the reference's Q_atof) found only NaN-bit differences, which led to D8.
+R7: 10 builtin mutants (random by 32768, vectoyaw in float, rint with a float sum, normalize in double, runtime
+sin, anglemod in float, a strict bound in changeyaw, atof for cvar, precache without return value, ftos always
+"%5.1f"), all detected; first by the fuzz for 9, by the replay for the precache one. Cvar via atof was blind on
+game values (the cvars are integers) until the fuzz got cvar values with decimals, exponents and hex.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)

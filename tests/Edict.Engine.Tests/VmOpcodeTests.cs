@@ -28,9 +28,10 @@ public sealed class VmOpcodeTests
         var rng = new Rng(1);
         uint[] edges = Rng.Edges;
 
-        string? Case(string what)
+        // arithmetic: NaN results compare as a class (docs/adr/D8); copies, branches and addresses: every bit
+        string? Case(string what, bool nanClass = true)
         {
-            string? d = f.Run(vm);
+            string? d = f.Run(vm, nanClass);
             if (d is null)
                 return null;
             if (all is null)
@@ -132,7 +133,7 @@ public sealed class VmOpcodeTests
                 f.Global(A + 1, v1);
                 f.Global(A + 2, v2);
                 Program(op, A, B, 0);
-                if (Case($"{op} #{n}") is { } d)
+                if (Case($"{op} #{n}", nanClass: false) is { } d)
                     return d;
             }
             foreach (Op op in new[] { Op.LoadF, Op.LoadV, Op.LoadS, Op.LoadEnt, Op.LoadFld, Op.LoadFnc, Op.Address })
@@ -142,7 +143,7 @@ public sealed class VmOpcodeTests
                 f.Global(A, (uint)f.EdictOffset(e));
                 f.Global(B, (uint)field);
                 Program(op, A, B, C);
-                if (Case($"{op} edict {e} field {field} #{n}") is { } d)
+                if (Case($"{op} edict {e} field {field} #{n}", nanClass: false) is { } d)
                     return d;
             }
             foreach (Op op in new[] { Op.StorePF, Op.StorePV, Op.StorePS, Op.StorePEnt, Op.StorePFld, Op.StorePFnc })
@@ -153,7 +154,7 @@ public sealed class VmOpcodeTests
                 f.Global(A + 2, v2);
                 f.Global(B, (uint)f.FieldPointer(e, field));
                 Program(op, A, B, 0);
-                if (Case($"{op} edict {e} field {field} #{n}") is { } d)
+                if (Case($"{op} edict {e} field {field} #{n}", nanClass: false) is { } d)
                     return d;
             }
         }
@@ -169,14 +170,14 @@ public sealed class VmOpcodeTests
                 f.Statement(1, op, A, 2, 0);
                 f.Statement(2, Op.StoreF, One, C);
                 f.Statement(3, Op.Done);
-                if (Case($"{op} {Hex(w)}") is { } d)
+                if (Case($"{op} {Hex(w)}", nanClass: false) is { } d)
                     return d;
             }
         f.Scramble(ref rng);
         f.Statement(1, Op.Goto, 2);
         f.Statement(2, Op.StoreF, One, C);
         f.Statement(3, Op.Done);
-        if (Case("Goto") is { } goto_)
+        if (Case("Goto", nanClass: false) is { } goto_)
             return goto_;
 
         // return values
@@ -185,7 +186,7 @@ public sealed class VmOpcodeTests
             f.Scramble(ref rng);
             f.Statement(1, Op.Return, A);
             f.Statement(2, Op.Done);
-            if (Case($"Return #{n}") is { } d)
+            if (Case($"Return #{n}", nanClass: false) is { } d)
                 return d;
         }
 

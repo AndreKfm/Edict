@@ -232,7 +232,7 @@ public sealed unsafe class MutantVm
                 case Op.MulV:
                     *(float*)c = M == Mutation.MulVReordered
                         ? ((float*)a)[2] * ((float*)b)[2] + ((float*)a)[1] * ((float*)b)[1] + ((float*)a)[0] * ((float*)b)[0]
-                        : ((float*)b)[2] * ((float*)a)[2] + (((float*)a)[0] * ((float*)b)[0] + ((float*)b)[1] * ((float*)a)[1]);
+                        : ((float*)a)[0] * ((float*)b)[0] + ((float*)a)[1] * ((float*)b)[1] + ((float*)a)[2] * ((float*)b)[2];
                     break;
                 case Op.MulFV:
                     ((float*)c)[0] = *(float*)a * ((float*)b)[0];

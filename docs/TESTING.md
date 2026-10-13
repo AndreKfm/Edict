@@ -7,7 +7,7 @@ rules needs an ADR. "Reference" means the patched WinQuake C build (`ref/`), "po
 
 | # | Rule |
 |---|---|
-| R1 | **Bits, not tolerances.** Every comparison is on raw bits (`float`/`double` via `BitConverter.SingleToInt32Bits`/`DoubleToInt64Bits`, structs field by field). No epsilon anywhere. NaN results compare by payload too. |
+| R1 | **Bits, not tolerances.** Every comparison is on raw bits (`float`/`double` via `BitConverter.SingleToInt32Bits`/`DoubleToInt64Bits`, structs field by field). No epsilon anywhere. Exception (D8, `docs/adr/D8-nan-bits-are-not-state.md`): a NaN produced by float arithmetic only has to be NaN; copies keep NaN bits and are compared by them. |
 | R2 | **One input, two consumers.** An input is generated or recorded once, from a seed or a capture, and fed unchanged to both sides. Neither side generates its own inputs. |
 | R3 | **One reference configuration.** The oracle library, the reference executable and the golden files are built from the same object files with the same flags (`docs/PLAN.md` D2). A test against a differently built oracle does not count. |
 | R4 | **Every ported function with numeric or state semantics gets a differential test before it is merged**, on four input sets: (a) an edge table (±0, smallest denormal, largest finite, ±inf, quiet NaN, 2^31 − 1/2^31 boundaries, x.5 values, negative values that print as `-0.0`); (b) seeded random inputs, ≥ 10^6 per function; (c) inputs captured from real runs (§ Capture); (d) exhaustive for unary 32-bit functions (all 2^32 `float` inputs) where one pass takes less than 10 minutes. |
@@ -109,3 +109,6 @@ VM (cut 2, step 2; `docs/PLAN.md` section C): level 1 is the opcode fuzz against
 level 2 the replay of VM captures, 94 engine tests in all. The captures replayed green on the first run but saw
 only 4 of 10 known-bad VM variants: a game run produces the common values, not the edges. The fuzz was added for
 that, and found a real difference the replay could not see (which NaN `OP_MUL_V` returns). Both levels are needed.
+Builtins (cut 2, step 3a): the replay runs the ported builtins inside the captured game (level 2) and the builtin
+fuzz runs them against `pr_builtins[num] ()` in the oracle (level 1). As with the VM, the game alone was not
+enough: cvar values in a game are integers, so `atof` instead of `Q_atof` passed the replay.

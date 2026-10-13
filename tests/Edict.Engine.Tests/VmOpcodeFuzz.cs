@@ -172,22 +172,41 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
     }
 
     /// <summary>Runs function 1 on both sides; null if memory agrees in every byte afterwards, else the report.</summary>
-    public string? Run(IVm port)
+    /// <param name="nanClass">
+    /// The statement does arithmetic: two NaN words count as equal, whatever their bits (docs/adr/D8). False for
+    /// copies, which must keep every bit.
+    /// </param>
+    public string? Run(IVm port, bool nanClass)
     {
         VmRunFn(_refStatements, NumStatements, _refFunctions, 2, RefGlobals, NumGlobals, Strings, _numStrings,
                 RefEdicts, EntityFields, Active ? 1 : 0, 1);
         port.Execute(1);
+        return Compare(nanClass);
+    }
+
+    /// <summary>A float word that is NaN.</summary>
+    public static bool IsNaN(uint bits) => (bits & 0x7FFFFFFF) > 0x7F800000;
+
+    /// <summary>Equal bits, or (with <paramref name="nanClass"/>) both NaN.</summary>
+    public static bool Same(uint a, uint b, bool nanClass) => a == b || (nanClass && IsNaN(a) && IsNaN(b));
+
+    /// <summary>Null if both memories agree word for word (NaN as a class if asked), else the first difference.</summary>
+    public string? Compare(bool nanClass)
+    {
         for (int i = 0; i < NumGlobals; i++)
-            if (((uint*)RefGlobals)[i] != ((uint*)PortGlobals)[i])
+            if (!Same(((uint*)RefGlobals)[i], ((uint*)PortGlobals)[i], nanClass))
                 return $"global {i}: port {Hex(((uint*)PortGlobals)[i])}, reference {Hex(((uint*)RefGlobals)[i])}";
-        var r = new ReadOnlySpan<byte>(RefEdicts, NumEdicts * Stride);
-        var p = new ReadOnlySpan<byte>(PortEdicts, NumEdicts * Stride);
-        int k = r.CommonPrefixLength(p);
-        if (k < r.Length)
+        for (int e = 0; e < NumEdicts; e++)
         {
-            int e = k / Stride, f = (k % Stride - Header) / 4;
-            return $"edict {e} field {f}: port {Hex(*(uint*)(PortEdicts + e * Stride + Header + 4 * f))}, " +
-                   $"reference {Hex(*(uint*)(RefEdicts + e * Stride + Header + 4 * f))}";
+            var r = new ReadOnlySpan<byte>(RefEdicts + e * Stride, Header);
+            if (!r.SequenceEqual(new ReadOnlySpan<byte>(PortEdicts + e * Stride, Header)))
+                return $"edict {e}: the header changed";
+            for (int f = 0; f < EntityFields; f++)
+            {
+                uint x = *(uint*)(RefEdicts + e * Stride + Header + 4 * f), y = *(uint*)(PortEdicts + e * Stride + Header + 4 * f);
+                if (!Same(x, y, nanClass))
+                    return $"edict {e} field {f}: port {Hex(y)}, reference {Hex(x)}";
+            }
         }
         return null;
     }

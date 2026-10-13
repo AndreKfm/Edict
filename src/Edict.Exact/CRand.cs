@@ -16,6 +16,9 @@ public struct CRand
     /// <summary>C's <c>srand</c>.</summary>
     public void Srand(uint seed) => _seedMinusOne = seed - 1;
 
+    /// <summary>The seed as it is now: the next <see cref="Next"/> starts from it (the reference's rand_seed).</summary>
+    public readonly uint Seed => _seedMinusOne + 1;
+
     /// <summary>C's <c>rand</c>: 0..0x7fff.</summary>
     public int Next()
     {

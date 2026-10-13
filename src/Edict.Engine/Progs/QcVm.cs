@@ -188,7 +188,7 @@ public sealed unsafe class QcVm
     /// PR_RunError: "pr_depth = 0; // dump the stack so host_error can shutdown functions", then Host_Error. As in C,
     /// localstack_used is left as it is.
     /// </summary>
-    private HostErrorException RunError(HostErrorException e)
+    public HostErrorException RunError(HostErrorException e)
     {
         Depth = 0;
         return e;
@@ -246,14 +246,10 @@ public sealed unsafe class QcVm
                     *(float*)c = *(float*)a * *(float*)b;
                     break;
                 case Op.MulV:
-                {
-                    // a0*b0 + a1*b1 + a2*b2, with the operand order clang compiled (clang 18 and 23, measured with
-                    // NaN payloads through the oracle): equal values for any order, but with two NaN operands x86
-                    // returns the first one, so the order decides which NaN comes out (docs/PLAN.md A.2).
-                    float sum = ((float*)a)[0] * ((float*)b)[0] + ((float*)b)[1] * ((float*)a)[1];
-                    *(float*)c = ((float*)b)[2] * ((float*)a)[2] + sum;
+                    *(float*)c = ((float*)a)[0] * ((float*)b)[0]
+                               + ((float*)a)[1] * ((float*)b)[1]
+                               + ((float*)a)[2] * ((float*)b)[2];
                     break;
-                }
                 case Op.MulFV:
                     ((float*)c)[0] = *(float*)a * ((float*)b)[0];
                     ((float*)c)[1] = *(float*)a * ((float*)b)[1];

@@ -10,41 +10,51 @@ using Edict.Harness;
 
 namespace Edict.Engine.Tests;
 
-/// <summary>A difference between the port's VM and the reference's capture.</summary>
+/// <summary>A difference between the port and the reference's capture.</summary>
 public sealed class ReplayDivergence(string message) : Exception(message);
 
 /// <summary>
-/// Replays a VM capture (ref/src/edict_capture.c, version 2) through the port's <see cref="QcVm"/> (cut 2, step 2):
-/// the engine's and the builtins' changes come from the capture and are applied; the VM runs; at every builtin call
-/// and every return to the engine, the words the VM changed must be exactly the words the reference's VM changed.
-/// The builtins themselves do not run. Also checked: the order of QuakeC calls, builtin numbers and argument
-/// counts, and that every engine string the VM reads was recorded.
+/// Replays a VM capture (ref/src/edict_capture.c, version 3) through the port (cut 2, steps 2 and 3): the engine's
+/// changes come from the capture and are applied; the port's VM runs; the builtins the port has
+/// (<see cref="Builtins.Has"/>) run too, the others are replayed from the capture. At every boundary the words that
+/// changed must be exactly the ones that changed in the reference: up to a builtin call and up to the return to the
+/// engine (the VM's work), and from a builtin call to its return (the builtin's work, for ported builtins). For
+/// ported builtins the rand seed afterwards and the text of strings they return are checked as well. Also checked:
+/// the order of QuakeC calls, builtin numbers and argument counts, and that every engine string read was recorded.
+/// Two NaN words count as equal (docs/adr/D8); the opcode fuzz checks that copies keep NaN bits.
 /// </summary>
 public sealed unsafe class VmReplay : IDisposable
 {
     public const int NumBuiltins = 79;      // pr_numbuiltins: pr_builtin[] compiled without QUAKE2
+    private const int Version = 3;
 
     private readonly byte[] _d;
     private int _p;
     private readonly string _file;
     private readonly QFileSystem _files;
+    private readonly Func<Progs, nint, nint, int, IVm> _makeVm;
+    private readonly Func<int, bool> _ported;
+    private readonly Action<Server, int> _call;
 
     // per map
     private string _map = "";
     private Progs? _progs;
     private IVm? _vm;
-    private readonly Func<Progs, nint, nint, int, IVm> _makeVm;
+    private Server? _sv;
+    private BrushModelSet? _world;
     private int* _globals;
     private byte* _edicts;
+    private byte* _stringTemp;
+    private readonly List<nint> _ownStrings = [];
     private int[] _shadow = [];
     private int _numGlobals, _entityFields, _header, _stride, _numStrings;
-    private bool _active;
-    private readonly Dictionary<int, byte[]> _engineStrings = [];
+    private readonly ReplayStrings _strings = new();
     private readonly Dictionary<int, string> _names = [];
     private readonly Stack<string> _where = new();
 
     public long Entries { get; private set; }
     public long BuiltinCalls { get; private set; }
+    public long PortedBuiltinCalls { get; private set; }
     public long QcCalls { get; private set; }
     public long WordsChecked { get; private set; }
 
@@ -55,37 +65,62 @@ public sealed unsafe class VmReplay : IDisposable
         void Execute(VmReplay replay, int fnum);
     }
 
-    private sealed class PortVm(Progs progs, nint globals, nint edicts, int header) : IVm
+    private sealed class PortVm(QcVm vm) : IVm
     {
-        private readonly QcVm _vm = new(progs, (int*)globals, (byte*)edicts, header, NumBuiltins);
-        public int Argc => _vm.Argc;
+        public int Argc => vm.Argc;
         public void Execute(VmReplay replay, int fnum)
         {
             var host = new Host(replay);
-            _vm.Execute(ref host, fnum);
+            vm.Execute(ref host, fnum);
         }
     }
 
-    public VmReplay(string file, QFileSystem files, Func<Progs, nint, nint, int, IVm>? makeVm = null)
+    /// <summary>Engine strings as the capture recorded them.</summary>
+    private sealed class ReplayStrings : IEngineStrings
     {
-        _makeVm = makeVm ?? ((p, g, e, h) => new PortVm(p, g, e, h));
+        private readonly Dictionary<int, byte[]> _texts = [];
+        public Func<int, Exception>? Missing;
+
+        public void Clear() => _texts.Clear();
+
+        public void Set(int ofs, ReadOnlySpan<byte> text)
+        {
+            byte[] s = GC.AllocateArray<byte>(text.Length + 1, pinned: true);
+            text.CopyTo(s);
+            _texts[ofs] = s;
+        }
+
+        public byte* Get(int ofs) =>
+            _texts.TryGetValue(ofs, out byte[]? s) ? (byte*)Unsafe.AsPointer(ref s[0]) : throw Missing!(ofs);
+    }
+
+    /// <param name="ported">Which builtins run as the port's code; default: all the port has.</param>
+    /// <param name="call">How a ported builtin runs; default <see cref="Builtins.Call"/> (known-bad variants replace it).</param>
+    public VmReplay(string file, QFileSystem files, Func<Progs, nint, nint, int, IVm>? makeVm = null, Func<int, bool>? ported = null,
+                    Action<Server, int>? call = null)
+    {
+        _call = call ?? Builtins.Call;
+        _makeVm = makeVm ?? ((p, g, e, h) => new PortVm(_sv!.Vm));
+        _ported = ported ?? Builtins.Has;
         _file = file;
         _d = File.ReadAllBytes(file);
         _files = files;
-        if (!_d.AsSpan(0, 4).SequenceEqual("ECP1"u8) || U32At(4) != 2)
-            throw new InvalidDataException($"{file}: not an ECP1 version 2 capture");
+        if (!_d.AsSpan(0, 4).SequenceEqual("ECP1"u8) || U32At(4) != Version)
+            throw new InvalidDataException($"{file}: not an ECP1 version {Version} capture (run tools/captures.sh)");
         _p = 8;
+        _strings.Missing = ofs => Fail($"engine string at offset {ofs} is read, but the capture did not record it");
     }
 
     private uint U32At(int p) => BinaryPrimitives.ReadUInt32LittleEndian(_d.AsSpan(p, 4));
     private byte U8() => _d[_p++];
     private ushort U16() { ushort v = BinaryPrimitives.ReadUInt16LittleEndian(_d.AsSpan(_p, 2)); _p += 2; return v; }
     private int I32() { int v = BinaryPrimitives.ReadInt32LittleEndian(_d.AsSpan(_p, 4)); _p += 4; return v; }
+    private double F64() { double v = BinaryPrimitives.ReadDoubleLittleEndian(_d.AsSpan(_p, 8)); _p += 8; return v; }
 
-    private string CString()
+    private ReadOnlySpan<byte> Bytes()
     {
         int e = Array.IndexOf(_d, (byte)0, _p);
-        string s = Encoding.Latin1.GetString(_d, _p, e - _p);
+        var s = new ReadOnlySpan<byte>(_d, _p, e - _p);
         _p = e + 1;
         return s;
     }
@@ -112,7 +147,7 @@ public sealed unsafe class VmReplay : IDisposable
     private void Name()
     {
         int fnum = I32();
-        _names[fnum] = CString();
+        _names[fnum] = Encoding.Latin1.GetString(Bytes());
     }
 
     private string FunctionName(int fnum) =>
@@ -136,12 +171,28 @@ public sealed unsafe class VmReplay : IDisposable
     {
         _progs?.Dispose();
         _progs = null;
+        _world?.Dispose();
+        _world = null;
+        foreach (nint p in _ownStrings)
+            NativeMemory.Free((void*)p);
+        _ownStrings.Clear();
         if (_globals is not null)
             NativeMemory.Free(_globals);
         if (_edicts is not null)
             NativeMemory.Free(_edicts);
+        if (_stringTemp is not null)
+            NativeMemory.Free(_stringTemp);
         _globals = null;
         _edicts = null;
+        _stringTemp = null;
+    }
+
+    private byte* OwnString(ReadOnlySpan<byte> s)
+    {
+        byte* p = (byte*)NativeMemory.AllocZeroed((nuint)s.Length + 1);
+        s.CopyTo(new Span<byte>(p, s.Length));
+        _ownStrings.Add((nint)p);
+        return p;
     }
 
     private void NewMap()
@@ -154,6 +205,14 @@ public sealed unsafe class VmReplay : IDisposable
         _header = I32();
         int maxEdicts = I32();
         _numStrings = I32();
+        int stringTempOffset = I32();
+        int numCvars = I32();
+        var cvars = new List<(byte[], byte[])>();
+        for (int i = 0; i < numCvars; i++)
+        {
+            byte[] name = Bytes().ToArray();
+            cvars.Add((name, Bytes().ToArray()));
+        }
 
         FreeMap();
         QFile f = _files.Find("progs.dat") ?? throw new FileNotFoundException("progs.dat");
@@ -165,9 +224,24 @@ public sealed unsafe class VmReplay : IDisposable
         _stride = _header + _entityFields * 4;
         _globals = (int*)NativeMemory.AllocZeroed((nuint)_numGlobals, 4);
         _edicts = (byte*)NativeMemory.AllocZeroed((nuint)maxEdicts, (nuint)_stride);
+        _stringTemp = (byte*)NativeMemory.AllocZeroed(Server.StringTempSize);
         _shadow = new int[_numGlobals + maxEdicts * _entityFields];
-        _engineStrings.Clear();
+        _strings.Clear();
         _names.Clear();
+
+        var qcvm = new QcVm(_progs, _globals, _edicts, _header, NumBuiltins);
+        _sv = new Server(qcvm, _progs, _globals, _edicts, _header, new Cvars(cvars), _strings, _stringTemp, stringTempOffset);
+
+        // SV_SpawnServer's precache entries: "" first, then the world and its inline models
+        string worldName = $"maps/{_map}.bsp";
+        byte[] wn = Encoding.Latin1.GetBytes(worldName);
+        _world = BrushLoader.Load(_files.Find(wn) ?? throw new FileNotFoundException(worldName), wn);
+        var models = new nint[_world.Count];
+        models[0] = (nint)OwnString(wn);
+        for (int i = 1; i < _world.Count; i++)
+            models[i] = (nint)OwnString(Encoding.Latin1.GetBytes($"*{i}"));
+        _sv.InitPrecache(_progs.Strings, models);
+
         _vm = _makeVm(_progs, (nint)_globals, (nint)_edicts, _header);
     }
 
@@ -201,7 +275,7 @@ public sealed unsafe class VmReplay : IDisposable
     private static string Value(int v) =>
         string.Create(CultureInfo.InvariantCulture, $"0x{v:X8} (int {v}, float {BitConverter.Int32BitsToSingle(v):R})");
 
-    /// <summary>The engine's or a builtin's changes: applied to memory and shadow.</summary>
+    /// <summary>The engine's or a replayed builtin's changes: applied to memory and shadow; strings recorded.</summary>
     private void Apply()
     {
         I32();                              // num_edicts: the memory is allocated for max_edicts
@@ -212,24 +286,26 @@ public sealed unsafe class VmReplay : IDisposable
             Word(w) = v;
             _shadow[w] = v;
         }
-        Strings();
-    }
-
-    private void Strings()
-    {
         int m = I32();
         for (int i = 0; i < m; i++)
         {
             int ofs = I32();
-            int e = Array.IndexOf(_d, (byte)0, _p);
-            byte[] s = GC.AllocateArray<byte>(e - _p + 1, pinned: true);
-            _d.AsSpan(_p, e - _p).CopyTo(s);
-            _engineStrings[ofs] = s;
-            _p = e + 1;
+            ReadOnlySpan<byte> text = Bytes();
+            if (ofs != _sv!.StringTempOffset)
+                _strings.Set(ofs, text);
+            else                            // pr_string_temp, written by a replayed ftos or vtos
+            {
+                Span<byte> temp = _sv.StringTemp;
+                text[..Math.Min(text.Length, Server.StringTempSize - 1)].CopyTo(temp);
+                temp[Math.Min(text.Length, Server.StringTempSize - 1)] = 0;
+            }
         }
     }
 
-    /// <summary>The VM's changes since the last boundary must be the recorded ones, word for word.</summary>
+    /// <summary>
+    /// The port's changes since the last boundary must be the recorded ones, word for word, and every recorded string
+    /// text must be the text the port has at that offset.
+    /// </summary>
     private void Check(string boundary)
     {
         int numEdicts = I32();
@@ -240,10 +316,18 @@ public sealed unsafe class VmReplay : IDisposable
             CheckSegment(_numGlobals + e * _entityFields,
                          new Span<int>(_edicts + (long)e * _stride + _header, _entityFields), boundary, ref r, n);
         if (r != n)
-            throw Fail($"{boundary}: the reference's VM changed {WordName((int)U32At(_p + 8 * r))} beyond num_edicts {numEdicts}");
+            throw Fail($"{boundary}: the reference changed {WordName((int)U32At(_p + 8 * r))} beyond num_edicts {numEdicts}");
         WordsChecked += _numGlobals + (long)numEdicts * _entityFields;
         _p += 8 * n;
-        Strings();
+        int m = I32();
+        for (int i = 0; i < m; i++)
+        {
+            int ofs = I32();
+            ReadOnlySpan<byte> text = Bytes();
+            var port = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(_sv!.String(ofs));
+            if (!port.SequenceEqual(text))
+                throw Fail($"{boundary}: string at offset {ofs} is \"{Encoding.Latin1.GetString(port)}\", the reference's is \"{Encoding.Latin1.GetString(text)}\"");
+        }
     }
 
     // One contiguous run of words (the globals, or one edict's fields) starting at word index first. Unchanged
@@ -259,15 +343,16 @@ public sealed unsafe class VmReplay : IDisposable
             int k = Math.Min(mismatch, recorded);
             if (k >= now.Length)
                 return;
+            // NaN words compare as a class: which NaN arithmetic produces is not part of the state (docs/adr/D8)
             if (k == recorded)
             {
                 int v = (int)U32At(_p + 8 * r + 4);
-                if (now[k] != v)
-                    throw Fail($"{boundary}: {WordName(first + k)} is {Value(now[k])}, the reference's VM wrote {Value(v)} (before: {Value(before[k])})");
+                if (!VmOpcodeFuzz.Same((uint)now[k], (uint)v, nanClass: true))
+                    throw Fail($"{boundary}: {WordName(first + k)} is {Value(now[k])}, the reference wrote {Value(v)} (before: {Value(before[k])})");
                 r++;
             }
-            else
-                throw Fail($"{boundary}: {WordName(first + k)} changed to {Value(now[k])} (before: {Value(before[k])}); the reference's VM did not change it");
+            else if (!VmOpcodeFuzz.Same((uint)now[k], (uint)before[k], nanClass: true))
+                throw Fail($"{boundary}: {WordName(first + k)} changed to {Value(now[k])} (before: {Value(before[k])}); the reference did not change it");
             before[k] = now[k];
             pos = k + 1;
         }
@@ -279,9 +364,14 @@ public sealed unsafe class VmReplay : IDisposable
         I32();                              // host_framecount
         byte state = U8();
         I32(); I32();                       // self, other: in the diff too
+        uint seed = (uint)I32();
+        double time = F64();
         Apply();
-        bool wasActive = _active;
-        _active = state == 1;               // ss_active
+        Server sv = _sv!;
+        sv.Rand.Srand(seed);                // the engine's draws since the last boundary
+        sv.Time = time;
+        bool wasActive = sv.Active;
+        sv.Active = state == 1;             // ss_active
         Entries++;
         _where.Push($"{FunctionName(fnum)}");
         _vm!.Execute(this, fnum);
@@ -293,7 +383,7 @@ public sealed unsafe class VmReplay : IDisposable
         _p += 12;                           // return[3]: in the diff
         Check($"return from {FunctionName(fnum)}");
         _where.Pop();
-        _active = wasActive;
+        sv.Active = wasActive;
     }
 
     private void Builtin(int num)
@@ -308,19 +398,41 @@ public sealed unsafe class VmReplay : IDisposable
             throw Fail($"port calls builtin #{num} with {_vm!.Argc} arguments, the reference #{recNum} with {argc}");
         _p += 12 * argc;                    // parms: in the diff
         BuiltinCalls++;
-        Check($"call of builtin #{num} ({FunctionName(fnum)})");
+        string name = $"builtin #{num} ({FunctionName(fnum)})";
+        Check($"call of {name}");
+
+        bool ported = _ported(num);
+        if (ported)
+        {
+            PortedBuiltinCalls++;
+            _call(_sv!, num);
+        }
         while (true)
         {
             k = Next();
             if (k == (byte)'E')
             {
-                Enter();                    // QuakeC run by the builtin (touch, think)
+                if (ported)
+                    throw Fail($"{name} runs QuakeC in the reference, the port's did not");
+                Enter();                    // QuakeC run by a replayed builtin (touch, think)
                 continue;
             }
             if (k != (byte)'R' || U16() != num)
-                throw Fail($"builtin #{num}: expected its return record, found '{(char)k}'");
+                throw Fail($"{name}: expected its return record, found '{(char)k}'");
             _p += 12;                       // return[3]: in the diff
-            Apply();
+            uint seed = (uint)I32();
+            double time = F64();
+            if (!ported)
+            {
+                Apply();
+                _sv!.Rand.Srand(seed);      // a replayed builtin's draws
+                return;
+            }
+            if (_sv!.Rand.Seed != seed)
+                throw Fail($"after {name}: rand seed 0x{_sv.Rand.Seed:X8}, the reference's 0x{seed:X8}");
+            if (BitConverter.DoubleToInt64Bits(_sv.Time) != BitConverter.DoubleToInt64Bits(time))
+                throw Fail($"after {name}: sv.time {_sv.Time:R}, the reference's {time:R}");
+            Check($"return of {name}");
             return;
         }
     }
@@ -336,20 +448,11 @@ public sealed unsafe class VmReplay : IDisposable
         QcCalls++;
     }
 
-    private byte* String(int ofs)
-    {
-        if (ofs >= 0 && ofs < _numStrings)
-            return _progs!.Strings + ofs;
-        if (_engineStrings.TryGetValue(ofs, out byte[]? s))
-            return (byte*)Unsafe.AsPointer(ref s[0]);
-        throw Fail($"the VM reads engine string at offset {ofs}, which the capture did not record");
-    }
-
     public readonly struct Host(VmReplay r) : IProgsHost
     {
         public void Builtin(int num) => r.Builtin(num);
-        public byte* String(int ofs) => r.String(ofs);
-        public bool Active => r._active;
+        public byte* String(int ofs) => r._sv!.String(ofs);
+        public bool Active => r._sv!.Active;
         public void Called(int fnum) => r.Called(fnum);
     }
 

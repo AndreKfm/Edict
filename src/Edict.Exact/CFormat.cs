@@ -66,11 +66,11 @@ public static class CFormat
         uint mantissa = bits & 0x7fffff;
         int n = 0;
 
-        if (negative)
+        if (negative && !(exponent == 0xff && mantissa != 0))
             body[n++] = (byte)'-';
         if (exponent == 0xff)
         {
-            // pinned: "nan" / "inf" with the sign, padded like any other conversion
+            // pinned: "inf" with its sign, "nan" without one (docs/adr/D8), padded like any other conversion
             body[n++] = mantissa != 0 ? (byte)'n' : (byte)'i';
             body[n++] = mantissa != 0 ? (byte)'a' : (byte)'n';
             body[n++] = mantissa != 0 ? (byte)'n' : (byte)'f';
