@@ -15,6 +15,8 @@ Arguments (besides Quake's own):
   -edicttraces <file> <count> <seed>
                      after the first frame with a running map, write the hull trace corpus (edict_traces.c)
                      instead of continuing, then exit
+  -edicttracebench <file> <reps>
+                     the same point: check the corpus file against the map, time reps passes over it, exit
 The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
 */
 #include "quakedef.h"
@@ -217,7 +219,7 @@ static int ArgValue (char *name, int fallback)
 int main (int argc, char **argv)
 {
 	static quakeparms_t	parms;
-	int		frames, frame, before, i, traces;
+	int		frames, frame, before, i, traces, bench;
 
 	COM_InitArgv (argc, argv);
 
@@ -236,6 +238,9 @@ int main (int argc, char **argv)
 	traces = COM_CheckParm ("-edicttraces");
 	if (traces && traces >= com_argc - 3)
 		Sys_Error ("-edicttraces <file> <count> <seed>");
+	bench = COM_CheckParm ("-edicttracebench");
+	if (bench && bench >= com_argc - 2)
+		Sys_Error ("-edicttracebench <file> <reps>");
 	i = COM_CheckParm ("-edicthash");
 	if (i && i < com_argc - 1)
 		EdictHash_Open (com_argv[i + 1], COM_CheckParm ("-edictperent") ? EDH_FLAG_PER_ENTITY : 0);
@@ -258,6 +263,11 @@ int main (int argc, char **argv)
 			{
 				EdictTraces_Write (com_argv[traces + 1], Q_atoi (com_argv[traces + 2]),
 					strtoull (com_argv[traces + 3], NULL, 0));
+				break;
+			}
+			if (bench)
+			{
+				EdictTraces_Bench (com_argv[bench + 1], Q_atoi (com_argv[bench + 2]));
 				break;
 			}
 		}

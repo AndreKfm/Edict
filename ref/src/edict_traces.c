@@ -36,6 +36,7 @@ File layout (all integers little-endian, floats as raw bits):
                i16 contents_start[3]  i16 contents_end[3] (world hulls 0..2, from their firstclipnode)
 */
 #include "quakedef.h"
+#include <time.h>
 #include "edict_traces.h"
 
 #define ETR_VERSION		1
@@ -784,4 +785,141 @@ void EdictTraces_Write (char *path, int count, unsigned long long seed)
 	out = NULL;
 	Con_Printf ("EdictTraces: %i traces on %s written to %s (%i chosen to back up)\n", count, sv.name, path,
 		backups_found);
+}
+
+/*
+==============================================================================
+Timing: id's SV_ClipMoveToEntity on the inputs of a corpus file
+
+The comparison point for the port's benchmark (bench/Edict.Benchmarks). Reads the records written above, first
+checks every result against the file (so the timing runs on the corpus the gate checks), then calls
+SV_ClipMoveToEntity reps times over all records and prints ns per trace. As in the port's benchmark, the inputs
+are prepared once; per call only the six entity fields SV_HullForEntity reads are set.
+==============================================================================
+*/
+
+typedef struct
+{
+	int		kind, modelindex;
+	vec3_t	ent_origin, ent_mins, ent_maxs, start, mins, maxs, end;
+	float	fraction;
+	vec3_t	endpos;
+} benchrec_t;
+
+static unsigned char	*bench_data;
+static int				bench_pos, bench_len;
+
+static unsigned int get32 (void)
+{
+	unsigned char	*p = bench_data + bench_pos;
+
+	if (bench_pos + 4 > bench_len)
+		Sys_Error ("EdictTraces: corpus file truncated");
+	bench_pos += 4;
+	return p[0] | (p[1] << 8) | (p[2] << 16) | ((unsigned int)p[3] << 24);
+}
+
+static float getfloat (void)
+{
+	unsigned int	bits = get32 ();
+	float			f;
+
+	memcpy (&f, &bits, 4);
+	return f;
+}
+
+static void getvec (vec3_t v)
+{
+	v[0] = getfloat (); v[1] = getfloat (); v[2] = getfloat ();
+}
+
+static void Skip (int size)
+{
+	bench_pos += get32 () * size;
+}
+
+void EdictTraces_Bench (char *path, int reps)
+{
+	static edict_t	test_ent;
+	FILE			*f;
+	benchrec_t		*recs, *r;
+	int				count, i, rep, base;
+	unsigned char	*p;
+	edict_t			*ent;
+	trace_t			trace;
+	clock_t			t0, t1;
+	double			sum = 0, ns;
+
+	f = fopen (path, "rb");
+	if (!f)
+		Sys_Error ("EdictTraces: cannot open %s", path);
+	fseek (f, 0, SEEK_END);
+	bench_len = ftell (f);
+	fseek (f, 0, SEEK_SET);
+	bench_data = malloc (bench_len);
+	if (!bench_data || fread (bench_data, 1, bench_len, f) != (size_t)bench_len)
+		Sys_Error ("EdictTraces: cannot read %s", path);
+	fclose (f);
+
+	if (memcmp (bench_data, "ETR1", 4))
+		Sys_Error ("EdictTraces: %s is not a corpus file", path);
+	bench_pos = 4 + 4 + 8;
+	count = get32 ();
+	if (strncmp ((char *)bench_data + bench_pos, sv.name, 64))
+		Sys_Error ("EdictTraces: %s is for another map than %s", path, sv.name);
+	bench_pos += 64;
+	Skip (18); Skip (28); Skip (24); Skip (8); Skip (8);	// planes, nodes, leafs, clipnodes, hull 0
+	Skip (4 + 64 + 12 + 12 + 4 + 12 + 3 * 32);				// models
+	if (bench_len - bench_pos != count * 136)
+		Sys_Error ("EdictTraces: %s: record section has the wrong size", path);
+
+	recs = malloc (count * sizeof (*recs));
+	if (!recs)
+		Sys_Error ("EdictTraces: out of memory");
+	for (i = 0 ; i < count ; i++)
+	{
+		r = &recs[i];
+		base = bench_pos;
+		p = bench_data + bench_pos;
+		r->kind = p[0];
+		r->modelindex = p[1] | (p[2] << 8);
+		bench_pos += 3;
+		getvec (r->ent_origin); getvec (r->ent_mins); getvec (r->ent_maxs);
+		getvec (r->start); getvec (r->mins); getvec (r->maxs); getvec (r->end);
+		bench_pos += 4;				// allsolid, startsolid, inopen, inwater
+		r->fraction = getfloat ();
+		getvec (r->endpos);
+		bench_pos = base + 136;
+	}
+
+	for (rep = -1 ; rep < reps ; rep++)		// rep -1: check against the file, untimed
+	{
+		if (rep == 0)
+			t0 = clock ();
+		for (i = 0 ; i < count ; i++)
+		{
+			r = &recs[i];
+			if (r->kind == 0)
+				ent = sv.edicts;
+			else
+			{
+				ent = &test_ent;
+				ent->v.solid = r->kind == 1 ? SOLID_BSP : SOLID_BBOX;
+				ent->v.movetype = r->kind == 1 ? MOVETYPE_PUSH : MOVETYPE_STEP;
+				ent->v.modelindex = r->modelindex;
+				VectorCopy (r->ent_origin, ent->v.origin);
+				VectorCopy (r->ent_mins, ent->v.mins);
+				VectorCopy (r->ent_maxs, ent->v.maxs);
+			}
+			trace = SV_ClipMoveToEntity (ent, r->start, r->mins, r->maxs, r->end);
+			sum += trace.fraction;
+			if (rep < 0 && (memcmp (&trace.fraction, &r->fraction, 4) || memcmp (trace.endpos, r->endpos, 12)))
+				Sys_Error ("EdictTraces: record %i differs from %s", i, path);
+		}
+	}
+	t1 = clock ();
+	ns = (double)(t1 - t0) / CLOCKS_PER_SEC * 1e9 / ((double)reps * count);
+	Con_Printf ("EdictTraces: %s, %i traces x %i: %.1f ns per trace (checksum %g)\n", sv.name, count, reps, ns, sum);
+	free (recs);
+	free (bench_data);
 }

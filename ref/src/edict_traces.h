@@ -10,4 +10,7 @@ Edict reference build: hull trace corpus (.etr), docs/PLAN.md section C (cut 1).
 // Writes the loader dump and <count> traces seeded with <seed> for the map that is running (sv.active).
 void EdictTraces_Write (char *path, int count, unsigned long long seed);
 
+// Checks the running map's corpus file against id's SV_ClipMoveToEntity, then times reps passes over it.
+void EdictTraces_Bench (char *path, int reps);
+
 #endif

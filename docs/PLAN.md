@@ -218,8 +218,15 @@ State 2026-10-12: **gate met** (P1 kill rule not reached: 100 % on the first ful
   the packed layout: the shuffles cost more than the 6 µops saved on 5–29 % of visits. Batching traces across lanes
   would be exact but the tree paths diverge after a few nodes. Disassembly of every variant (Tier1 and FullOpts):
   no `vfmadd*`; RyuJIT does not contract `a*b+c`. SIMD in the simulation is left to the integer work of §B.1
-  (`Mod_DecompressVis`, `SV_FatPVS`). Not yet measured: the C reference on the same inputs, `Vec3` passing (§B.2),
-  `net11.0`, a 24-byte node.
+  (`Mod_DecompressVis`, `SV_FatPVS`).
+  The C reference on the same inputs (2026-10-13, `edict_ref -edicttracebench <file> <reps>`: checks every record
+  against the file, then times 50 passes; Windows build, clang 23, the reference flags of D2): 256 ns/trace on
+  `start`, 303 on `lq_e0m3`. The literal C# port is 0.91×/0.90× of that, the packed default 0.81×/0.79×. Part of
+  the difference is C's per-visit node range check (validated once at load in the port); the reference is built
+  for exactness (x86-64-v2, no LTO), not for speed.
+  Also measured and not taken: a 24-byte `PackedNode` (no pad; nodes straddle cache lines) 1.01×/1.02× of the
+  32-byte one; `Vec3` passed by value instead of `in` (§B.2) 1.05×/1.05×: on Windows x64 a 12-byte struct goes
+  by hidden reference anyway, by value only adds the copy. Open: `net11.0` (no .NET 11 SDK installed yet), SysV.
 
 **Cut 2:** `PR_LoadProgs`, VM, builtins, `ED_LoadFromFile`, `SV_SpawnServer`, areanodes. Gate: frame-0 hash
 (edicts + typed globals after spawn, before `SV_Physics`) per map.
