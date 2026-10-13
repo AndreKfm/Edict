@@ -9,22 +9,32 @@ on memory layout enters the gated lanes: strings are hashed by content, entity r
 padding and pointers (edict_t.area) are never read. The C# port produces the same streams.
 
 File layout (all integers little-endian):
-  header   "EDH1"  u32 version (2)  u32 flags
+  header   "EDH1"  u32 version (3)  u32 flags
   record   'M'  char map[64]  u32 progs_crc  u32 entityfields  u32 numglobals          on every new map, and before
                                                                                       every spawn record
   record   'S'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
-                u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw
+                u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw  u64 lane_messages
                 u64 entity_hash x num_edicts                                          after ED_LoadFromFile in
                                                                                       SV_SpawnServer (patch 0005):
                                                                                       the cut-2 frame-0 gate
   record   'F'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
-                u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw
+                u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw  u64 lane_messages
                 [u64 entity_hash x num_edicts, if EDH_FLAG_PER_ENTITY]                on every server frame
-Version 1 had no spawn records.
+Version 1 had no spawn records, version 2 no messages lane.
 Lanes:
   edicts         sv.time, num_edicts, state, paused, serverflags, lightstyles, then (index, entity hash) pairs
   globals_typed  every globals word covered by a globaldef, typed like entity fields
   globals_raw    every globals word as raw bits; contains layout-dependent entity offsets: diagnostic only
+  messages       what the server sent to the tape connection since the previous record (edict_tape.c), each
+                 message as u8 kind (1 reliable, 2 unreliable)  u32 length  bytes; XXH64 of the empty stream if
+                 nothing was sent
+
+Diagnostic: -edictmessages <file> (.emg) writes the messages themselves, for localizing a difference in that lane:
+  header   "EMG1"  u32 version (1)
+  record   u8 kind (1, 2)  u32 host_framecount  u32 length  byte data[length]      every message sent
+  record   u8 'S' or 'F'  u32 host_framecount  u32 0                                at every spawn and frame record
+                                                                                    of the .edh, which ends the
+                                                                                    messages its lane covers
 */
 #include "quakedef.h"
 #include "edict_hash.h"
@@ -77,6 +87,70 @@ static void putstring (const char *s)
 	while (*s)
 		put8 (*s++);
 	put8 (0);
+}
+
+/*
+==============================================================================
+Messages to clients
+==============================================================================
+*/
+
+static FILE			*edh;
+
+#define SENT_SIZE	(1 << 20)
+static unsigned char	sent[SENT_SIZE];	// the messages lane's stream since the last record
+static int				sent_len;
+static FILE				*emg;
+
+static void SentPut (const void *data, int length)
+{
+	if (sent_len + length > SENT_SIZE)
+		Sys_Error ("EdictHash: message stream overflow");
+	memcpy (sent + sent_len, data, length);
+	sent_len += length;
+}
+
+static void EmgWrite (int kind, int length, const void *data)
+{
+	unsigned char	h[9];
+	unsigned int	fc = (unsigned int)host_framecount, len = (unsigned int)length;
+	int				i;
+
+	h[0] = (unsigned char)kind;
+	for (i = 0 ; i < 4 ; i++)
+	{
+		h[1 + i] = (unsigned char)(fc >> (8 * i));
+		h[5 + i] = (unsigned char)(len >> (8 * i));
+	}
+	if (fwrite (h, 1, 9, emg) != 9 || (length && fwrite (data, 1, length, emg) != (size_t)length))
+		Sys_Error ("EdictHash: write failed");
+}
+
+void EdictHash_Sent (int kind, const void *data, int length)
+{
+	unsigned char	h[5];
+	int				i;
+
+	if (!edh)
+		return;
+	h[0] = (unsigned char)kind;
+	for (i = 0 ; i < 4 ; i++)
+		h[1 + i] = (unsigned char)((unsigned int)length >> (8 * i));
+	SentPut (h, 5);
+	SentPut (data, length);
+	if (emg)
+		EmgWrite (kind, length, data);
+}
+
+// The lane over what was sent since the last record; starts the next one.
+static edict_u64 HashMessages (int kind)
+{
+	edict_u64	h = EdictHash_XXH64 (sent, sent_len);
+
+	sent_len = 0;
+	if (emg)
+		EmgWrite (kind, 0, NULL);
+	return h;
 }
 
 /*
@@ -211,7 +285,6 @@ Output
 ==============================================================================
 */
 
-static FILE			*edh;
 static int			edh_flags;
 static edict_u64	*entity_hashes;
 static int			entity_hashes_size;
@@ -231,9 +304,22 @@ void EdictHash_Open (char *path, int flags)
 	edh_flags = flags;
 	stream_len = 0;
 	put8 ('E'); put8 ('D'); put8 ('H'); put8 ('1');
-	put32 (2);
+	put32 (3);
 	put32 (flags);
 	FlushStream ();
+}
+
+void EdictHash_OpenMessages (char *path)
+{
+	static const unsigned char	header[8] = { 'E', 'M', 'G', '1', 1, 0, 0, 0 };
+
+	if (!edh)
+		Sys_Error ("EdictHash: -edictmessages needs -edicthash (its records end the messages of each lane)");
+	emg = fopen (path, "wb");
+	if (!emg)
+		Sys_Error ("EdictHash: cannot open %s", path);
+	if (fwrite (header, 1, 8, emg) != 8)
+		Sys_Error ("EdictHash: write failed");
 }
 
 static void MapRecord (void)
@@ -263,7 +349,7 @@ static void MapRecord (void)
 
 static void StateRecord (int kind, int per_entity)
 {
-	edict_u64	lane_edicts, lane_typed, lane_raw;
+	edict_u64	lane_edicts, lane_typed, lane_raw, lane_messages;
 	int			i, n;
 
 	n = sv.num_edicts;
@@ -301,6 +387,7 @@ static void StateRecord (int kind, int per_entity)
 	lane_edicts = EdictHash_XXH64 (stream, stream_len);
 	lane_typed = HashGlobals (1);
 	lane_raw = HashGlobals (0);
+	lane_messages = HashMessages (kind);
 
 	stream_len = 0;
 	put8 (kind);
@@ -310,6 +397,7 @@ static void StateRecord (int kind, int per_entity)
 	put64 (lane_edicts);
 	put64 (lane_typed);
 	put64 (lane_raw);
+	put64 (lane_messages);
 	if (per_entity)
 		for (i = 0 ; i < n ; i++)
 			put64 (entity_hashes[i]);
@@ -374,4 +462,7 @@ void EdictHash_Close (void)
 	if (edh)
 		fclose (edh);
 	edh = NULL;
+	if (emg)
+		fclose (emg);
+	emg = NULL;
 }

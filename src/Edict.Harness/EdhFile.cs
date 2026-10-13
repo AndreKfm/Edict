@@ -7,16 +7,17 @@ using System.Text;
 namespace Edict.Harness;
 
 /// <summary>
-/// A reference .edh file (ref/src/edict_hash.c, version 2): its spawn records, the frame-0 states after
-/// ED_LoadFromFile, each with the map it belongs to. Frame records are counted, not kept (cut 3 reads them).
+/// A reference .edh file (ref/src/edict_hash.c, version 3): its spawn records, the frame-0 states after
+/// ED_LoadFromFile, each with the map it belongs to, and its frame records by host_framecount.
 /// </summary>
 public sealed class EdhFile
 {
     public readonly record struct Spawn(string Map, uint FrameCount, double Time, int NumEdicts, ulong Edicts,
-                                        ulong GlobalsTyped, ulong GlobalsRaw, ulong[] Entities);
+                                        ulong GlobalsTyped, ulong GlobalsRaw, ulong Messages, ulong[] Entities);
 
-    /// <summary>The three lanes of a frame record (the state after a host frame).</summary>
-    public readonly record struct Frame(double Time, int NumEdicts, ulong Edicts, ulong GlobalsTyped, ulong GlobalsRaw);
+    /// <summary>The four lanes of a frame record (the state after a host frame, the messages sent during it).</summary>
+    public readonly record struct Frame(double Time, int NumEdicts, ulong Edicts, ulong GlobalsTyped, ulong GlobalsRaw,
+                                        ulong Messages);
 
     public IReadOnlyList<Spawn> Spawns { get; }
     public int Frames { get; }
@@ -27,8 +28,8 @@ public sealed class EdhFile
     public EdhFile(string path)
     {
         byte[] d = File.ReadAllBytes(path);
-        if (d.Length < 12 || !d.AsSpan(0, 4).SequenceEqual("EDH1"u8) || BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(4)) != 2)
-            throw new InvalidDataException($"{path}: not an EDH1 version 2 file (run tools/captures.sh)");
+        if (d.Length < 12 || !d.AsSpan(0, 4).SequenceEqual("EDH1"u8) || BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(4)) != 3)
+            throw new InvalidDataException($"{path}: not an EDH1 version 3 file (run tools/captures.sh)");
         uint flags = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(8));
         var spawns = new List<Spawn>();
         var frameRecords = new Dictionary<uint, Frame>();
@@ -52,17 +53,18 @@ public sealed class EdhFile
                     ulong le = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 16));
                     ulong lt = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 24));
                     ulong lr = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 32));
-                    p += 40;
+                    ulong lm = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 40));
+                    p += 48;
                     bool perEntity = k == (byte)'S' || (flags & 1) != 0;
                     var ents = new ulong[perEntity ? n : 0];
                     for (int i = 0; i < ents.Length; i++, p += 8)
                         ents[i] = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p));
                     if (k == (byte)'S')
-                        spawns.Add(new Spawn(map, fc, t, n, le, lt, lr, ents));
+                        spawns.Add(new Spawn(map, fc, t, n, le, lt, lr, lm, ents));
                     else
                     {
                         frames++;
-                        frameRecords[fc] = new Frame(t, n, le, lt, lr);
+                        frameRecords[fc] = new Frame(t, n, le, lt, lr, lm);
                     }
                     break;
                 }

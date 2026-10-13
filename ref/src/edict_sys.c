@@ -11,6 +11,8 @@ Arguments (besides Quake's own):
   -edictframes <n>   run n host frames, then exit (required)
   -edicthash <file>  write per-frame hashes (.edh) to file
   -edictperent       add one hash per edict to every frame record
+  -edictmessages <file>
+                     write the messages the messages lane hashes (.emg, edict_hash.c); needs -edicthash
   -mem <mb>          hunk size in megabytes (default 32)
   -edicttraces <file> <count> <seed>
                      after the first frame with a running map, write the hull trace corpus (edict_traces.c)
@@ -249,6 +251,9 @@ int main (int argc, char **argv)
 	i = COM_CheckParm ("-edicthash");
 	if (i && i < com_argc - 1)
 		EdictHash_Open (com_argv[i + 1], COM_CheckParm ("-edictperent") ? EDH_FLAG_PER_ENTITY : 0);
+	i = COM_CheckParm ("-edictmessages");
+	if (i && i < com_argc - 1)
+		EdictHash_OpenMessages (com_argv[i + 1]);
 
 	i = COM_CheckParm ("-edictcapture");
 	if (i && i < com_argc - 1)

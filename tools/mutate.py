@@ -6,7 +6,11 @@
 # restored, the change applied, the engine tests built and the given test classes run. A mutant must make them fail
 # ("detected"); one that passes is a blind spot of the gates. A mutant whose text no longer matches is an error.
 #
-# Usage: python3 -I tools/mutate.py <work dir> [group ...]      (groups below; default all)
+# Usage: python3 -I tools/mutate.py <work dir> [--known] [--only <text>] [group ...]      (groups below; default all)
+#   --known        only the known blind spots: after a gate gained a test, the mutants it detected before stay detected
+#                  (a test added to a gate can only detect more), so only these need to run again
+#   --only <text>  only mutants whose name contains the text (repeatable)
+# The tests of a mutant stop at their first failure (-stopOnFail): a detected mutant does not run the rest.
 # The tests read the corpora from the checkout (EDICT_TRACES, EDICT_DATA, EDICT_CAPTURES are set to it) and need
 # EDICT_ORACLE for the oracle-based classes.
 import os, shutil, subprocess, sys
@@ -23,26 +27,23 @@ import os, shutil, subprocess, sys
 # - SV_Physics_Pusher's thinktime < ltime + host_frametime with <=: at equality both branches give movetime ==
 #   host_frametime (thinktime - ltime is exact in float when the exact difference is a float, and it can only be
 #   equal when host_frametime is one).
+# - SV_WriteEntitiesToClient's origin threshold with >= 0.1 for > 0.1 (and <= -0.1): no float equals the double 0.1,
+#   so a float miss is >= 0.1 exactly when it is > 0.1.
+# - SV_FatPVS over the (numleafs + 7) >> 3 bytes of a PVS row instead of (numleafs + 31) >> 3: the bits tested are
+#   leafnums of world leafs 1..numleafs (leaf - 1 < numleafs), all within the row; the three bytes more only OR in what
+#   Mod_DecompressVis left past the row.
 # - PF_checkclient's interval with > instead of >=: sv.time - sv.lastchecktime == 0.1 cannot hold. 0.1 as a double is
 #   an odd multiple of 2^-55; with sv.time >= 1 (it starts at 1) the difference is exact and a multiple of 2^-52.
 
 # Known blind spots: mutants the gates do not detect yet, each with the reason; reported, not counted as failures.
 # They are run like the others, so that one that becomes detected shows (then move it out of here).
 KNOWN = {
-    'CheckStuck: 17 up': 'needs a player stuck so that only 17 units up frees it, with its old origin stuck too',
-    'Frags: old_frags not updated': 'old_frags only decides svc_updatefrags messages: no gated lane sees them yet',
     'AirMove: teleport hack off': 'needs a player walking backwards within teleport_time of leaving a teleporter; the '
         'tapes do not',
-    'SetIdealPitch: steps rounded': 'SV_SetIdealPitch runs once per spawn in step 2 (through Host_Spawn_f); every frame '
-        'from step 3 on (SV_SendClientMessages)',
     'AirMove: walk gets upmove': 'tools/tapegen.py never sends an upmove, which walking ignores; the new tapes of cut 3, '
         'step 4 can',
     'spawn: team from top color': 'the tapes send "color 0 0", where top and bottom agree',
     'color: no clamp': 'the tapes send "color 0 0"',
-    'clientdata: damage kept': 'SV_WriteClientdataToMessage runs once per spawn in step 2 (Host_Spawn_f), before any '
-        'damage; every frame from step 4 on (SV_SendClientMessages)',
-    'SetIdealPitch: one step enough': 'SV_SetIdealPitch runs once per spawn in step 2 (through Host_Spawn_f); every frame '
-        'from step 4 on',
     'sprite bounds in float': 'differs only for a sprite of odd width or height; the three sprites of LibreQuake are '
         '16x16, 32x32 and 64x64',
     'aim: target centre in float': 'equivalent except on denormals: origin + 0.5*(mins + maxs) rounded once from double '
@@ -102,7 +103,8 @@ MUTANTS = {
          'if (clip.PassEdict >= 0 && Fields(clip.PassEdict)[EntVars.Size] != 0 && t[EntVars.Size] == 0)\n                continue;   // points never interact', ''),
     ]),
     'physics': (['method:Edict.Engine.Tests.PhysicsFuzzTests.Physics_matches_the_reference',
-                 'method:Edict.Engine.Tests.VmReplayTests.Server_frames_match_the_reference'], [
+                 'method:Edict.Engine.Tests.VmReplayTests.Server_frames_match_the_reference',
+                 'method:Edict.Engine.Tests.LoopGateTests.Loop_hashes_as_the_reference_every_frame'], [
         ('RunThink: >= the frame end', 'src/Edict.Engine/Server/Physics.cs',
          'if (thinktime <= 0 || thinktime > Time + FrameTime)', 'if (thinktime <= 0 || thinktime >= Time + FrameTime)'),
         ('RunThink: the past kept', 'src/Edict.Engine/Server/Physics.cs',
@@ -167,14 +169,17 @@ MUTANTS = {
          '                if (v[EntVars.Velocity + i] > max)\n                    v[EntVars.Velocity + i] = max;\n                else if (v[EntVars.Velocity + i] < -max)\n                    v[EntVars.Velocity + i] = -max;', ''),
         ('Noclip: no turning', 'src/Edict.Engine/Server/Physics.cs',
          '        VectorMa(V3(v, EntVars.Angles), (float)FrameTime, *V3(v, EntVars.Avelocity));\n        VectorMa(V3(v, EntVars.Origin), (float)FrameTime, *V3(v, EntVars.Velocity));\n        LinkEdict(ent, false);', '        VectorMa(V3(v, EntVars.Origin), (float)FrameTime, *V3(v, EntVars.Velocity));\n        LinkEdict(ent, false);'),
-        ('CleanupEnts: muzzle flash kept', 'src/Edict.Engine/Server/Physics.cs',
+        ('CleanupEnts: muzzle flash kept', 'src/Edict.Engine/Server/Send.cs',
          '            v[EntVars.Effects] = CCast.I32(v[EntVars.Effects]) & ~EfMuzzleFlash;', ''),
         ('Baseline: frame not kept', 'src/Edict.Engine/Server/Physics.cs',
          '            h->Baseline.Frame = CCast.I32(v[EntVars.Frame]);', ''),
-        ('Frags: old_frags not updated', 'src/Edict.Engine/Server/Physics.cs',
+        ('Frags: old_frags not updated', 'src/Edict.Engine/Server/Send.cs',
          '                host.OldFrags = CCast.I32(frags);', ''),
     ]),
-    'clients': (['Edict.Engine.Tests.VmReplayTests'], [
+    'clients': (['method:Edict.Engine.Tests.VmReplayTests.Vm_matches_the_reference_at_every_boundary',
+                 'method:Edict.Engine.Tests.VmReplayTests.Server_frame_start_matches_the_reference',
+                 'method:Edict.Engine.Tests.VmReplayTests.Server_frames_match_the_reference',
+                 'method:Edict.Engine.Tests.LoopGateTests.Loop_hashes_as_the_reference_every_frame'], [
         ('ReadAngle unsigned', 'src/Edict.Engine/Common/SizeBuf.cs',
          'public float ReadAngle() => (float)(ReadChar() * (360.0 / 256));', 'public float ReadAngle() => (float)(ReadByte() * (360.0 / 256));'),
         ('button2 not shifted', 'src/Edict.Engine/Server/Clients.cs',
@@ -226,6 +231,56 @@ MUTANTS = {
          'client.SpawnParms[i] = *G(GlobalVars.Parm1 + i);', 'client.SpawnParms[i] = *G(GlobalVars.Parm2 + i);'),
         ('spawn: time not set', 'src/Edict.Engine/Server/Clients.cs',
          '        *G(GlobalVars.Time) = (float)Time;\n        Globals[GlobalVars.Self] = _svPlayer * _edictSize;', '        Globals[GlobalVars.Self] = _svPlayer * _edictSize;'),
+    ]),
+    'messages': (['method:Edict.Engine.Tests.LoopGateTests.Loop_hashes_as_the_reference_every_frame',
+                  'method:Edict.Engine.Tests.MessageFuzzTests.Client_datagram_matches_the_reference',
+                  'method:Edict.Engine.Tests.MessageBuiltinTests.Message_builtins_match_the_reference'], [
+        ('entities: miss threshold in float', 'src/Edict.Engine/Server/Send.cs',
+         'if (miss < -0.1 || miss > 0.1)', 'if (miss < -0.1f || miss > 0.1f)'),
+        ('entities: angles compared to the origin baseline', 'src/Edict.Engine/Server/Send.cs',
+         'if (v[EntVars.Angles] != h->Baseline.Angles.X)', 'if (v[EntVars.Angles] != h->Baseline.Origin.X)'),
+        ('entities: no NOLERP for MOVETYPE_STEP', 'src/Edict.Engine/Server/Send.cs',
+         'bits |= UNoLerp;    // don\'t mess up the step animation', 'bits |= 0;'),
+        ('entities: colormap compared as an int', 'src/Edict.Engine/Server/Send.cs',
+         'if (h->Baseline.Colormap != v[EntVars.Colormap])', 'if (h->Baseline.Colormap != CCast.I32(v[EntVars.Colormap]))'),
+        ('entities: modelindex compared as an int', 'src/Edict.Engine/Server/Send.cs',
+         'if (h->Baseline.ModelIndex != v[EntVars.Modelindex])', 'if (h->Baseline.ModelIndex != CCast.I32(v[EntVars.Modelindex]))'),
+        ('entities: U_LONGENTITY from 257', 'src/Edict.Engine/Server/Send.cs', 'if (e >= 256)', 'if (e > 256)'),
+        ('entities: U_MOREBITS from 257', 'src/Edict.Engine/Server/Send.cs', 'if (bits >= 256)', 'if (bits > 256)'),
+        ('entities: 18 bytes kept free', 'src/Edict.Engine/Server/Send.cs', 'if (msg.MaxSize - msg.CurSize < 16)', 'if (msg.MaxSize - msg.CurSize < 18)'),
+        ('entities: second coordinate is the first', 'src/Edict.Engine/Server/Send.cs',
+         '                msg.WriteCoord(v[EntVars.Origin + 1]);', '                msg.WriteCoord(v[EntVars.Origin]);'),
+        ('entities: the client not always sent', 'src/Edict.Engine/Server/Send.cs', 'if (e != clent)     // clent is always sent', 'if (e != -1)'),
+        ('entities: model string not checked', 'src/Edict.Engine/Server/Send.cs',
+         'if (v[EntVars.Modelindex] == 0 || *String(((int*)v)[EntVars.Model]) == 0)', 'if (v[EntVars.Modelindex] == 0)'),
+        ('entities: leaf bits from the top', 'src/Edict.Engine/Server/Send.cs',
+         '(1 << (h->LeafNums[i] & 7))', '(0x80 >> (h->LeafNums[i] & 7))'),
+        ('fat PVS: d >= 8 goes one side', 'src/Edict.Engine/Server/Send.cs', 'if (d > 8)', 'if (d >= 8)'),
+        ('fat PVS: without the view offset', 'src/Edict.Engine/Server/Send.cs',
+         'Vec3 org = Vec3.Add(*V3(c, EntVars.Origin), *V3(c, EntVars.ViewOfs));', 'Vec3 org = *V3(c, EntVars.Origin);'),
+        ('fat PVS: solid leafs too', 'src/Edict.Engine/Server/Send.cs',
+         'if (model->Leafs[leaf].Contents != Bsp.ContentsSolid)', 'if (model->Leafs[leaf].Contents <= 0)'),
+        ('datagram: time of the next frame', 'src/Edict.Engine/Server/Send.cs', 'msg.WriteFloat((float)Time);', 'msg.WriteFloat((float)(Time + FrameTime));'),
+        ('datagram: copied when it just fits', 'src/Edict.Engine/Server/Send.cs',
+         'if (msg.CurSize + Datagram.CurSize < msg.MaxSize)', 'if (msg.CurSize + Datagram.CurSize <= msg.MaxSize)'),
+        ('datagram: server datagram left out', 'src/Edict.Engine/Server/Send.cs',
+         'msg.Write(Datagram.Data, Datagram.CurSize);', 'msg.Write(Datagram.Data, 0);'),
+        ('nop: after 4 seconds', 'src/Edict.Engine/Server/Send.cs', 'if (RealTime - host.LastMessage > 5)', 'if (RealTime - host.LastMessage > 4)'),
+        ('nop: last_message kept', 'src/Edict.Engine/Server/Send.cs', '        client.LastMessage = RealTime;\n', ''),
+        ('reliable: last_message kept', 'src/Edict.Engine/Server/Send.cs', '                host.LastMessage = RealTime;\n', ''),
+        ('reliable: signon stage kept', 'src/Edict.Engine/Server/Send.cs', '                host.SendSignon = false;\n', ''),
+        ('reconnect: not sent', 'src/Edict.Engine/Host.cs', '            old.SendReconnect();', '            _ = old;'),
+        ('ambientsound: volume rounded', 'src/Edict.Engine/Server/Builtins.cs', 'm.WriteByte(CCast.I32(vol * 255));', 'm.WriteByte(CCast.I32(vol * 255 + 0.5f));'),
+        ('ambientsound: no message', 'src/Edict.Engine/Server/Builtins.cs', '        m.WriteByte(SvcSpawnStaticSound);\n', ''),
+        ('makestatic: skin before colormap', 'src/Edict.Engine/Server/Builtins.cs',
+         '        m.WriteByte(CCast.I32(v[EntVars.Colormap]));\n        m.WriteByte(CCast.I32(v[EntVars.Skin]));',
+         '        m.WriteByte(CCast.I32(v[EntVars.Skin]));\n        m.WriteByte(CCast.I32(v[EntVars.Colormap]));'),
+        ('makestatic: angle before origin', 'src/Edict.Engine/Server/Builtins.cs',
+         '            m.WriteCoord(v[EntVars.Origin + i]);\n            m.WriteAngle(v[EntVars.Angles + i]);',
+         '            m.WriteAngle(v[EntVars.Angles + i]);\n            m.WriteCoord(v[EntVars.Origin + i]);'),
+        ('lightstyle: only to spawned clients', 'src/Edict.Engine/Server/Builtins.cs', 'if (c.Active || c.Spawned)', 'if (c.Spawned)'),
+        ('lightstyle: sent while loading too', 'src/Edict.Engine/Server/Builtins.cs', '        if (!sv.Active)\n            return;\n        for (int j = 0; j < sv.MaxClients; j++)',
+         '        for (int j = 0; j < sv.MaxClients; j++)'),
     ]),
     'spawn': (['Edict.Engine.Tests.SpawnGateTests', 'Edict.Engine.Tests.SpawnParseTests'], [
         ('COM_Parse: unsigned char', 'src/Edict.Engine/Common/ComParse.cs',
@@ -313,7 +368,10 @@ def run(cmd, cwd, env):
 def main():
     repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     work = os.path.abspath(sys.argv[1])
-    groups = sys.argv[2:] or list(MUTANTS)
+    args = sys.argv[2:]
+    known_only = '--known' in args
+    only = [args[i + 1] for i, a in enumerate(args) if a == '--only']
+    groups = [a for i, a in enumerate(args) if not a.startswith('--') and (i == 0 or args[i - 1] != '--only')] or list(MUTANTS)
     shutil.rmtree(work, ignore_errors=True)
     os.makedirs(work)
     for c in COPY:
@@ -332,6 +390,8 @@ def main():
     for g in groups:
         classes, mutants = MUTANTS[g]
         for name, rel, old, new in mutants:
+            if known_only and name not in KNOWN or only and not any(o in name for o in only):
+                continue
             path = os.path.join(work, rel)
             pristine = open(os.path.join(repo, rel), encoding='utf-8').read()
             if pristine.count(old) != 1:
@@ -344,7 +404,7 @@ def main():
                 print(f'ERROR   {g}: {name}: does not build')
                 survived += 1
             else:
-                args = ['dotnet', 'run', '--project', test, '-c', 'Release', '--no-build', '--']
+                args = ['dotnet', 'run', '--project', test, '-c', 'Release', '--no-build', '--', '-stopOnFail']
                 for c in classes:     # a test class, or 'method:' and one test method
                     args += ['-method', c[7:]] if c.startswith('method:') else ['-class', c]
                 t = run(args, work, env)
@@ -355,6 +415,8 @@ def main():
                     continue
                 failed = t.returncode != 0
                 first = next((l.strip() for l in t.stdout.splitlines() if 'first divergence' in l), '')
+                if failed and not first:     # the failing test, when its message names no divergence
+                    first = next((l.strip() for l in t.stdout.splitlines() if '[FAIL]' in l), '')
                 known = name in KNOWN
                 status = 'detected' if failed else 'KNOWN BLIND' if known else 'SURVIVED'
                 print(f'{status} {g}: {name}' + (f'  -- {first[:160]}' if first else f'  -- {KNOWN[name]}' if known and not failed else ''))

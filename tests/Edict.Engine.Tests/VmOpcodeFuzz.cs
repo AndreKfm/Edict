@@ -35,8 +35,8 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
             throw new InvalidOperationException("EDICT_ORACLE is not set: point it to the oracle library built by ref/build.sh (docs/TESTING.md).");
         nint h = NativeLibrary.Load(path);
         var version = (delegate* unmanaged<int>)NativeLibrary.GetExport(h, "EdictOracle_Version");
-        if (version() != 6)
-            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 6.");
+        if (version() != 7)
+            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 7.");
         return h;
     }
 
@@ -241,6 +241,12 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
     public int NumEdicts { get; }
 
     /// <summary>splitmix64 and the float inputs of the fuzz.</summary>
+    /// <summary>
+    /// A fuzz seed for a map that is the same in every process (string.GetHashCode is randomized per process, which
+    /// made the fuzzes' inputs differ from run to run).
+    /// </summary>
+    public static ulong MapSeed(string map) => Edict.Harness.Xxh64.Hash(System.Text.Encoding.ASCII.GetBytes(map)) & 0xFFFF;
+
     public struct Rng(ulong seed)
     {
         private ulong _s = seed;

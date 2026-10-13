@@ -39,7 +39,6 @@ public sealed unsafe partial class Server
         _gravityField = d == null ? -1 : d->Ofs;
         _movedEdict = new int[MaxEdictsDefault];      // MAX_EDICTS, as C's arrays
         _movedFrom = new Vec3[MaxEdictsDefault];
-        _clientDatagram = new SizeBuf(MaxDatagram);
         _varString = GC.AllocateArray<byte>(VarStringSize, pinned: true);
         CommandText = new SizeBuf(8192);         // cmd_text; the host loop shares its own
     }
@@ -1081,88 +1080,6 @@ public sealed unsafe partial class Server
             if (Clients[i].Active)
                 SendServerinfo(Clients[i]);
     }
-
-    // ---- the end of the server frame
-
-    /// <summary>
-    /// SV_SendClientMessages as far as it changes state: the frag updates (old_frags), each spawned client's
-    /// datagram with its client data (SV_WriteClientdataToMessage clears damage and fixangle, sets idealpitch), the
-    /// signon messages, an overflowed message dropping its client (not ported yet), and SV_CleanupEnts. The entity
-    /// updates (SV_WriteEntitiesToClient) are messages only and come with the messages lane; what is sent is
-    /// discarded by the tape driver in the reference too.
-    /// </summary>
-    public void SendClientMessages()
-    {
-        // update frags, names, etc (SV_UpdateToReliableMessages)
-        for (int i = 0; i < MaxClients; i++)
-        {
-            Client host = Clients[i];
-            float frags = Fields(host.Edict)[EntVars.Frags];
-            if (host.OldFrags != frags)
-            {
-                for (int j = 0; j < MaxClients; j++)
-                {
-                    Client c = Clients[j];
-                    if (!c.Active)
-                        continue;
-                    c.Message.WriteByte(SvcUpdateFrags);
-                    c.Message.WriteByte(i);
-                    c.Message.WriteShort(CCast.I32(frags));
-                }
-                host.OldFrags = CCast.I32(frags);
-            }
-        }
-        for (int j = 0; j < MaxClients; j++)
-        {
-            Client c = Clients[j];
-            if (!c.Active)
-                continue;
-            c.Message.Write(ReliableDatagram.Data, ReliableDatagram.CurSize);
-        }
-        ReliableDatagram.Clear();
-
-        // build individual updates
-        for (int i = 0; i < MaxClients; i++)
-        {
-            _hostClient = i;
-            Client host = Clients[i];
-            if (!host.Active)
-                continue;
-
-            if (host.Spawned)
-            {
-                // SV_SendClientDatagram: svc_time, the client data, the entities, the server datagram if there is room
-                SizeBuf msg = _clientDatagram;
-                msg.Clear();
-                msg.WriteByte(SvcTime);
-                msg.WriteFloat((float)Time);
-                WriteClientdataToMessage(host.Edict, msg);
-            }
-            else if (!host.SendSignon)
-                continue;   // SV_SendNop if too much time has passed; don't send out non-signon messages
-
-            // check for an overflowed message
-            if (host.Message.Overflowed)
-                throw DropNotPorted;
-
-            if (host.Message.CurSize != 0 || host.DropAsap)
-            {
-                if (host.DropAsap)
-                    throw DropNotPorted;    // went to another level
-                host.Message.Clear();       // NET_SendMessage: the tape discards it
-                host.SendSignon = false;
-            }
-        }
-
-        // clear muzzle flashes (SV_CleanupEnts)
-        for (int e = 1; e < NumEdicts; e++)
-        {
-            float* v = Fields(e);
-            v[EntVars.Effects] = CCast.I32(v[EntVars.Effects]) & ~EfMuzzleFlash;
-        }
-    }
-
-    private SizeBuf _clientDatagram = null!;    // SV_SendClientDatagram's buf[MAX_DATAGRAM], without overflow
 
     /// <summary>Host_ServerFrame: the frame start (clients), SV_Physics, SV_SendClientMessages.</summary>
     public void ServerFrame()

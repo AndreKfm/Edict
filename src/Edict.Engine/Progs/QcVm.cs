@@ -97,7 +97,7 @@ public sealed unsafe class QcVm
     public int Depth { get; private set; }
 
     /// <summary>pr_argc: the argument count of the builtin being called.</summary>
-    public int Argc { get; private set; }
+    public int Argc { get; internal set; }
 
     /// <summary>pr_xstatement.</summary>
     public int XStatement { get; private set; }

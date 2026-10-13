@@ -298,6 +298,7 @@ public sealed unsafe class VmReplay : IDisposable
             _where.Push($"server frame {frame}");
             _sv.ServerFrame();
             _where.Pop();
+            _tape.TakeSent();               // the messages lane is gated by the host loop (LoopGateTests), which has realtime
             _lastPortFrame = frame;
             PortFrames++;
             return;

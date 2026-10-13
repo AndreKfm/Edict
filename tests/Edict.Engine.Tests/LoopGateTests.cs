@@ -9,9 +9,10 @@ namespace Edict.Engine.Tests;
 /// <summary>
 /// The cut-3 gate (docs/PLAN.md section C): the port's host runs the whole tape by itself — "map", every host
 /// frame, the clients' messages from the tape, physics, restarts and changelevels — with no capture in the loop, and
-/// after every frame its state must hash as the reference's frame record, at every spawn as its spawn record. What
-/// the port takes from the reference: the cvars, maxclients and the rand state at the first spawn (Host_Init and the
-/// configs ran before it), from the capture of the same run.
+/// after every frame its state must hash as the reference's frame record, at every spawn as its spawn record, and what
+/// it sent the client since the previous record must hash as the record's messages lane. What the port takes from the
+/// reference: the cvars, maxclients and the rand state at the first spawn (Host_Init and the configs ran before it),
+/// from the capture of the same run. Where the run has an .emg, a difference in the messages is shown to the byte.
 /// </summary>
 public sealed unsafe class LoopGateTests
 {
@@ -44,6 +45,8 @@ public sealed unsafe class LoopGateTests
         string capture = Path.Combine(VmReplay.Directory, map + ".ecp");
         VmReplay.SpawnInputs inputs = VmReplay.FirstSpawn(capture);
         var edh = new EdhFile(edhPath);
+        string emgPath = Path.ChangeExtension(edhPath, ".emg");
+        EmgFile? emg = File.Exists(emgPath) ? new EmgFile(emgPath) : null;
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         var tape = new TapeNet(tapePath);
         using var host = new Host(files, new Cvars(inputs.Cvars), inputs.MaxClients, inputs.RandSeed, tape,
@@ -73,6 +76,9 @@ public sealed unsafe class LoopGateTests
                 failure = $"spawn of {r.Map}: typed globals lane differs";
             if (failure is null && l.Edicts != r.Edicts)
                 failure = $"spawn of {r.Map}: edicts lane differs";
+            if (failure is null && Xxh64.Hash(tape.Sent) != r.Messages)
+                failure = $"spawn of {r.Map}: messages lane differs" + (emg is null ? "" : ": " + EmgFile.Difference(tape.Sent, emg.Spawns[spawn - 1]));
+            tape.TakeSent();
         };
         host.AddText(Encoding.Latin1.GetBytes($"map {map}\n"));
         float time = host.HostFramerate();
@@ -100,8 +106,12 @@ public sealed unsafe class LoopGateTests
                 failure = $"frame {frame}: typed globals lane differs";
             else if (l.Edicts != r.Edicts)
                 failure = $"frame {frame}: edicts lane differs";
+            else if (Xxh64.Hash(tape.Sent) != r.Messages)
+                failure = $"frame {frame}: messages lane differs"
+                          + (emg is null ? "" : ": " + EmgFile.Difference(tape.Sent, emg.Frames[(uint)host.FrameCount]));
             else
                 hashed++;
+            tape.TakeSent();
         }
         frames = hashed;
         spawns = spawn;

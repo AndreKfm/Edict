@@ -15,6 +15,10 @@ edict_u64 EdictHash_XXH64 (const void *data, int length);
 // Opens the .edh output; flags: EDH_FLAG_PER_ENTITY adds one hash per edict to every frame record.
 #define EDH_FLAG_PER_ENTITY	1
 void EdictHash_Open (char *path, int flags);
+// Diagnostic: -edictmessages <file>, the messages of the messages lane (.emg); after EdictHash_Open.
+void EdictHash_OpenMessages (char *path);
+// Called by the tape driver for every message the server sends: kind 1 reliable, 2 unreliable.
+void EdictHash_Sent (int kind, const void *data, int length);
 // Called after every host frame that ran while sv.active; writes one frame record.
 void EdictHash_Frame (void);
 // Called after ED_LoadFromFile in SV_SpawnServer (patch 0005): the spawn records of the hash and the capture.

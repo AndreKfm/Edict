@@ -9,7 +9,9 @@ namespace Edict.Harness;
 /// <summary>
 /// The tape network driver of the reference (ref/src/edict_tape.c) for the port: one client connection fed from an
 /// input tape (.etp, tools/tapegen.py); a record tagged with frame f is delivered when the server reads during a
-/// host frame with host_framecount ≥ f. What the server sends is discarded. Open-loop, as in C.
+/// host frame with host_framecount ≥ f. Open-loop, as in C. What the server sends is kept in the stream the messages
+/// lane hashes (ref/src/edict_hash.c: per message u8 kind, 1 reliable or 2 unreliable, u32 length, the bytes) until
+/// the harness takes it at a state record.
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public sealed unsafe class TapeNet : INetServer, IClientConnection, IFrameCounted
@@ -19,10 +21,27 @@ public sealed unsafe class TapeNet : INetServer, IClientConnection, IFrameCounte
     private static readonly SysErrorException SecondConnect = new("Tape: second connect record");
     private static readonly SysErrorException BadRecord = new("Tape: bad record type");
     private static readonly SysErrorException Truncated = new("Tape: truncated record");
+    private static readonly SysErrorException SentOverflow = new("Tape: message stream overflow");
+    private const int SentSize = 1 << 20;            // SENT_SIZE
 
     private readonly byte[] _tape;
     private int _pos = 16;
     private bool _connected;
+    private readonly byte[] _sent;
+    private int _sentLength;
+
+    /// <summary>What was sent since the last <see cref="TakeSent"/>, in the messages lane's format.</summary>
+    public ReadOnlySpan<byte> Sent
+    {
+        get
+        {
+            fixed (byte* s = _sent)
+                return new ReadOnlySpan<byte>(s, _sentLength);
+        }
+    }
+
+    /// <summary>Ends the messages of one state record: <see cref="Sent"/> starts empty again.</summary>
+    public void TakeSent() => _sentLength = 0;
 
     /// <summary>host_framecount while the server reads.</summary>
     public int FrameCount { get; set; }
@@ -31,6 +50,7 @@ public sealed unsafe class TapeNet : INetServer, IClientConnection, IFrameCounte
     public TapeNet(string path)
     {
         _tape = GC.AllocateArray<byte>((int)new FileInfo(path).Length, pinned: true);
+        _sent = GC.AllocateArray<byte>(SentSize, pinned: true);
         using (FileStream f = File.OpenRead(path))
             f.ReadExactly(_tape);
         if (_tape.Length < 16 || !_tape.AsSpan(0, 4).SequenceEqual("ETP1"u8) || BinaryPrimitives.ReadUInt32LittleEndian(_tape.AsSpan(4)) != 1)
@@ -77,4 +97,27 @@ public sealed unsafe class TapeNet : INetServer, IClientConnection, IFrameCounte
         _pos += 7 + length;
         return type;
     }
+
+    private int Record(int kind, SizeBuf data)
+    {
+        int n = data.CurSize;
+        if (_sentLength + 5 + n > SentSize)
+            throw SentOverflow;
+        fixed (byte* s = _sent)
+        {
+            byte* m = s + _sentLength;
+            m[0] = (byte)kind;
+            for (int i = 0; i < 4; i++)
+                m[1 + i] = (byte)(n >> (8 * i));
+            new ReadOnlySpan<byte>(data.Data, n).CopyTo(new Span<byte>(m + 5, n));
+        }
+        _sentLength += 5 + n;
+        return 1;
+    }
+
+    public int SendMessage(SizeBuf data) => Record(1, data);
+
+    public int SendUnreliableMessage(SizeBuf data) => Record(2, data);
+
+    public bool CanSendMessage() => true;
 }

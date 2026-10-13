@@ -16,7 +16,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	6
+#define ORACLE_VERSION	7
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);
@@ -529,4 +529,169 @@ EDICT_EXPORT void EdictOracle_Physics (float *globals, void *edicts, int *num_ed
 	SV_Physics ();
 	*num_edicts = sv.num_edicts;
 	*time = sv.time;
+}
+
+/*
+==============================================================================
+A client's datagram on a world (level 1 for SV_WriteClientdataToMessage and SV_WriteEntitiesToClient)
+
+On the world of EdictOracle_LoadWorld, the progs image of EdictOracle_Progs and caller edicts linked with
+EdictOracle_LinkEdict. The buffer allows overflow (SV_SendClientDatagram's own leaves allowoverflow uninitialized),
+so that the caller can put the 16-byte check on its edge and see what an overflow does.
+==============================================================================
+*/
+
+void SV_WriteEntitiesToClient (edict_t *clent, sizebuf_t *msg);	// sv_main.c, not declared in a header
+
+// The baseline of edict n (SV_CreateBaseline's entity_state_t).
+EDICT_EXPORT void EdictOracle_SetBaseline (void *edicts, int entityfields, int n, entity_state_t *baseline)
+{
+	pr_edict_size = entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
+	sv.edicts = edicts;
+	EDICT_NUM (n)->baseline = *baseline;
+}
+
+// SV_WriteClientdataToMessage (if clientdata) and SV_WriteEntitiesToClient for edict clent, as sv_player, into out
+// from cursize start of maxsize; returns the new cursize, or -1 - cursize if the buffer overflowed.
+EDICT_EXPORT int EdictOracle_ClientDatagram (float *globals, void *edicts, int num_edicts, int clent, int clientdata,
+	byte *out, int start, int maxsize)
+{
+	sizebuf_t	msg;
+
+	pr_globals = globals;
+	pr_global_struct = (globalvars_t *)globals;
+	sv.edicts = edicts;
+	sv.num_edicts = num_edicts;
+	sv_player = EDICT_NUM (clent);
+	memset (&msg, 0, sizeof (msg));
+	msg.data = out;
+	msg.maxsize = maxsize;
+	msg.cursize = start;
+	msg.allowoverflow = true;
+	if (clientdata)
+		SV_WriteClientdataToMessage (sv_player, &msg);
+	SV_WriteEntitiesToClient (sv_player, &msg);
+	return msg.overflowed ? -1 - msg.cursize : msg.cursize;
+}
+
+qboolean SV_SendClientDatagram (client_t *client);	// sv_main.c, likewise
+
+static byte		oracle_sent[MAX_DATAGRAM];
+static int		oracle_sent_len;
+
+static int OracleSendUnreliable (qsocket_t *sock, sizebuf_t *data)
+{
+	oracle_sent_len = data->cursize <= (int)sizeof (oracle_sent) ? data->cursize : -1;
+	if (oracle_sent_len > 0)
+		memcpy (oracle_sent, data->data, oracle_sent_len);
+	return 1;
+}
+
+// SV_SendClientDatagram itself for client 0 (edict clent, as sv_player) at sv.time, with sv.datagram holding
+// datagram[length]; the message goes to a socket of driver 0, whose unreliable send the oracle takes over for the
+// call. Returns the message's length (out gets it), -1 if nothing was sent. The function's own buffer leaves
+// allowoverflow uninitialized: the caller keeps the message clear of an overflow.
+EDICT_EXPORT int EdictOracle_SendClientDatagram (float *globals, void *edicts, int num_edicts, int clent, double time,
+	byte *datagram, int length, byte *out)
+{
+	static qsocket_t	sock;
+	int					(*send) (qsocket_t *sock, sizebuf_t *data);
+
+	pr_globals = globals;
+	pr_global_struct = (globalvars_t *)globals;
+	sv.edicts = edicts;
+	sv.num_edicts = num_edicts;
+	sv.time = time;
+	sv_player = EDICT_NUM (clent);
+	memset (&sock, 0, sizeof (sock));
+	oracle_clients[0].edict = sv_player;
+	oracle_clients[0].netconnection = &sock;
+	memcpy (oracle_datagram, datagram, length);
+	sv.datagram.data = oracle_datagram;
+	sv.datagram.maxsize = sizeof (oracle_datagram);
+	sv.datagram.cursize = length;
+	sv.datagram.overflowed = false;
+	send = net_drivers[0].SendUnreliableMessage;
+	net_drivers[0].SendUnreliableMessage = OracleSendUnreliable;
+	oracle_sent_len = -1;
+	SV_SendClientDatagram (&oracle_clients[0]);
+	net_drivers[0].SendUnreliableMessage = send;
+	oracle_clients[0].netconnection = NULL;
+	sv.datagram.cursize = 0;
+	if (oracle_sent_len > 0)
+		memcpy (out, oracle_sent, oracle_sent_len);
+	return oracle_sent_len;
+}
+
+/*
+==============================================================================
+Message builtins (level 1 for the Write* family, sound, particle, the prints, stuffcmd, lightstyle, ambientsound,
+makestatic)
+
+EdictOracle_MessageSetup gives the server its message buffers (sv.datagram, sv.reliable_datagram and sv.signon as
+SV_SpawnServer sizes them, without allowoverflow: the caller keeps what one call writes small), maxclients clients
+with their own messages (allowoverflow, as SV_ConnectClient sets it) and the precache lists the builtins look names
+up in. EdictOracle_Builtin then runs a builtin; EdictOracle_TakeMessage reads a buffer and empties it.
+==============================================================================
+*/
+
+static byte		oracle_reliable[MAX_DATAGRAM];
+static byte		oracle_signon[NET_MAXMESSAGE];
+static char		oracle_empty[1];
+
+EDICT_EXPORT void EdictOracle_MessageSetup (int maxclients, int *active, int *spawned, char **models, int nmodels,
+	char **sounds, int nsounds)
+{
+	int		i;
+
+	memset (oracle_clients, 0, sizeof (oracle_clients));
+	for (i = 0 ; i < maxclients ; i++)
+	{
+		oracle_clients[i].active = active[i];
+		oracle_clients[i].spawned = spawned[i];
+		oracle_clients[i].message.data = oracle_clients[i].msgbuf;
+		oracle_clients[i].message.maxsize = sizeof (oracle_clients[i].msgbuf);
+		oracle_clients[i].message.allowoverflow = true;
+	}
+	svs.clients = oracle_clients;
+	svs.maxclients = maxclients;
+	memset (&sv.datagram, 0, sizeof (sv.datagram));
+	sv.datagram.data = oracle_datagram;
+	sv.datagram.maxsize = sizeof (oracle_datagram);
+	memset (&sv.reliable_datagram, 0, sizeof (sv.reliable_datagram));
+	sv.reliable_datagram.data = oracle_reliable;
+	sv.reliable_datagram.maxsize = sizeof (oracle_reliable);
+	memset (&sv.signon, 0, sizeof (sv.signon));
+	sv.signon.data = oracle_signon;
+	sv.signon.maxsize = sizeof (oracle_signon);
+	memset (sv.model_precache, 0, sizeof (sv.model_precache));
+	memset (sv.sound_precache, 0, sizeof (sv.sound_precache));
+	sv.model_precache[0] = sv.sound_precache[0] = oracle_empty;
+	for (i = 0 ; i < nmodels && i < MAX_MODELS - 1 ; i++)
+		sv.model_precache[i + 1] = models[i];
+	for (i = 0 ; i < nsounds && i < MAX_SOUNDS - 1 ; i++)
+		sv.sound_precache[i + 1] = sounds[i];
+}
+
+// which: 0 sv.datagram, 1 sv.reliable_datagram, 2 sv.signon, 3 + i client i's message. Copies at most size bytes;
+// returns cursize, or -1 - cursize if the buffer overflowed. The buffer is emptied.
+EDICT_EXPORT int EdictOracle_TakeMessage (int which, byte *out, int size)
+{
+	sizebuf_t	*b;
+	int			n;
+
+	if (which == 0)
+		b = &sv.datagram;
+	else if (which == 1)
+		b = &sv.reliable_datagram;
+	else if (which == 2)
+		b = &sv.signon;
+	else
+		b = &oracle_clients[which - 3].message;
+	n = b->cursize;
+	memcpy (out, b->data, n < size ? n : size);
+	n = b->overflowed ? -1 - n : n;
+	b->cursize = 0;
+	b->overflowed = false;
+	return n;
 }

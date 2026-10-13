@@ -202,7 +202,7 @@ public sealed unsafe class WorldFuzzTests
     // Mod_PointInLeaf: random points, and points exactly on node planes (d == 0 takes the back side)
     private static string? Points(Server sv, Model* w, string map)
     {
-        var rng = new Rng((ulong)map.GetHashCode() & 0xFFFF);
+        var rng = new Rng(VmOpcodeFuzz.MapSeed(map));
         for (int n = 0; n < 40_000; n++)
         {
             Vec3 p = Point(ref rng, w);

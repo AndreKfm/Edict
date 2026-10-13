@@ -136,7 +136,7 @@ public sealed unsafe class PhysicsFuzzTests
             int active = 1;
             SetupFn(1, &active, 800, 2000, 0);
 
-            var rng = new VmOpcodeFuzz.Rng((ulong)map.GetHashCode() & 0xFFFF);
+            var rng = new VmOpcodeFuzz.Rng(VmOpcodeFuzz.MapSeed(map));
             short* leafs = stackalloc short[16];
             Model* w = world.World;
 

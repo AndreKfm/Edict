@@ -5,12 +5,24 @@ using Edict.Exact;
 
 namespace Edict.Engine;
 
-/// <summary>The server's side of one client connection (net.h's qsocket_t as SV_ReadClientMessage uses it).</summary>
+/// <summary>The server's side of one client connection (net.h's qsocket_t as the server uses it).</summary>
 public interface IClientConnection
 {
     /// <summary>NET_GetMessage: -1 error, 0 nothing pending, 1 a reliable and 2 an unreliable message in <paramref name="netMessage"/>.</summary>
     [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
     int GetMessage(SizeBuf netMessage);
+
+    /// <summary>NET_SendMessage: 1 sent, 0 not now, -1 the connection is gone.</summary>
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    int SendMessage(SizeBuf data);
+
+    /// <summary>NET_SendUnreliableMessage: as <see cref="SendMessage"/>.</summary>
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    int SendUnreliableMessage(SizeBuf data);
+
+    /// <summary>NET_CanSendMessage.</summary>
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    bool CanSendMessage();
 }
 
 /// <summary>The network as the server sees it: NET_CheckNewConnections.</summary>

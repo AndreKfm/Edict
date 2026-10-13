@@ -3,7 +3,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 # Cut-2 VM corpus: per map, a VM capture (.ecp, ref/src/edict_capture.c) of spawn and FRAMES frames driven by the
 # R9 input tape (same map:seed list as tools/r9-linux.sh), single player, and the hashes of the same run (.edh,
-# ref/src/edict_hash.c), whose spawn records are the frame-0 gate.
+# ref/src/edict_hash.c), whose spawn records are the frame-0 gate, and the messages the server sent (.emg), which
+# show a difference in the messages lane to the byte.
 # Usage: tools/captures.sh <dir with edict_ref or edict_ref.exe> <out-dir>
 set -eu
 REF="$(cd "$1" && pwd)"
@@ -18,8 +19,7 @@ for entry in start:1 lq_e0m1:2 lq_e0m2:3 lq_e0m3:4 lq_e0m4:5 lq_e0m5:6 lq_e0m6:7
   map=${entry%:*}; seed=${entry#*:}
   $PY -I "$TOOLS/tapegen.py" "$OUT/$map.etp" "$seed" "$FRAMES"
   "$REF/edict_ref$EXE" -dedicated 1 -edictframes "$FRAMES" -edicttape "$OUT/$map.etp" -edictcapture "$OUT/$map.ecp" \
-    -edicthash "$OUT/$map.edh" \
-    +map "$map" > "$OUT/$map.log" 2>&1 || { echo "$map: exit $?"; tail -2 "$OUT/$map.log"; exit 1; }
+    -edicthash "$OUT/$map.edh" -edictmessages "$OUT/$map.emg" +map "$map" > "$OUT/$map.log" 2>&1 || { echo "$map: exit $?"; tail -2 "$OUT/$map.log"; exit 1; }
   echo "$map: $(wc -c < "$OUT/$map.ecp") bytes"
 done
 

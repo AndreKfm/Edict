@@ -396,10 +396,27 @@ public static unsafe class Builtins
     }
 
     /// <summary>
-    /// makestatic (entity): the entity goes into the signon message as a static entity, then is freed. The signon
-    /// output comes with messages; what the VM sees, the freed entity, is here.
+    /// makestatic (entity): the entity goes into the signon message as a static entity, then is freed.
     /// </summary>
-    private static void PF_makestatic(Server sv) => sv.Free(GEdict(sv, OfsParm0));
+    private static void PF_makestatic(Server sv)
+    {
+        int e = GEdict(sv, OfsParm0);
+        float* v = sv.Fields(e);
+        SizeBuf m = sv.Signon;
+        m.WriteByte(SvcSpawnStatic);
+        m.WriteByte(sv.SvModelIndex(sv.String(((int*)v)[EntVars.Model])));
+        m.WriteByte(CCast.I32(v[EntVars.Frame]));
+        m.WriteByte(CCast.I32(v[EntVars.Colormap]));
+        m.WriteByte(CCast.I32(v[EntVars.Skin]));
+        for (int i = 0; i < 3; i++)
+        {
+            m.WriteCoord(v[EntVars.Origin + i]);
+            m.WriteAngle(v[EntVars.Angles + i]);
+        }
+
+        // throw the entity away now
+        sv.Free(e);
+    }
 
     /// <summary>
     /// setorigin (entity, origin): the only valid way to move an object without using the physics of the world;
@@ -438,8 +455,8 @@ public static unsafe class Builtins
     private static readonly SysErrorException BadLightstyle = new("PF_lightstyle: style outside sv.lightstyles (undefined in C)");
 
     /// <summary>
-    /// lightstyle (style, value): sv.lightstyles[style] = value. Once the server is active C also sends the style to
-    /// every client: message output, which comes with the messages lane.
+    /// lightstyle (style, value): sv.lightstyles[style] = value; once the server is active, the style goes to every
+    /// active or spawned client too. C does not check the style's range (it writes past sv.lightstyles); the port stops.
     /// </summary>
     private static void PF_lightstyle(Server sv)
     {
@@ -447,18 +464,53 @@ public static unsafe class Builtins
         byte* val = S(sv, OfsParm1);
         if ((uint)style >= Server.MaxLightstyles)
             throw BadLightstyle;
+
+        // change the string in sv
         sv.SetLightstyle(style, val);
+
+        // send message to all clients on this server
+        if (!sv.Active)
+            return;
+        for (int j = 0; j < sv.MaxClients; j++)
+        {
+            Client c = sv.Clients[j];
+            if (c.Active || c.Spawned)
+            {
+                c.Message.WriteChar(SvcLightStyleNum);
+                c.Message.WriteChar(style);
+                c.Message.WriteString(val);
+            }
+        }
     }
 
     /// <summary>
-    /// ambientsound (pos, samp, vol, attenuation): a sound that is not precached is a console message; otherwise C
-    /// adds svc_spawnstaticsound to the signon message, which comes with the messages lane. No state changes.
+    /// ambientsound (pos, samp, vol, attenuation): svc_spawnstaticsound in the signon message; a sound that is not
+    /// precached is only a console message.
     /// </summary>
-    private static void PF_ambientsound(Server sv) => sv.SoundIndex(S(sv, OfsParm1));
+    private static void PF_ambientsound(Server sv)
+    {
+        float* pos = sv.G(OfsParm0);
+        float vol = *sv.G(OfsParm2), attenuation = *sv.G(OfsParm3);
+
+        // check to see if samp was properly precached
+        int soundnum = sv.SoundIndex(S(sv, OfsParm1));
+        if (soundnum < 0)
+            return;     // Con_Printf ("no precache: %s\n", samp)
+
+        // add an svc_spawnambient command to the level signon packet
+        SizeBuf m = sv.Signon;
+        m.WriteByte(SvcSpawnStaticSound);
+        for (int i = 0; i < 3; i++)
+            m.WriteCoord(pos[i]);
+        m.WriteByte(soundnum);
+        m.WriteByte(CCast.I32(vol * 255));
+        m.WriteByte(CCast.I32(attenuation * 64));
+    }
 
     // ---- messages: what the server sends; the bytes are what a client receives, their sizes decide overflows
 
-    private const int SvcPrintNum = 8, SvcCenterPrintNum = 26, SvcStuffText = 9;
+    private const int SvcPrintNum = 8, SvcCenterPrintNum = 26, SvcStuffText = 9, SvcLightStyleNum = 12, SvcSpawnStatic = 20,
+        SvcSpawnStaticSound = 29;
     private const int MsgBroadcast = 0, MsgOne = 1, MsgAll = 2, MsgInit = 3;
 
     private static readonly HostErrorException NotAClient = new("WriteDest: not a client");

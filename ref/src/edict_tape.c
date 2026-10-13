@@ -6,8 +6,9 @@ Edict reference build: tape network driver. Replaces net_none.c in the build (it
 
 A tape is a file of client-to-server messages, each tagged with the host frame from which it may be read
 (docs/PLAN.md E.4). The driver presents one client connection to the server and hands it the tape's messages;
-everything the server sends is accepted and discarded. Input is open-loop: nothing on the tape depends on what
-the server does, so the same file drives the C reference and the C# port.
+everything the server sends is accepted, goes to the messages lane of the state hashes (edict_hash.c) and is then
+discarded. Input is open-loop: nothing on the tape depends on what the server does, so the same file drives the C
+reference and the C# port.
 
 File layout (little-endian):
   header  "ETP1"  u32 version (1)  u32 seed  u32 frames
@@ -20,6 +21,7 @@ holds, per frame, any reliable messages followed by at most one unreliable messa
 Argument: -edicttape <file>. Without it the driver does not initialize and the server runs without clients.
 */
 #include "quakedef.h"
+#include "edict_hash.h"
 
 #define TAPE_CONNECT	0
 
@@ -129,11 +131,13 @@ static int Tape_GetMessage (qsocket_t *sock)
 
 static int Tape_SendMessage (qsocket_t *sock, sizebuf_t *data)
 {
+	EdictHash_Sent (1, data->data, data->cursize);
 	return 1;
 }
 
 static int Tape_SendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
 {
+	EdictHash_Sent (2, data->data, data->cursize);
 	return 1;
 }
 

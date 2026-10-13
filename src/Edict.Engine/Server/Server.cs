@@ -118,6 +118,7 @@ public sealed unsafe partial class Server
         _linkPrev = _linkNext = null!;     // sized by ClearWorld, when max_edicts is known
         InitClients();
         InitPhysics();
+        InitSend();
     }
 
     /// <summary><c>pr_strings + ofs</c>.</summary>

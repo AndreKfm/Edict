@@ -119,7 +119,7 @@ with its reason; one that becomes detected is reported so that it can be moved o
 whose text no longer matches or one that does not build makes the run fail.
 
 ```sh
-EDICT_ORACLE=<path> python3 -I tools/mutate.py <work dir> [link] [move] [check] [spawn]
+EDICT_ORACLE=<path> python3 -I tools/mutate.py <work dir> [link] [move] [check] [spawn] [clients] [physics] [messages]
 ```
 
 The game alone was again not enough for linking, movement and the PVS: R7 found blind spots where the tapes never go
@@ -143,9 +143,15 @@ of the reference is in the loop but the tape and the state at the first spawn. E
 the record where it appears; the last only says in which frame. R7 at source level covers the client code
 (`clients`) and the physics (`physics`); the physics fuzz (`PhysicsFuzzTests`) is what makes the second group work:
 the tapes never reach speeds beyond sv_maxvelocity, gravity fields, corpses on pushers or a fourth bump.
+The messages lane puts the server's output in the same gate: the loop gate compares what the port sent the client
+since each record with the reference's, and the `.emg` of the run (`-edictmessages`) turns a different hash into the
+message and byte where it differs. Its level 1 is `MessageFuzzTests` (SV_WriteClientdataToMessage and
+SV_WriteEntitiesToClient on the oracle's world): a game rarely puts an entity exactly a tenth of a unit off its
+baseline, a client on the 8-unit edge of a node plane, 256 entities in view or a datagram at its 16-byte limit. R7
+group `messages`; the loop gate is also part of `clients` and `physics` now, whose blind spots were messages.
 
 ```sh
-sh tools/longruns.sh ~/edict-ref data/long      # the ten-minute runs of the cut-3 gate (hashes only)
+sh tools/longruns.sh ~/edict-ref data/long      # the ten-minute runs of the cut-3 gate (hashes and messages)
 ```
 
 Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after cut 3): about 146 s for a full run — build 5 s,

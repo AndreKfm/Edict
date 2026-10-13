@@ -460,6 +460,49 @@ spawns (four restarts, `dev`'s changelevel to `lq_e0m1`). The long runs (`tools/
 601.3), every frame and spawn hashed alike, on Windows and Linux. Not ported yet: SV_WriteEntitiesToClient (messages
 only), dropping a client, saved games, a local client, any other console command; the message bytes are produced but
 not gated (the messages lane).
+The messages lane (2026-10-13), the server's output in the gate. Reference, without a hook line: the tape driver
+(`edict_tape.c`) hands every message the server sends to `edict_hash.c`; `.edh` version 3 has `lane_messages` in every
+spawn and frame record, XXH64 over what was sent since the previous record (per message u8 kind, u32 length, the
+bytes). `-edictmessages` writes the messages themselves (`.emg`), so that a difference can be shown to the byte;
+`tools/captures.sh` and `tools/longruns.sh` write one per run. On all 90 corpus runs and the three long runs every
+other lane is identical to version 2. Port: `Server/Send.cs` — SV_SendClientMessages whole: SV_SendClientDatagram
+with SV_WriteEntitiesToClient and SV_FatPVS, SV_SendNop on the host's realtime, the reliable message and
+last_message, SV_SendReconnect when a map spawns over a running server; the connection got the three send calls,
+`TapeNet` keeps what is sent. The gate found what was still missing on its first run, in frame 3 of `start`: the
+prespawn reply began with svc_spawnstaticsound in the reference and with svc_spawnbaseline in the port — `ambientsound`
+and `makestatic` now write their signon messages and `lightstyle` its message to the clients. Gate
+(`LoopGateTests`): at every record the port's messages must hash as the reference's; with the `.emg` a difference is
+reported as message, kind and byte. Green on the 10 corpus runs (40,000 frames, 15 spawns; per map 8–22 reliable and
+451–3,993 unreliable messages, 30–390 KB) and the three long runs (on `lq_e0m3` 43,193 datagrams, 2.1 MB; on
+`lq_e0m1` and `lq_e0m6` the player dies early, and the client that stays connected after the restart gets a nop
+every five seconds: 114 and 108 of them). Level 1 (`MessageFuzzTests`, oracle version 7: `EdictOracle_SetBaseline`,
+`EdictOracle_ClientDatagram`, which runs SV_WriteClientdataToMessage and SV_WriteEntitiesToClient on the oracle's world
+into a buffer that allows overflow): 300 linked entities, origins 0.1 off their baseline and one float either side,
+fractional and out-of-byte frames, skins, colormaps and model indexes, the client exactly 8 units (and a float less)
+from axial node planes (130–290 per map), messages that start near their end; per map 1,000 datagrams, 2,800–3,900
+entity updates in those without client data, 320–500 with a long entity number, 250–265 stopped by the 16-byte check,
+73–84 overflows; and SV_SendClientDatagram
+itself (`EdictOracle_SendClientDatagram`; the oracle takes the message over through the driver table) with a server
+datagram that fits, just fits or misses by one byte, 131–136 of 250 calls per map at that edge. `MessageBuiltinTests`
+(`EdictOracle_MessageSetup`, `EdictOracle_TakeMessage`): the 17 message builtins — the `Write*` family to every
+destination, sound, particle, sprint, centerprint, bprint, stuffcmd, lightstyle, ambientsound, makestatic — against
+`pr_builtins[num] ()`, with clients active, spawned, both or neither, and every buffer they can write compared
+(sv.datagram, sv.reliable_datagram, sv.signon, each client's message); about 2,300 calls each. All green on the first
+run. R7 (`messages`, 29 mutants): all detected. On the first run of the group 4 survived, each a gap in level 1, not
+in the port: `U_MOREBITS` from 257 (only an update that changes the pitch alone has bits == 256; the fuzz changed all
+three angles together), the server datagram copied when it just fits (the fuzz did not call SV_SendClientDatagram),
+`makestatic` with skin and colormap swapped (both are 0 on LibreQuake's statics) and `lightstyle` only to spawned
+clients (after a restart nobody switches a light); the two datagram cases and the builtin fuzz above closed them.
+The groups `clients` and `physics` now run the loop gate too, which sees the messages their known blind spots needed:
+the two ideal-pitch mutants, damage kept and `old_frags` are detected now. One more defect found on the way: three
+fuzzes (world, physics, datagram) took their seed from `string.GetHashCode`, which .NET randomizes per process, so
+every run fuzzed other inputs (`CheckStuck: 17 up` was detected in one run and not in the next). The seeds are XXH64
+of the map name now; `move`, `check`, `physics` and `messages` were rerun with them: 86 of 87 detected (`CheckStuck:
+17 up` among them, by the physics fuzz on `lq_e0m3`), the one left is `aim`'s known denormal case. Deviations from C: SV_SendClientDatagram's buffer has an
+uninitialized `allowoverflow`, so an overflow (an entity update is up to 18 bytes, the check leaves 16) is undefined
+in C; the port stops with an error, the fuzz compares the allowed overflow. SV_FatPVS writes past `fatpvs` on a map
+with more than 8,189 leafs; the port stops. Not ported yet: dropping a client, saved games, a local client, any other
+console command.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
@@ -500,7 +543,9 @@ per-entity, per-field first-divergence report, not only a frame hash.
 - Frame hash = hash over header (`sv.time` bits, `num_edicts`, `sv.state`, `paused`, `serverflags`, lightstyles)
   and the `(index, entity hash)` pairs.
 - Lanes per frame: `edicts` (gate), `globals_typed` (gate), `globals_raw`, `arealinks`, `messages` (diagnostic;
-  promoted to gate when stable).
+  promoted to gate when stable). State 2026-10-13: `arealinks` is checked by the capture replay instead (linking
+  records, section C); `messages` is a gate since `.edh` version 3: the bytes sent to the client since the previous
+  record, from the tape driver, with no hook line in id's files.
 
 ### E.2 Dump and diff
 

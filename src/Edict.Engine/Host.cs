@@ -115,6 +115,7 @@ public sealed unsafe class Host : IDisposable
         if (Sv is { Active: true } sv)
         {
             sv.FrameTime = FrameTime;
+            sv.RealTime = _realtime;
             if (_net is { } net && net is IFrameCounted counted)
                 counted.FrameCount = FrameCount;
             sv.ServerFrame();
@@ -252,6 +253,9 @@ public sealed unsafe class Host : IDisposable
     private void SpawnServer(ReadOnlySpan<byte> map)
     {
         byte[] name = map.ToArray();
+        // tell all connected clients that we are going to a new level
+        if (Sv is { Active: true } old)
+            old.SendReconnect();
         CRand rand = Rand();
         FreeServer();
 
