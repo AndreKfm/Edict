@@ -29,8 +29,6 @@ import os, shutil, subprocess, sys
 # Known blind spots: mutants the gates do not detect yet, each with the reason; reported, not counted as failures.
 # They are run like the others, so that one that becomes detected shows (then move it out of here).
 KNOWN = {
-    'RunThink: >= the frame end': 'needs a nextthink exactly at sv.time + host_frametime; neither the tapes nor the '
-        'physics fuzz reach it with a think that changes the state',
     'CheckStuck: 17 up': 'needs a player stuck so that only 17 units up frees it, with its old origin stuck too',
     'Frags: old_frags not updated': 'old_frags only decides svc_updatefrags messages: no gated lane sees them yet',
     'AirMove: teleport hack off': 'needs a player walking backwards within teleport_time of leaving a teleporter; the '

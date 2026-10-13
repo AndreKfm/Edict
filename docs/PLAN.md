@@ -444,9 +444,9 @@ counted the frame). 39,985 frames hashed alike on the 10 maps (all but the last 
 (`PhysicsFuzzTests`, oracle version 6): `SV_Physics` itself on the oracle's world and the game's progs.dat, every
 function pointed at SUB_Null, random entities of every movetype, speeds beyond sv_maxvelocity, gravity fields,
 pushers with riders, stuck players, think times on the frame boundary; 1,500 frames per map on 4 maps. R7
-(`physics`, 35 mutants): the replay alone detected 27 of 36; with the fuzz 33 of 35, and 3 known blind spots (a
-nextthink exactly at the frame end that changes state, a player stuck exactly 17 units deep, `old_frags`, which
-only messages show); one candidate shown not to be bad (the pusher's `<` with `<=`).
+(`physics`, 35 mutants): the replay alone detected 27 of 36; with the fuzz 33 of 35 (a think exactly at the frame
+end among them), and 2 known blind spots (a player stuck exactly 17 units deep, `old_frags`, which only messages
+show); one candidate shown not to be bad (the pusher's `<` with `<=`).
 Step 4 done (2026-10-13), and with it the cut-3 gate: `Host.cs` — the host loop of a server without a local client:
 `_Host_Frame`'s server part (the frame's `rand ()`, `Host_FilterTime` with host_framerate, `Cbuf_Execute`,
 `Host_ServerFrame`, host_framecount), the commands a game issues (`map`, `restart` after a death through QuakeC's
