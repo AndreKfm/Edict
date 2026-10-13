@@ -27,28 +27,39 @@ def builtin_names():
 
 def read(path):
     d = open(path, 'rb').read()
-    assert d[:4] == b'ECP1' and struct.unpack_from('<I', d, 4)[0] == 1, path
+    version = struct.unpack_from('<I', d, 4)[0]
+    assert d[:4] == b'ECP1' and version in (1, 2), path
     p = 8; names = {}; state = 0; m = None
+
+    def diff(p):                    # version 2: a state diff after E, L, B and R
+        if version < 2:
+            return p
+        _, n = struct.unpack_from('<II', d, p); p += 8 + 8 * n
+        strings, = struct.unpack_from('<I', d, p); p += 4
+        for _ in range(strings):
+            p = d.index(b'\0', p + 4) + 1
+        return p
+
     while p < len(d):
         k = d[p:p+1]; p += 1
         if k == b'M':
-            m = d[p:p+64].split(b'\0')[0].decode(); p += 64; names = {}
+            m = d[p:p+64].split(b'\0')[0].decode(); p += 64 + (24 if version >= 2 else 0); names = {}
         elif k == b'F':
             fnum, = struct.unpack_from('<I', d, p); p += 4
             e = d.index(b'\0', p); names[fnum] = d[p:e].decode('latin-1'); p = e + 1
         elif k == b'E':
-            fnum, frame, state, self_, other = struct.unpack_from('<IIBII', d, p); p += 17
+            fnum, frame, state, self_, other = struct.unpack_from('<IIBII', d, p); p = diff(p + 17)
             yield ('enter', m, state, names.get(fnum, fnum), frame)
         elif k == b'L':
-            p += 16
+            p = diff(p + 16)
         elif k == b'C':
             fnum, = struct.unpack_from('<I', d, p); p += 4
             yield ('call', m, state, names.get(fnum, fnum), None)
         elif k == b'B':
-            num, fnum, argc = struct.unpack_from('<HIB', d, p); p += 7 + 12 * argc
+            num, fnum, argc = struct.unpack_from('<HIB', d, p); p = diff(p + 7 + 12 * argc)
             yield ('builtin', m, state, (num, names.get(fnum, fnum)), None)
         elif k == b'R':
-            p += 14
+            p = diff(p + 14)
         else:
             raise SystemExit('%s: bad record %r at %d' % (path, k, p - 1))
 

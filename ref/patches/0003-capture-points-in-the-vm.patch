@@ -2,8 +2,8 @@ EDICT 0003: capture points in the QuakeC VM
 
 Category: harness hook, no change in results.
 Five macro lines (and two braces) in PR_ExecuteProgram for the record mode -edictcapture (ref/src/edict_capture.c,
-docs/TESTING.md, Capture): entry from the engine, return to it, QuakeC-to-QuakeC calls, and builtin calls before
-and after. The macros test one int and call the capture code only while a capture file is open; the capture code
+docs/TESTING.md, Capture): entry from the engine (before PR_EnterFunction, which already writes globals), return to
+it, QuakeC-to-QuakeC calls, and builtin calls before and after. The macros test one int and call the capture code only while a capture file is open; the capture code
 reads the VM state and writes it to the file, it changes nothing. Checked when added: the per-frame hashes of all
 10 R9 maps and the hull trace corpora are identical with and without the patch, with and without -edictcapture.
 
@@ -20,8 +20,8 @@ reads the VM state and writes it to the file, it changes nothing. Checked when a
 @@ -386,6 +387,7 @@
  	exitdepth = pr_depth;
  
++	EDICT_CAPTURE_ENTER (fnum);	// EDICT: before PR_EnterFunction, which already changes globals
  	s = PR_EnterFunction (f);
-+	EDICT_CAPTURE_ENTER (fnum);	// EDICT
  	
  while (1)
  {

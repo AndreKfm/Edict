@@ -15,7 +15,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	1
+#define ORACLE_VERSION	2
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);
@@ -84,4 +84,48 @@ EDICT_EXPORT int EdictOracle_Vtos (float x, float y, float z, char *out, int siz
 	G_VECTOR (OFS_PARM0)[2] = z;
 	PF_vtos ();
 	return ReturnString (out, size);
+}
+
+/*
+==============================================================================
+The QuakeC VM on caller-provided programs (level 1 for pr_exec.c)
+
+PR_ExecuteProgram itself, run on statements, functions, globals, strings and edicts the caller provides, so the
+port's VM can be compared on inputs a game rarely produces (signed zeros, NaN payloads, empty strings at nonzero
+offsets). The programs must not call builtins and must not fail (PR_RunError would longjmp out of the oracle).
+==============================================================================
+*/
+
+extern int	localstack_used, pr_depth, pr_xstatement;	// pr_exec.c
+extern dfunction_t	*pr_xfunction;
+
+// sizeof (edict_t) - sizeof (entvars_t): the header in front of every edict's fields (docs/adr/D7).
+EDICT_EXPORT int EdictOracle_EdictHeaderBytes (void) { return sizeof (edict_t) - sizeof (entvars_t); }
+
+EDICT_EXPORT void EdictOracle_VmRun (dstatement_t *statements, int numstatements, dfunction_t *functions,
+	int numfunctions, float *globals, int numglobals, char *strings, int numstrings, void *edicts, int entityfields,
+	int active, int fnum)
+{
+	static dprograms_t	header;
+
+	header.version = PROG_VERSION;
+	header.numstatements = numstatements;
+	header.numfunctions = numfunctions;
+	header.numglobals = numglobals;
+	header.numstrings = numstrings;
+	header.entityfields = entityfields;
+	progs = &header;
+	pr_statements = statements;
+	pr_functions = functions;
+	pr_globals = globals;
+	pr_global_struct = (globalvars_t *)globals;
+	pr_strings = strings;
+	pr_edict_size = entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
+	sv.edicts = edicts;
+	sv.state = active ? ss_active : ss_loading;
+	pr_depth = 0;
+	localstack_used = 0;
+	pr_xfunction = NULL;
+	pr_xstatement = 0;
+	PR_ExecuteProgram (fnum);
 }
