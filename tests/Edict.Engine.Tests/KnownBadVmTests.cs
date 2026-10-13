@@ -16,6 +16,7 @@ namespace Edict.Engine.Tests;
 /// and float/double differences of nextthink do not occur on its frame times. The opcode fuzz is there for these.
 /// </remarks>
 [Collection(OracleCollection.Name)]
+[Trait("Tier", "long")]
 public sealed unsafe class KnownBadVmTests
 {
     private sealed class Mutant(Progs progs, nint globals, nint edicts, int header) : VmReplay.IVm

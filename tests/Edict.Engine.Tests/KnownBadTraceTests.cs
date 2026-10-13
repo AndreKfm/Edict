@@ -16,6 +16,7 @@ namespace Edict.Engine.Tests;
 /// importance sampling so that the loop runs (ref/src/edict_traces.c). The third, DIST_EPSILON as a float, turned
 /// out not to be bad: see <see cref="Float_epsilon_is_bit_identical"/>.
 /// </remarks>
+[Trait("Tier", "long")]
 public sealed unsafe class KnownBadTraceTests
 {
     public enum Mutation

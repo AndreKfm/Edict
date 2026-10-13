@@ -51,7 +51,8 @@ KNOWN = {
         'is exact unless the sum is denormal. Needs denormal coordinates with an odd last bit',
 }
 MUTANTS = {
-    'link': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.BoxOnPlaneSideTests'], [
+    'link': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.FrameStartReplayTests', 'Edict.Engine.Tests.FrameReplayTests',
+              'Edict.Engine.Tests.BoxOnPlaneSideTests'], [
         ('item boxes grow by 16, not 15', 'src/Edict.Engine/Server/World.cs',
          'v[EntVars.Absmin] -= 15;', 'v[EntVars.Absmin] -= 16;'),
         ('triggers inserted at the head', 'src/Edict.Engine/Server/World.cs',
@@ -79,7 +80,8 @@ MUTANTS = {
         ('free unlinks after clearing', 'src/Edict.Engine/Server/Edicts.cs',
          'UnlinkEdict(n);         // unlink from world bsp\n', ''),
     ]),
-    'move': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.WorldFuzzTests'], [
+    'move': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.FrameStartReplayTests', 'Edict.Engine.Tests.FrameReplayTests',
+              'Edict.Engine.Tests.WorldFuzzTests'], [
         ('ClipToLinks: <= keeps the later entity', 'src/Edict.Engine/Server/Move.cs',
          'trace.Fraction < clip.Trace.Fraction', 'trace.Fraction <= clip.Trace.Fraction'),
         ('MoveBounds without the unit', 'src/Edict.Engine/Server/Move.cs',
@@ -103,7 +105,7 @@ MUTANTS = {
          'if (clip.PassEdict >= 0 && Fields(clip.PassEdict)[EntVars.Size] != 0 && t[EntVars.Size] == 0)\n                continue;   // points never interact', ''),
     ]),
     'physics': (['method:Edict.Engine.Tests.PhysicsFuzzTests.Physics_matches_the_reference',
-                 'method:Edict.Engine.Tests.VmReplayTests.Server_frames_match_the_reference',
+                 'method:Edict.Engine.Tests.FrameReplayTests.Server_frames_match_the_reference',
                  'method:Edict.Engine.Tests.LoopGateTests.Loop_hashes_as_the_reference_every_frame'], [
         ('RunThink: >= the frame end', 'src/Edict.Engine/Server/Physics.cs',
          'if (thinktime <= 0 || thinktime > Time + FrameTime)', 'if (thinktime <= 0 || thinktime >= Time + FrameTime)'),
@@ -177,8 +179,8 @@ MUTANTS = {
          '                host.OldFrags = CCast.I32(frags);', ''),
     ]),
     'clients': (['method:Edict.Engine.Tests.VmReplayTests.Vm_matches_the_reference_at_every_boundary',
-                 'method:Edict.Engine.Tests.VmReplayTests.Server_frame_start_matches_the_reference',
-                 'method:Edict.Engine.Tests.VmReplayTests.Server_frames_match_the_reference',
+                 'method:Edict.Engine.Tests.FrameStartReplayTests.Server_frame_start_matches_the_reference',
+                 'method:Edict.Engine.Tests.FrameReplayTests.Server_frames_match_the_reference',
                  'method:Edict.Engine.Tests.LoopGateTests.Loop_hashes_as_the_reference_every_frame'], [
         ('ReadAngle unsigned', 'src/Edict.Engine/Common/SizeBuf.cs',
          'public float ReadAngle() => (float)(ReadChar() * (360.0 / 256));', 'public float ReadAngle() => (float)(ReadByte() * (360.0 / 256));'),
@@ -326,7 +328,8 @@ MUTANTS = {
         ('sprite bounds in float', 'src/Edict.Engine/Model/ModelCache.cs',
          'm->Mins = new Vec3(-width / 2, -width / 2, -height / 2);', 'm->Mins = new Vec3(-width / 2f, -width / 2f, -height / 2f);'),
     ]),
-    'check': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.WorldFuzzTests'], [
+    'check': (['Edict.Engine.Tests.VmReplayTests', 'Edict.Engine.Tests.FrameStartReplayTests', 'Edict.Engine.Tests.FrameReplayTests',
+              'Edict.Engine.Tests.WorldFuzzTests'], [
         ('PointInLeaf: d >= 0 goes to the front', 'src/Edict.Engine/Server/CheckClient.cs',
          'if (d > 0)', 'if (d >= 0)'),
         ('checkclient: leaf index without the -1', 'src/Edict.Engine/Server/CheckClient.cs',

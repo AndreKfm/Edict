@@ -76,7 +76,7 @@ dotnet run --project bench/Edict.Benchmarks -c Release -- --filter "*HullTrace*"
 
 The engine tests read the corpus from `EDICT_TRACES`, the VM captures from `EDICT_CAPTURES` and the game data from
 `EDICT_DATA` (defaults: `data/traces`, `data/captures` and `data/libreq-v0.09-beta` in the checkout); with
-`--artifacts-path` outside the checkout (WSL) set all three. Tests that call the oracle share one non-parallel
+`--artifacts-path` outside the checkout (WSL) set all three. Tests that call the oracle share one serial
 collection (`OracleCollection`).
 
 In WSL, build the C# side with `--artifacts-path` outside the checkout, so that Windows and Linux builds do not share
@@ -160,3 +160,28 @@ engine tests 129 s (255 tests), exact tests 8 s, analyzer tests 4 s. The largest
 `TraceGateTests` 13 s, `BuiltinTests` 12 s; `SpawnGateTests` 6 s, the fuzzes 2 s each. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
 they change (0.2 s; 132 s when each ran the whole fuzz). `tools/mutate.py` is not part of the suite (one build per
 mutant; the group `spawn` with its 21 mutants takes 216 s).
+
+Run time after the messages lane and the tiers (same machine, 2026-10-13): `tools/test.sh quick` 59 s — build 7 s,
+engine tests 44 s (219 tests; before the split the whole engine suite took 131 s, its critical path the replay modes
+and the long runs in one class each), exact tests 8 s. The three long runs, now in parallel, 25 s (62 s one after
+another). `tools/mutate.py move check physics messages` (87 mutants, stopping at the first failing test) 631 s.
+
+### Test tiers (2026-10-13)
+
+Not every change needs every test. Three tiers, chosen by what a run has to answer:
+
+| Tier | When | What |
+|---|---|---|
+| targeted | while working | the class, method or map the change touches (`-class`, `-method`, a single corpus map through `EDICT_LONG`) |
+| quick | before every commit | `tools/test.sh quick`: build, engine tests without the trait `Tier=long`, Exact tests |
+| milestone | after a large step, and only when a narrower run cannot answer the question | `tools/test.sh full` (the long tier: the ten-minute runs, the `KnownBad*` classes; the analyzer tests), `tools/mutate.py`, R9 (`tools/r9-*.sh`), the Linux leg |
+
+For R7 after a gate gained a test, `tools/mutate.py --known` runs only the known blind spots (a mutant a gate detected
+stays detected when the gate gains a test); `--only <text>` runs single mutants. A mutant's tests stop at their first
+failure, and the tool names the test that failed. The fuzzes take their seeds from XXH64 of the map name: until
+2026-10-13 they used `string.GetHashCode`, which .NET randomizes per process, so each run fuzzed other inputs (found
+when `CheckStuck: 17 up` was detected in one run and not in the next).
+
+Parallelism: the classes run in parallel, the tests of one class one after another. The three replay modes and the
+three long runs are classes of their own for that reason; the oracle collection runs serially in itself, in parallel
+with the rest (no other class calls the oracle).

@@ -18,20 +18,6 @@ public sealed unsafe class LoopGateTests
 {
     public static IEnumerable<TheoryDataRow<string>> MapNames => VmReplay.Maps().Select(m => new TheoryDataRow<string>(m));
 
-    /// <summary>The long runs of tools/longruns.sh (data/long, or EDICT_LONG).</summary>
-    public static string LongDirectory
-    {
-        get
-        {
-            string? dir = Environment.GetEnvironmentVariable("EDICT_LONG");
-            return string.IsNullOrEmpty(dir) ? Path.Combine(Path.GetDirectoryName(VmReplay.Directory)!, "long") : dir;
-        }
-    }
-
-    public static IEnumerable<TheoryDataRow<string>> LongMaps =>
-        (Directory.Exists(LongDirectory) ? Directory.GetFiles(LongDirectory, "*.edh") : [])
-        .Select(f => Path.GetFileNameWithoutExtension(f)).Order(StringComparer.Ordinal).Select(m => new TheoryDataRow<string>(m));
-
     internal static string? FirstDivergence(string map, out int frames, out int spawns) =>
         FirstDivergence(map, Path.Combine(VmReplay.Directory, map + ".edh"), Path.Combine(VmReplay.Directory, map + ".etp"),
                         out frames, out spawns);
@@ -118,17 +104,6 @@ public sealed unsafe class LoopGateTests
         return failure;
     }
 
-    /// <summary>The cut-3 gate on new tapes: ten minutes (43,200 frames) per map, every frame hashed.</summary>
-    [Theory]
-    [MemberData(nameof(LongMaps))]
-    public void Long_run_hashes_as_the_reference_every_frame(string map)
-    {
-        string? d = FirstDivergence(map, Path.Combine(LongDirectory, map + ".edh"), Path.Combine(LongDirectory, map + ".etp"),
-                                    out int frames, out int spawns);
-        Assert.True(d is null, $"{map} (long run), after {frames} frames hashed alike: {d}");
-        TestContext.Current.TestOutputHelper?.WriteLine($"{map} (long run): {frames} frames and {spawns} spawns hashed as the reference");
-    }
-
     [Theory]
     [MemberData(nameof(MapNames))]
     public void Loop_hashes_as_the_reference_every_frame(string map)
@@ -138,3 +113,41 @@ public sealed unsafe class LoopGateTests
         TestContext.Current.TestOutputHelper?.WriteLine($"{map}: {frames} frames and {spawns} spawns hashed as the reference");
     }
 }
+
+/// <summary>
+/// The cut-3 gate on new tapes (tools/longruns.sh, in data/long or EDICT_LONG): ten minutes (43,200 frames) of one
+/// map, every frame hashed. One class per map, so that the runs go in parallel; each is in the milestone tier
+/// (docs/TESTING.md).
+/// </summary>
+public abstract class LongRunTests(string map)
+{
+    /// <summary>The long runs of tools/longruns.sh (data/long, or EDICT_LONG).</summary>
+    public static string LongDirectory
+    {
+        get
+        {
+            string? dir = Environment.GetEnvironmentVariable("EDICT_LONG");
+            return string.IsNullOrEmpty(dir) ? Path.Combine(Path.GetDirectoryName(VmReplay.Directory)!, "long") : dir;
+        }
+    }
+
+    [Fact]
+    public void Long_run_hashes_as_the_reference_every_frame()
+    {
+        string edh = Path.Combine(LongDirectory, map + ".edh");
+        if (!File.Exists(edh))
+            Assert.Skip($"{edh} not found (tools/longruns.sh)");
+        string? d = LoopGateTests.FirstDivergence(map, edh, Path.ChangeExtension(edh, ".etp"), out int frames, out int spawns);
+        Assert.True(d is null, $"{map} (long run), after {frames} frames hashed alike: {d}");
+        TestContext.Current.TestOutputHelper?.WriteLine($"{map} (long run): {frames} frames and {spawns} spawns hashed as the reference");
+    }
+}
+
+[Trait("Tier", "long")]
+public sealed class LongRun_lq_e0m1() : LongRunTests("lq_e0m1");
+
+[Trait("Tier", "long")]
+public sealed class LongRun_lq_e0m3() : LongRunTests("lq_e0m3");
+
+[Trait("Tier", "long")]
+public sealed class LongRun_lq_e0m6() : LongRunTests("lq_e0m6");

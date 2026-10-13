@@ -11,6 +11,7 @@ namespace Edict.Engine.Tests;
 /// both means the builtin gates are blind there.
 /// </summary>
 [Collection(OracleCollection.Name)]
+[Trait("Tier", "long")]
 public sealed class KnownBadBuiltinTests
 {
     private static string? Run(BuiltinTests.Mutation m)
