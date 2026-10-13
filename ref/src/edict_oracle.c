@@ -16,7 +16,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	4
+#define ORACLE_VERSION	5
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);
@@ -230,6 +230,31 @@ extern byte		checkpvs[MAX_MAP_LEAFS/8];	// pr_cmds.c
 
 static model_t	oracle_world;
 static int		oracle_mark = -1;
+static char		*oracle_hunk_strings;	// a pr_strings on the hunk: string_t offsets to hunk strings must fit an int
+
+// The oracle's own hunk, set up once (with COM_Init's byte order setup, which the model loader reads through);
+// oracle_mark is the low mark above Memory_Init's zone. -1 if there is no memory.
+static int OracleHunk (void)
+{
+	void	*hunk;
+
+	if (oracle_mark >= 0)
+		return 0;
+	hunk = malloc (ORACLE_HUNK);
+	if (!hunk)
+		return -1;
+	BigShort = ShortSwap;
+	LittleShort = ShortNoSwap;
+	BigLong = LongSwap;
+	LittleLong = LongNoSwap;
+	BigFloat = FloatSwap;
+	LittleFloat = FloatNoSwap;
+	Memory_Init (hunk, ORACLE_HUNK);
+	Mod_Init ();
+	oracle_hunk_strings = Hunk_AllocName (16, "ostrings");
+	oracle_mark = Hunk_LowMark ();
+	return 0;
+}
 
 // Returns the world's numleafs (visleafs), or -1 if there is no hunk.
 EDICT_EXPORT int EdictOracle_LoadWorld (void *bsp, const char *name)
@@ -237,23 +262,8 @@ EDICT_EXPORT int EdictOracle_LoadWorld (void *bsp, const char *name)
 	int		i;
 	char	sub[8];
 
-	if (oracle_mark < 0)
-	{
-		void	*hunk = malloc (ORACLE_HUNK);
-
-		if (!hunk)
-			return -1;
-		// COM_Init's byte order setup (little-endian), which the model loader reads through
-		BigShort = ShortSwap;
-		LittleShort = ShortNoSwap;
-		BigLong = LongSwap;
-		LittleLong = LongNoSwap;
-		BigFloat = FloatSwap;
-		LittleFloat = FloatNoSwap;
-		Memory_Init (hunk, ORACLE_HUNK);
-		Mod_Init ();
-		oracle_mark = Hunk_LowMark ();
-	}
+	if (OracleHunk () < 0)
+		return -1;
 	Hunk_FreeToLowMark (oracle_mark);
 	memset (&oracle_world, 0, sizeof (oracle_world));
 	strcpy (oracle_world.name, name);
@@ -359,3 +369,105 @@ EDICT_EXPORT void EdictOracle_AimCvars (float aim, float tp)
 	sv_aim.value = aim;
 	teamplay.value = tp;
 }
+
+/*
+==============================================================================
+The entity parser (level 1 for COM_Parse and pr_edict.c)
+==============================================================================
+*/
+
+char *ED_NewString (char *string);						// pr_edict.c, not declared in a header
+qboolean ED_ParseEpair (void *base, ddef_t *key, char *s);	// likewise
+
+// COM_Parse (data): the token into token (size bytes), and how far it read: the offset of the returned position,
+// or -1 for NULL (the end of the text).
+EDICT_EXPORT int EdictOracle_ComParse (char *data, char *token, int size)
+{
+	char	*next = COM_Parse (data);
+	int		n = strlen (com_token);
+
+	if (n >= size)
+		n = size - 1;
+	memcpy (token, com_token, n);
+	token[n] = 0;
+	return next ? (int)(next - data) : -1;
+}
+
+// ED_ParseEpair on a value of the given type (ev_float, ev_vector or ev_string) into three words at out; for
+// ev_string the new string's text goes to text (size bytes). The hunk strings are freed again afterwards. Returns
+// ED_ParseEpair's result, or -1 if there is no hunk.
+EDICT_EXPORT int EdictOracle_ParseEpair (int type, char *s, float *out, char *text, int size)
+{
+	ddef_t	key;
+	int		mark, r, n;
+	char	*str;
+
+	if (OracleHunk () < 0)
+		return -1;
+	pr_strings = oracle_hunk_strings;	// as patch 0002 has it in the engine: near the hunk strings
+	mark = Hunk_LowMark ();
+	memset (&key, 0, sizeof (key));
+	key.type = type;
+	key.ofs = 0;
+	r = ED_ParseEpair (out, &key, s);
+	if (type == ev_string)
+	{
+		str = pr_strings + *(int *)out;
+		n = strlen (str);
+		if (n >= size)
+			n = size - 1;
+		memcpy (text, str, n);
+		text[n] = 0;
+	}
+	Hunk_FreeToLowMark (mark);
+	return r;
+}
+
+static int		oracle_progs_mark = -1;
+
+// A progs.dat image copied onto the oracle's hunk and set up as PR_LoadProgs points into it (little-endian, so no
+// swapping), for ED_ParseEdict's field and function lookups. Frees what the hunk held above the world's mark.
+EDICT_EXPORT int EdictOracle_Progs (void *image, int length)
+{
+	if (OracleHunk () < 0)
+		return -1;
+	Hunk_FreeToLowMark (oracle_mark);
+	progs = Hunk_AllocName (length, "oprogs");
+	memcpy (progs, image, length);
+	pr_functions = (dfunction_t *)((byte *)progs + progs->ofs_functions);
+	pr_strings = (char *)progs + progs->ofs_strings;
+	pr_globaldefs = (ddef_t *)((byte *)progs + progs->ofs_globaldefs);
+	pr_fielddefs = (ddef_t *)((byte *)progs + progs->ofs_fielddefs);
+	pr_statements = (dstatement_t *)((byte *)progs + progs->ofs_statements);
+	pr_global_struct = (globalvars_t *)((byte *)progs + progs->ofs_globals);
+	pr_globals = (float *)pr_global_struct;
+	pr_edict_size = progs->entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
+	oracle_progs_mark = Hunk_LowMark ();
+	return 0;
+}
+
+// ED_ParseEdict (data, edict n) on caller edicts (max_edicts of them; edict 0 is sv.edicts); returns how far it read.
+// The strings it allocates stay until EdictOracle_ProgsReset. The text must be a valid entity (ED_ParseEdict's errors
+// end the process).
+EDICT_EXPORT int EdictOracle_ParseEdict (char *data, void *edicts, int max_edicts, int n)
+{
+	sv.edicts = edicts;
+	sv.max_edicts = max_edicts;
+	return (int)(ED_ParseEdict (data, EDICT_NUM (n)) - data);
+}
+
+// The text of string offset ofs (relative to pr_strings) into out (size bytes); its length.
+EDICT_EXPORT int EdictOracle_String (int ofs, char *out, int size)
+{
+	const char	*s = pr_strings + ofs;
+	int			n = strlen (s);
+
+	if (n >= size)
+		n = size - 1;
+	memcpy (out, s, n);
+	out[n] = 0;
+	return n;
+}
+
+// Frees the strings ED_ParseEdict allocated since EdictOracle_Progs.
+EDICT_EXPORT void EdictOracle_ProgsReset (void) { Hunk_FreeToLowMark (oracle_progs_mark); }
