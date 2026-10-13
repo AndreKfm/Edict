@@ -15,6 +15,9 @@ namespace Edict.Engine;
 public static unsafe class Builtins
 {
     public const int SetOrigin = 2, SetModel = 3, SetSize = 4, CheckClient = 17, Aim = 44, Lightstyle = 35, AmbientSound = 74;
+    public const int Sound = 8, StuffCmd = 21, Bprint = 23, Sprint = 24, Dprint = 25, LocalCmd = 46, Particle = 48,
+        WriteByte = 52, WriteChar = 53, WriteShort = 54, WriteLong = 55, WriteCoord = 56, WriteAngle = 57, WriteString = 58,
+        WriteEntity = 59, ChangeLevel = 70, CenterPrint = 73;
     public const int TraceLine = 16, WalkMove = 32, DropToFloor = 34, CheckBottom = 40, PointContents = 41, MoveToGoal = 67;
     public const int MakeVectors = 1, Random = 7, Normalize = 9, Vlen = 12, VectoYaw = 13, PrecacheSound = 19,
         PrecacheModel = 20, Ftos = 26, Vtos = 27, Rint = 36, Floor = 37, Ceil = 38, Fabs = 43, Cvar = 45,
@@ -30,6 +33,8 @@ public static unsafe class Builtins
             or Floor or Ceil or Fabs or Cvar or ChangeYaw or VectoAngles or PrecacheFile or CvarSet or PrecacheModel2
             or PrecacheSound2 or PrecacheFile2 or Spawn or Remove or Find or FindRadius or NextEnt or MakeStatic
             or SetOrigin or SetModel or SetSize or CheckClient or Aim or Lightstyle or AmbientSound
+            or Sound or StuffCmd or Bprint or Sprint or Dprint or LocalCmd or Particle or WriteByte or WriteChar or WriteShort
+            or WriteLong or WriteCoord or WriteAngle or WriteString or WriteEntity or ChangeLevel or CenterPrint
             or TraceLine or WalkMove or DropToFloor or CheckBottom or PointContents or MoveToGoal => true,
         _ => false,
     };
@@ -76,6 +81,23 @@ public static unsafe class Builtins
             case Aim: PF_aim(sv); break;
             case Lightstyle: PF_lightstyle(sv); break;
             case AmbientSound: PF_ambientsound(sv); break;
+            case Sound: PF_sound(sv); break;
+            case StuffCmd: PF_stuffcmd(sv); break;
+            case Bprint: sv.BroadcastPrint(VarString(sv, 0)); break;
+            case Sprint: PF_sprint(sv, SvcPrintNum); break;
+            case CenterPrint: PF_sprint(sv, SvcCenterPrintNum); break;
+            case Dprint: break;     // Con_DPrintf: console output only
+            case LocalCmd: sv.AddCommandText(S(sv, OfsParm0)); break;
+            case Particle: PF_particle(sv); break;
+            case ChangeLevel: PF_changelevel(sv); break;
+            case WriteByte: WriteDest(sv).WriteByte(CCast.I32(*sv.G(OfsParm1))); break;
+            case WriteChar: WriteDest(sv).WriteChar(CCast.I32(*sv.G(OfsParm1))); break;
+            case WriteShort: WriteDest(sv).WriteShort(CCast.I32(*sv.G(OfsParm1))); break;
+            case WriteLong: WriteDest(sv).WriteLong(CCast.I32(*sv.G(OfsParm1))); break;
+            case WriteAngle: WriteDest(sv).WriteAngle(*sv.G(OfsParm1)); break;
+            case WriteCoord: WriteDest(sv).WriteCoord(*sv.G(OfsParm1)); break;
+            case WriteString: WriteDest(sv).WriteString(S(sv, OfsParm1)); break;
+            case WriteEntity: WriteDest(sv).WriteShort(GEdictNum(sv, OfsParm1)); break;
             default: throw sv.Vm.RunError(NotPorted);
         }
     }
@@ -284,7 +306,7 @@ public static unsafe class Builtins
         ent[EntVars.Angles + 1] = Mathlib.Anglemod(current + move);
     }
 
-    private const int OfsParm2 = QcVm.OfsParm0 + 6, OfsParm3 = QcVm.OfsParm0 + 9;
+    private const int OfsParm2 = QcVm.OfsParm0 + 6, OfsParm3 = QcVm.OfsParm0 + 9, OfsParm4 = QcVm.OfsParm0 + 12;
 
     /// <summary>RETURN_EDICT: the edict's byte offset (EDICT_TO_PROG).</summary>
     private static void ReturnEdict(Server sv, int n) => sv.Globals[OfsReturn] = n * sv.EdictSize;
@@ -433,6 +455,114 @@ public static unsafe class Builtins
     /// adds svc_spawnstaticsound to the signon message, which comes with the messages lane. No state changes.
     /// </summary>
     private static void PF_ambientsound(Server sv) => sv.SoundIndex(S(sv, OfsParm1));
+
+    // ---- messages: what the server sends; the bytes are what a client receives, their sizes decide overflows
+
+    private const int SvcPrintNum = 8, SvcCenterPrintNum = 26, SvcStuffText = 9;
+    private const int MsgBroadcast = 0, MsgOne = 1, MsgAll = 2, MsgInit = 3;
+
+    private static readonly HostErrorException NotAClient = new("WriteDest: not a client");
+    private static readonly HostErrorException BadDestination = new("WriteDest: bad destination");
+    private static readonly HostErrorException StuffNotAClient = new("Parm 0 not a client");
+    private static readonly SysErrorException VarStringTooLong = new("PF_VarString: longer than C's out[256]");
+
+    /// <summary>WriteDest: the datagram, msg_entity's client message, the reliable datagram or the signon.</summary>
+    private static SizeBuf WriteDest(Server sv)
+    {
+        switch (CCast.I32(*sv.G(OfsParm0)))
+        {
+            case MsgBroadcast:
+                return sv.Datagram;
+            case MsgOne:
+            {
+                int entnum = sv.NumForEdict(sv.Globals[GlobalVars.MsgEntity]);
+                if (entnum < 1 || entnum > sv.MaxClients)
+                    throw sv.Vm.RunError(NotAClient);
+                return sv.Clients[entnum - 1].Message;
+            }
+            case MsgAll:
+                return sv.ReliableDatagram;
+            case MsgInit:
+                return sv.Signon;
+            default:
+                throw sv.Vm.RunError(BadDestination);
+        }
+    }
+
+    /// <summary>PF_VarString: the string arguments from <paramref name="first"/> on, concatenated into a static buffer.</summary>
+    private static byte* VarString(Server sv, int first)
+    {
+        byte* @out = sv.VarStringBuffer;
+        int n = 0;
+        for (int i = first; i < sv.Vm.Argc; i++)
+        {
+            byte* s = S(sv, OfsParm0 + i * 3);
+            while (*s != 0)
+            {
+                if (n >= Server.VarStringSize - 1)
+                    throw VarStringTooLong;
+                @out[n++] = *s++;
+            }
+        }
+        @out[n] = 0;
+        return @out;
+    }
+
+    /// <summary>sprint and centerprint: the text to one client (a non-client is a console message).</summary>
+    private static void PF_sprint(Server sv, int svc)
+    {
+        int entnum = GEdictNum(sv, OfsParm0);
+        byte* s = VarString(sv, 1);
+        if (entnum < 1 || entnum > sv.MaxClients)
+            return;     // Con_Printf ("tried to sprint to a non-client")
+        SizeBuf m = sv.Clients[entnum - 1].Message;
+        m.WriteChar(svc);
+        m.WriteString(s);
+    }
+
+    /// <summary>sound (entity, channel, sample, volume, attenuation): SV_StartSound, volume scaled by 255.</summary>
+    private static void PF_sound(Server sv)
+    {
+        int entity = GEdict(sv, OfsParm0);
+        int channel = CCast.I32(*sv.G(OfsParm1));
+        byte* sample = S(sv, OfsParm2);
+        int volume = CCast.I32(*sv.G(OfsParm3) * 255);
+        float attenuation = *sv.G(OfsParm4);
+        sv.StartSound(entity, channel, sample, volume, attenuation);
+    }
+
+    /// <summary>particle (origin, dir, color, count): SV_StartParticle on the datagram.</summary>
+    private static void PF_particle(Server sv)
+    {
+        Vec3 org = *V(sv, OfsParm0), dir = *V(sv, OfsParm1);
+        sv.StartParticle(org, dir, CCast.I32(*sv.G(OfsParm2)), CCast.I32(*sv.G(OfsParm3)));
+    }
+
+    /// <summary>stuffcmd (client, text): Host_ClientCommands, the text as svc_stufftext to that client.</summary>
+    private static void PF_stuffcmd(Server sv)
+    {
+        int entnum = GEdictNum(sv, OfsParm0);
+        if (entnum < 1 || entnum > sv.MaxClients)
+            throw sv.Vm.RunError(StuffNotAClient);
+        SizeBuf m = sv.Clients[entnum - 1].Message;
+        m.WriteByte(SvcStuffText);
+        m.WriteString(S(sv, OfsParm1));
+    }
+
+    /// <summary>changelevel (map): once per level, "changelevel map" into the command buffer.</summary>
+    private static void PF_changelevel(Server sv)
+    {
+        // make sure we don't issue two changelevels
+        if (sv.ChangelevelIssued)
+            return;
+        sv.ChangelevelIssued = true;
+        fixed (byte* cmd = "changelevel \0"u8, nl = "\n\0"u8)
+        {
+            sv.AddCommandText(cmd);
+            sv.AddCommandText(S(sv, OfsParm0));
+            sv.AddCommandText(nl);
+        }
+    }
 
     private const float DamageAim = 2;                // DAMAGE_AIM
 

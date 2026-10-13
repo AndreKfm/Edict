@@ -52,12 +52,18 @@ public sealed unsafe class ModelCache : IModelSource, IDisposable
     [NoAllocUnchecked("map load")]
     public BrushModelSet LoadBrush(ReadOnlySpan<byte> name)
     {
+        string key = System.Text.Encoding.Latin1.GetString(name);
+        if (_maps.TryGetValue(key, out BrushModelSet? known))
+            return known;   // a map spawned again (restart): Mod_ForName finds it loaded
         QFile file = _files.Find(name) ?? throw NotFound;
         BrushModelSet set = BrushLoader.Load(file, name);
         _brushSets.Add(set);
+        _maps[key] = set;
         Register(name, set.World);
         return set;
     }
+
+    private readonly Dictionary<string, BrushModelSet> _maps = [];
 
     /// <summary>
     /// Loads every model the map can precache with a constant name: the strings of <paramref name="progs"/> and the

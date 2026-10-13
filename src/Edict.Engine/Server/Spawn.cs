@@ -21,6 +21,9 @@ public sealed unsafe partial class Server
     /// <summary>current_skill: skill rounded and clamped to 0..3 by SV_SpawnServer.</summary>
     public int CurrentSkill { get; private set; }
 
+    /// <summary>sv.name, as a copy (Host_Restart_f spawns it again).</summary>
+    public byte[] MapName { get; private set; } = null!;
+
     /// <summary>sv.name, an engine string (pr_global_struct->mapname points to it).</summary>
     public int NameOffset { get; private set; }
 
@@ -365,6 +368,7 @@ public sealed unsafe partial class Server
         Paused = false;
         Time = 1.0;
         NameOffset = Hunk.Add(map);
+        MapName = map.ToArray();
 
         Span<byte> modelname = stackalloc byte[map.Length + 9];
         "maps/"u8.CopyTo(modelname);
@@ -424,5 +428,20 @@ public sealed unsafe partial class Server
 
         LoadFromFile(world.World->Entities);
         return true;
+    }
+
+    /// <summary>
+    /// SV_SpawnServer after the frame-0 point: the server is active, two settling frames with host_frametime 0.1
+    /// (which stays the host's frame time for the rest of the host frame), the baselines and serverinfo to the
+    /// connected clients.
+    /// </summary>
+    [NoAllocUnchecked("map load")]
+    public void SettleAndFinish()
+    {
+        Active = true;              // sv.active, sv.state = ss_active
+        FrameTime = 0.1;
+        Physics();
+        Physics();
+        FinishSpawn();
     }
 }

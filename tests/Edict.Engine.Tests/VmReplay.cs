@@ -63,7 +63,13 @@ public sealed unsafe class VmReplay : IDisposable
     public long Links { get; private set; }
 
     private int[] _clientNames = [];             // the reference's offsets of the client names, from the map record
-    private readonly bool _portClients;
+    private readonly bool _portClients, _portFrames;
+    private int _lastPortFrame = -1;             // the port ran this frame whole; its end is checked at the next 'H'
+    private bool _finishSpawn;                   // a spawn record was seen: the next 'H' runs SV_SpawnServer's end first
+
+    /// <summary>Server frames the port ran whole, and those of them whose state hashed as the reference's frame record.</summary>
+    public int PortFrames { get; private set; }
+    public int FramesHashed { get; private set; }
     private readonly TapeNet? _tape;
     private Client[]? _clients;                  // svs.clients: they outlive a map
     private bool _checkFrameStart;               // the next engine entry follows the port's server frame start
@@ -129,12 +135,18 @@ public sealed unsafe class VmReplay : IDisposable
     /// The port runs each server frame's start itself (cut 3, step 2): connecting, the tape's messages, the host
     /// commands, the clients' movement; checked at the frame's next engine entry.
     /// </param>
+    /// <param name="frames">
+    /// The port runs every server frame whole (cut 3, step 3): its start, SV_Physics and SV_SendClientMessages; at the
+    /// next frame its remaining changes, the rand seed after the next frame's rand () and the state hash of the
+    /// reference's frame record are checked.
+    /// </param>
     public VmReplay(string file, QFileSystem files, Func<Progs, nint, nint, int, IVm>? makeVm = null, Func<int, bool>? ported = null,
-                    Action<Server, int>? call = null, bool clients = false)
+                    Action<Server, int>? call = null, bool clients = false, bool frames = false)
     {
         _call = call ?? Builtins.Call;
-        _portClients = clients;
-        if (clients)
+        _portClients = clients || frames;
+        _portFrames = frames;
+        if (clients || frames)
             _tape = new TapeNet(Path.ChangeExtension(file, ".etp"));
         _makeVm = makeVm ?? ((p, g, e, h) => new PortVm(_sv!.Vm));
         _ported = ported ?? Builtins.Has;
@@ -215,6 +227,7 @@ public sealed unsafe class VmReplay : IDisposable
         sv.Time = time;
         sv.ServerFlags = serverflags;
 
+        _finishSpawn = true;
         if (_spawns >= _edh.Spawns.Count)
             throw Fail("a spawn point the .edh has no spawn record for");
         EdhFile.Spawn r = _edh.Spawns[_spawns++];
@@ -255,10 +268,43 @@ public sealed unsafe class VmReplay : IDisposable
         FrameTime = F64();
         uint seed = (uint)I32();
         double time = F64();
+        ServerFrames++;
+        if (!_portFrames)
+        {   // the engine's frame end (SV_SendClientMessages) and SV_ClearDatagram were the reference's: empty what the
+            // port's builtins wrote, as they did
+            Server s = _sv!;
+            s.Datagram.Clear();
+            s.ReliableDatagram.Clear();
+            foreach (Client c in s.Clients)
+                c.Message.Clear();
+        }
+        if (_portFrames)
+        {
+            if (_lastPortFrame >= 0)
+                EndOfPortFrame(frame, seed, time);
+            else
+            {
+                Apply();
+                _sv!.Rand.Srand(seed);
+                _sv.Time = time;
+            }
+            if (_finishSpawn)
+            {   // SV_SpawnServer's end, after its two settling frames (which the capture recorded and were applied)
+                _finishSpawn = false;
+                _sv!.FinishSpawn();
+            }
+            _sv!.FrameTime = FrameTime;
+            _tape!.FrameCount = frame;
+            _where.Push($"server frame {frame}");
+            _sv.ServerFrame();
+            _where.Pop();
+            _lastPortFrame = frame;
+            PortFrames++;
+            return;
+        }
         Apply();
         _sv!.Rand.Srand(seed);
         _sv.Time = time;
-        ServerFrames++;
         if (_portClients)
         {
             _sv.FrameTime = FrameTime;
@@ -269,6 +315,38 @@ public sealed unsafe class VmReplay : IDisposable
             _checkFrameStart = true;
             _frameStart = frame;
             PortFrameStarts++;
+        }
+    }
+
+    /// <summary>
+    /// The port ran the previous server frame whole: what changed since its last boundary must be what the reference
+    /// recorded at this frame's start, the next frame's rand () must give the recorded seed, and the state after the
+    /// frame must hash as the reference's frame record.
+    /// </summary>
+    private void EndOfPortFrame(int frame, uint seed, double time)
+    {
+        Server sv = _sv!;
+        Check($"the start of server frame {frame} (after the port's frame {_lastPortFrame})");
+        sv.Rand.Next();                     // _Host_Frame: rand () keeps the random time dependent
+        if (sv.Rand.Seed != seed)
+            throw Fail($"server frame {frame}: rand seed 0x{sv.Rand.Seed:X8} after the frame's rand (), the reference's 0x{seed:X8}");
+        if (BitConverter.DoubleToInt64Bits(sv.Time) != BitConverter.DoubleToInt64Bits(time))
+            throw Fail($"server frame {frame}: sv.time {sv.Time:R}, the reference's {time:R}");
+        // the frame record carries host_framecount after _Host_Frame has counted the frame up: frame N is record N + 1
+        if (_edh.FrameRecords.TryGetValue((uint)_lastPortFrame + 1, out EdhFile.Frame r))
+        {
+            _hash ??= new StateHash(_progs!);
+            bool active = sv.Active;
+            sv.Active = true;               // the frame record is written after the host frame, while sv.state is active
+            StateHash.Lanes l = _hash.Of(sv);
+            sv.Active = active;
+            if (sv.NumEdicts != r.NumEdicts)
+                throw Fail($"frame record {_lastPortFrame + 1}: num_edicts {sv.NumEdicts}, the reference's {r.NumEdicts}");
+            if (l.GlobalsTyped != r.GlobalsTyped)
+                throw Fail($"frame record {_lastPortFrame + 1}: typed globals lane {l.GlobalsTyped:x16}, the reference's {r.GlobalsTyped:x16}");
+            if (l.Edicts != r.Edicts)
+                throw Fail($"frame record {_lastPortFrame + 1}: edicts lane {l.Edicts:x16}, the reference's {r.Edicts:x16}");
+            FramesHashed++;
         }
     }
 
@@ -427,6 +505,7 @@ public sealed unsafe class VmReplay : IDisposable
         }
 
         FreeMap();
+        _lastPortFrame = -1;
         QFile f = _files.Find("progs.dat") ?? throw new FileNotFoundException("progs.dat");
         _progs = new Progs(f);
         _hash = null;

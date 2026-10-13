@@ -137,9 +137,20 @@ record. The tapes are single player on skill 1, so the variants are what reaches
 and the cvar adjustments; the maps' entity texts are well formed, so `SpawnParseTests` puts the parser on what they
 never contain (high bytes, comments, escapes, keys with trailing spaces, runs of spaces in vectors).
 
-Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after step 4b): about 89 s for a full run — build 6 s,
-engine tests 72 s (218 tests), exact tests 7 s, analyzer tests 4 s. The largest engine classes: `KnownBadVmTests`
-25 s, `VmReplayTests` 16 s, `TraceGateTests` 13 s, `BuiltinTests` 12 s alone (23 s next to the others);
-`SpawnGateTests` 6 s, `SpawnParseTests` 2 s, `WorldFuzzTests` 2 s. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
+Cut 3: the capture replay runs the port's server frames in three widening modes — the frame's start (clients),
+the whole frame (with physics and the frame's end), and finally the host loop alone (`LoopGateTests`), where nothing
+of the reference is in the loop but the tape and the state at the first spawn. Each mode localizes a difference to
+the record where it appears; the last only says in which frame. R7 at source level covers the client code
+(`clients`) and the physics (`physics`); the physics fuzz (`PhysicsFuzzTests`) is what makes the second group work:
+the tapes never reach speeds beyond sv_maxvelocity, gravity fields, corpses on pushers or a fourth bump.
+
+```sh
+sh tools/longruns.sh ~/edict-ref data/long      # the ten-minute runs of the cut-3 gate (hashes only)
+```
+
+Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after cut 3): about 146 s for a full run — build 5 s,
+engine tests 129 s (255 tests), exact tests 8 s, analyzer tests 4 s. The largest engine classes: `LoopGateTests` 84 s
+(62 s of it the three ten-minute runs), `VmReplayTests` 81 s (three modes on 10 maps), `KnownBadVmTests` 25 s,
+`TraceGateTests` 13 s, `BuiltinTests` 12 s; `SpawnGateTests` 6 s, the fuzzes 2 s each. The builtin mutants (`KnownBadBuiltinTests`) fuzz only the builtins
 they change (0.2 s; 132 s when each ran the whole fuzz). `tools/mutate.py` is not part of the suite (one build per
 mutant; the group `spawn` with its 21 mutants takes 216 s).

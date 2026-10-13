@@ -117,6 +117,7 @@ public sealed unsafe partial class Server
         _decompressed = new byte[MaxMapLeafs / 8];
         _linkPrev = _linkNext = null!;     // sized by ClearWorld, when max_edicts is known
         InitClients();
+        InitPhysics();
     }
 
     /// <summary><c>pr_strings + ofs</c>.</summary>

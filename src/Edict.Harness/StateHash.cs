@@ -119,10 +119,14 @@ public sealed unsafe class StateHash
         Put32((uint)e->NumLeafs);
         for (int i = 0; i < e->NumLeafs && i < EdictHeader.MaxEntLeafs; i++)
             Put32((ushort)e->LeafNums[i]);
-        for (int i = 0; i < 6; i++)
-            PutFloat(0);    // baseline origin, angles: SV_CreateBaseline runs after the spawn point (cut 3)
-        for (int i = 0; i < 5; i++)
-            Put32(0);       // baseline modelindex, frame, colormap, skin, effects
+        EntityState b = e->Baseline;
+        PutFloat(b.Origin.X); PutFloat(b.Origin.Y); PutFloat(b.Origin.Z);
+        PutFloat(b.Angles.X); PutFloat(b.Angles.Y); PutFloat(b.Angles.Z);
+        Put32((uint)b.ModelIndex);
+        Put32((uint)b.Frame);
+        Put32((uint)b.Colormap);
+        Put32((uint)b.Skin);
+        Put32((uint)b.Effects);
         for (int i = 0; i < _fieldTypes.Length; i++)
             PutWord(sv, _fieldTypes[i], words[i]);
         return Hash();

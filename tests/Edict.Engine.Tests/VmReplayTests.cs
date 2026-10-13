@@ -55,4 +55,26 @@ public sealed class VmReplayTests(ITestOutputHelper output)
         output.WriteLine($"{map}: {replay.PortFrameStarts} server frame starts run by the port, {replay.Entries} engine entries");
         Assert.True(replay.PortFrameStarts > 0, "no server frame ran");
     }
+
+    /// <summary>
+    /// Cut 3, step 3: the port runs every server frame whole (clients, SV_Physics, SV_SendClientMessages); every
+    /// boundary inside it is checked, and after it the remaining changes, the rand seed and the frame record's hash.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(MapNames))]
+    public void Server_frames_match_the_reference(string map)
+    {
+        using var files = new QFileSystem(TraceCorpus.DataDirectory);
+        using var replay = new VmReplay(Path.Combine(VmReplay.Directory, map + ".ecp"), files, frames: true);
+        try
+        {
+            replay.Run();
+        }
+        catch (ReplayDivergence d)
+        {
+            Assert.Fail($"first divergence (after {replay.FramesHashed} frames hashed as the reference): " + d.Message);
+        }
+        output.WriteLine($"{map}: {replay.PortFrames} server frames run by the port, {replay.FramesHashed} hashed as the reference");
+        Assert.True(replay.FramesHashed > 0, "no frame was hashed");
+    }
 }

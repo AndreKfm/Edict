@@ -135,6 +135,9 @@ public sealed unsafe partial class Server
 
     private int _hostClient = -1;               // host_client, an index into Clients
     private int _svPlayer;                       // sv_player, an edict number
+
+    /// <summary>sv_player (for the level-1 tests, which run SV_Physics without SV_RunClients).</summary>
+    internal int SvPlayer { get => _svPlayer; set => _svPlayer = value; }
     private int[] _clientNameOffsets;
 
     /// <summary>The client state's part of the constructor (load path).</summary>

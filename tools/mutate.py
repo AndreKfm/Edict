@@ -11,7 +11,8 @@
 # EDICT_ORACLE for the oracle-based classes.
 import os, shutil, subprocess, sys
 
-# group: (test classes, [(name, file, old, new), ...])
+# group: (test classes or 'method:<test method>', [(name, file, old, new), ...]); xunit ANDs a class with a method
+# filter, so a group names either classes or methods
 # Not known-bad variants, shown rather than assumed:
 # - SV_CheckBottom's midpoint (mins + maxs)*0.5 in float instead of double. Halving is exact in both, and rounding the
 #   exact value to float gives the same bits (denormals included).
@@ -19,12 +20,19 @@ import os, shutil, subprocess, sys
 #   which has no field whose name begins with one (another progs could have).
 # - SV_SpawnServer setting both the coop and the deathmatch global: with coop, deathmatch has just been set to 0, and
 #   without coop, coop is 0; either way the other global gets the 0 it has.
+# - SV_Physics_Pusher's thinktime < ltime + host_frametime with <=: at equality both branches give movetime ==
+#   host_frametime (thinktime - ltime is exact in float when the exact difference is a float, and it can only be
+#   equal when host_frametime is one).
 # - PF_checkclient's interval with > instead of >=: sv.time - sv.lastchecktime == 0.1 cannot hold. 0.1 as a double is
 #   an odd multiple of 2^-55; with sv.time >= 1 (it starts at 1) the difference is exact and a multiple of 2^-52.
 
 # Known blind spots: mutants the gates do not detect yet, each with the reason; reported, not counted as failures.
 # They are run like the others, so that one that becomes detected shows (then move it out of here).
 KNOWN = {
+    'RunThink: >= the frame end': 'needs a nextthink exactly at sv.time + host_frametime; neither the tapes nor the '
+        'physics fuzz reach it with a think that changes the state',
+    'CheckStuck: 17 up': 'needs a player stuck so that only 17 units up frees it, with its old origin stuck too',
+    'Frags: old_frags not updated': 'old_frags only decides svc_updatefrags messages: no gated lane sees them yet',
     'AirMove: teleport hack off': 'needs a player walking backwards within teleport_time of leaving a teleporter; the '
         'tapes do not',
     'SetIdealPitch: steps rounded': 'SV_SetIdealPitch runs once per spawn in step 2 (through Host_Spawn_f); every frame '
@@ -94,6 +102,79 @@ MUTANTS = {
          "if (((int*)t)[EntVars.Owner] == clip.PassEdict * EdictSize)\n                    continue;   // don't clip against own missiles", ''),
         ('ClipToLinks: points interact', 'src/Edict.Engine/Server/Move.cs',
          'if (clip.PassEdict >= 0 && Fields(clip.PassEdict)[EntVars.Size] != 0 && t[EntVars.Size] == 0)\n                continue;   // points never interact', ''),
+    ]),
+    'physics': (['method:Edict.Engine.Tests.PhysicsFuzzTests.Physics_matches_the_reference',
+                 'method:Edict.Engine.Tests.VmReplayTests.Server_frames_match_the_reference'], [
+        ('RunThink: >= the frame end', 'src/Edict.Engine/Server/Physics.cs',
+         'if (thinktime <= 0 || thinktime > Time + FrameTime)', 'if (thinktime <= 0 || thinktime >= Time + FrameTime)'),
+        ('RunThink: the past kept', 'src/Edict.Engine/Server/Physics.cs',
+         '        if (thinktime < Time)\n            thinktime = (float)Time;', ''),
+        ('Impact: only the mover touches', 'src/Edict.Engine/Server/Physics.cs',
+         '        float* v2 = Fields(e2);\n        if (((int*)v2)[EntVars.Touch] != 0 && v2[EntVars.Solid] != SolidNot)', '        float* v2 = Fields(e2);\n        if (((int*)v2)[EntVars.Touch] != 0 && v2[EntVars.Solid] != SolidNot && e2 < 0)'),
+        ('ClipVelocity: stop epsilon 0.01', 'src/Edict.Engine/Server/Physics.cs',
+         'private const double StopEpsilon = 0.1;', 'private const double StopEpsilon = 0.01;'),
+        ('FlyMove: floor at 0.71', 'src/Edict.Engine/Server/Physics.cs',
+         '            if (trace.Plane.Normal.Z > 0.7)\n            {\n                blocked |= 1;', '            if (trace.Plane.Normal.Z > 0.71)\n            {\n                blocked |= 1;'),
+        ('FlyMove: three bumps', 'src/Edict.Engine/Server/Physics.cs',
+         'int numbumps = 4;', 'int numbumps = 3;'),
+        ('FlyMove: dead stop only against', 'src/Edict.Engine/Server/Physics.cs',
+         'if (Vec3.Dot(*velocity, primalVelocity) <= 0)', 'if (Vec3.Dot(*velocity, primalVelocity) < 0)'),
+        ('FlyMove: time left not reduced', 'src/Edict.Engine/Server/Physics.cs',
+         'timeLeft -= timeLeft * trace.Fraction;', 'timeLeft -= 0;'),
+        ('AddGravity in float', 'src/Edict.Engine/Server/Physics.cs',
+         'v[EntVars.Velocity + 2] = (float)(v[EntVars.Velocity + 2] - entGravity * Cvars.Value(n) * FrameTime);', 'v[EntVars.Velocity + 2] = v[EntVars.Velocity + 2] - entGravity * Cvars.Value(n) * (float)FrameTime;'),
+        ('AddGravity: no gravity field', 'src/Edict.Engine/Server/Physics.cs',
+         'float entGravity = _gravityField >= 0 && v[_gravityField] != 0 ? v[_gravityField] : 1.0f;', 'float entGravity = 1.0f;'),
+        ('PushEntity: missiles move normally', 'src/Edict.Engine/Server/Physics.cs',
+         'end, MoveMissile, ent);', 'end, MoveNormal, ent);'),
+        ('PushEntity: triggers clip monsters', 'src/Edict.Engine/Server/Physics.cs',
+         'end, MoveNoMonsters, ent);', 'end, MoveNormal, ent);'),
+        ('PushMove: still pusher keeps its time', 'src/Edict.Engine/Server/Physics.cs',
+         '            pv[EntVars.Ltime] += movetime;\n            return;', '            return;'),
+        ('PushMove: riders must overlap', 'src/Edict.Engine/Server/Physics.cs',
+         'if (!((CCast.I32(cv[EntVars.Flags]) & FlOnGround) != 0 && ((int*)cv)[EntVars.Groundentity] == pusher * _edictSize))', 'if (true)'),
+        ('PushMove: no corpse case', 'src/Edict.Engine/Server/Physics.cs',
+         '                if (cv[EntVars.Solid] == SolidNot || cv[EntVars.Solid] == SolidTrigger)\n                {   // corpse', '                if (cv[EntVars.Solid] == SolidNot && cv[EntVars.Solid] == SolidTrigger)\n                {   // corpse'),
+        ('PushMove: blocked not called', 'src/Edict.Engine/Server/Physics.cs',
+         '                if (((int*)pv)[EntVars.Blocked] != 0)', '                if (((int*)pv)[EntVars.Blocked] < 0)'),
+        ('Pusher: think before ltime only', 'src/Edict.Engine/Server/Physics.cs',
+         'if (thinktime > oldltime && thinktime <= v[EntVars.Ltime])', 'if (thinktime > oldltime && thinktime < v[EntVars.Ltime])'),
+        ('CheckStuck: 17 up', 'src/Edict.Engine/Server/Physics.cs',
+         'for (int z = 0; z < 18; z++)', 'for (int z = 0; z < 17; z++)'),
+        ('CheckWater: middle from maxs', 'src/Edict.Engine/Server/Physics.cs',
+         'point.Z = (float)(v[EntVars.Origin + 2] + (v[EntVars.Mins + 2] + v[EntVars.Maxs + 2]) * 0.5);', 'point.Z = v[EntVars.Origin + 2] + v[EntVars.Maxs + 2];'),
+        ('WallFriction: d + 0.4', 'src/Edict.Engine/Server/Physics.cs',
+         'd = (float)(d + 0.5);', 'd = (float)(d + 0.4);'),
+        ('TryUnstick: one unit', 'src/Edict.Engine/Server/Physics.cs',
+         'case 0: dir.X = 2; dir.Y = 0; break;', 'case 0: dir.X = 1; dir.Y = 0; break;'),
+        ('WalkMove: step 16', 'src/Edict.Engine/Server/Physics.cs',
+         'private const int StepSizeWalk = 18;', 'private const int StepSizeWalk = 16;'),
+        ('WalkMove: down move without the fall', 'src/Edict.Engine/Server/Physics.cs',
+         'downmove.Z = (float)(-StepSizeWalk + oldvel.Z * FrameTime);', 'downmove.Z = -StepSizeWalk;'),
+        ('WalkMove: stuck at 1/16', 'src/Edict.Engine/Server/Physics.cs',
+         '            if (Math.Abs((double)(oldorg.Y - v[EntVars.Origin + 1])) < 0.03125\n                && Math.Abs((double)(oldorg.X - v[EntVars.Origin])) < 0.03125)', '            if (Math.Abs((double)(oldorg.Y - v[EntVars.Origin + 1])) < 0.0625\n                && Math.Abs((double)(oldorg.X - v[EntVars.Origin])) < 0.0625)'),
+        ('WaterTransition: waterlevel 0 out of water', 'src/Edict.Engine/Server/Physics.cs',
+         '            v[EntVars.Watertype] = ContentsEmpty;\n            v[EntVars.Waterlevel] = cont;', '            v[EntVars.Watertype] = ContentsEmpty;\n            v[EntVars.Waterlevel] = 0;'),
+        ('Toss: bounce 1.4', 'src/Edict.Engine/Server/Physics.cs',
+         'float backoff = v[EntVars.Movetype] == MovetypeBounce ? 1.5f : 1;', 'float backoff = v[EntVars.Movetype] == MovetypeBounce ? 1.4f : 1;'),
+        ('Toss: bounces stop below 50', 'src/Edict.Engine/Server/Physics.cs',
+         'if (vel->Z < 60 || v[EntVars.Movetype] != MovetypeBounce)', 'if (vel->Z < 50 || v[EntVars.Movetype] != MovetypeBounce)'),
+        ('Toss: angles not turned', 'src/Edict.Engine/Server/Physics.cs',
+         '        // move angles\n        VectorMa(V3(v, EntVars.Angles), (float)FrameTime, *V3(v, EntVars.Avelocity));', ''),
+        ('Step: flying monsters fall', 'src/Edict.Engine/Server/Physics.cs',
+         'if ((CCast.I32(v[EntVars.Flags]) & (FlOnGround | FlFly | FlSwim)) == 0)', 'if ((CCast.I32(v[EntVars.Flags]) & FlOnGround) == 0)'),
+        ('Physics: force_retouch kept', 'src/Edict.Engine/Server/Physics.cs',
+         '            *G(GlobalVars.ForceRetouch) = *G(GlobalVars.ForceRetouch) - 1;', ''),
+        ('CheckVelocity: no bound', 'src/Edict.Engine/Server/Physics.cs',
+         '                if (v[EntVars.Velocity + i] > max)\n                    v[EntVars.Velocity + i] = max;\n                else if (v[EntVars.Velocity + i] < -max)\n                    v[EntVars.Velocity + i] = -max;', ''),
+        ('Noclip: no turning', 'src/Edict.Engine/Server/Physics.cs',
+         '        VectorMa(V3(v, EntVars.Angles), (float)FrameTime, *V3(v, EntVars.Avelocity));\n        VectorMa(V3(v, EntVars.Origin), (float)FrameTime, *V3(v, EntVars.Velocity));\n        LinkEdict(ent, false);', '        VectorMa(V3(v, EntVars.Origin), (float)FrameTime, *V3(v, EntVars.Velocity));\n        LinkEdict(ent, false);'),
+        ('CleanupEnts: muzzle flash kept', 'src/Edict.Engine/Server/Physics.cs',
+         '            v[EntVars.Effects] = CCast.I32(v[EntVars.Effects]) & ~EfMuzzleFlash;', ''),
+        ('Baseline: frame not kept', 'src/Edict.Engine/Server/Physics.cs',
+         '            h->Baseline.Frame = CCast.I32(v[EntVars.Frame]);', ''),
+        ('Frags: old_frags not updated', 'src/Edict.Engine/Server/Physics.cs',
+         '                host.OldFrags = CCast.I32(frags);', ''),
     ]),
     'clients': (['Edict.Engine.Tests.VmReplayTests'], [
         ('ReadAngle unsigned', 'src/Edict.Engine/Common/SizeBuf.cs',
@@ -266,9 +347,14 @@ def main():
                 survived += 1
             else:
                 args = ['dotnet', 'run', '--project', test, '-c', 'Release', '--no-build', '--']
-                for c in classes:
-                    args += ['-class', c]
+                for c in classes:     # a test class, or 'method:' and one test method
+                    args += ['-method', c[7:]] if c.startswith('method:') else ['-class', c]
                 t = run(args, work, env)
+                if 'Total: 0,' in t.stdout:
+                    print(f'ERROR   {g}: {name}: the filter ran no tests')
+                    survived += 1
+                    open(path, 'w', encoding='utf-8', newline='\n').write(pristine)
+                    continue
                 failed = t.returncode != 0
                 first = next((l.strip() for l in t.stdout.splitlines() if 'first divergence' in l), '')
                 known = name in KNOWN

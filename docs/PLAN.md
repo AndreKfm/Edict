@@ -430,6 +430,36 @@ must have made. 4,000 frames on each of the 10 maps, green on the first run, Win
 mutants): 18 detected; 7 known blind spots, each with its reason in the tool: the tapes never send an upmove, a
 color other than 0 0, or a backward walk out of a teleporter, and SV_WriteClientdataToMessage runs only once per spawn
 until SV_SendClientMessages is ported (damage, idealpitch).
+Step 3 done (2026-10-13): `Server/Physics.cs` — sv_phys.c without its QUAKE2 parts (every movetype the census found
+and the client's, `SV_RunThink`, `SV_Impact`, `ClipVelocity`, `SV_FlyMove`, `SV_PushMove`, `SV_WalkMove` with
+`SV_TryUnstick` and `SV_WallFriction`, `SV_CheckStuck`, `SV_CheckWater`, `SV_CheckWaterTransition`), the state of
+`SV_SendClientMessages` (frag updates, each spawned client's client data every frame, signon, `SV_CleanupEnts`),
+`SV_CreateBaseline` (the baseline is in the edict header and in the hash), `SV_StartSound` and `SV_StartParticle`,
+and the eleven builtins still missing (the `Write*` family, sound, particle, the prints, stuffcmd, localcmd,
+changelevel): all 51 builtins the corpus reaches are the port's; messages are written in full, though no lane hashes
+them yet. Gate (`VmReplayTests.Server_frames_match_the_reference`): the port runs every server frame whole; every
+boundary inside it is checked, and at the next frame's start what changed since, the next frame's `rand ()` and the
+state hash of the reference's frame record (frame N is record N + 1: the record is written after `_Host_Frame` has
+counted the frame). 39,985 frames hashed alike on the 10 maps (all but the last and those before a restart). Level 1
+(`PhysicsFuzzTests`, oracle version 6): `SV_Physics` itself on the oracle's world and the game's progs.dat, every
+function pointed at SUB_Null, random entities of every movetype, speeds beyond sv_maxvelocity, gravity fields,
+pushers with riders, stuck players, think times on the frame boundary; 1,500 frames per map on 4 maps. R7
+(`physics`, 35 mutants): the replay alone detected 27 of 36; with the fuzz 33 of 35, and 3 known blind spots (a
+nextthink exactly at the frame end that changes state, a player stuck exactly 17 units deep, `old_frags`, which
+only messages show); one candidate shown not to be bad (the pusher's `<` with `<=`).
+Step 4 done (2026-10-13), and with it the cut-3 gate: `Host.cs` — the host loop of a server without a local client:
+`_Host_Frame`'s server part (the frame's `rand ()`, `Host_FilterTime` with host_framerate, `Cbuf_Execute`,
+`Host_ServerFrame`, host_framecount), the commands a game issues (`map`, `restart` after a death through QuakeC's
+localcmd, `changelevel` with `SV_SaveSpawnparms`), and the whole `SV_SpawnServer` (two settling frames with
+host_frametime 0.1, which the host frame keeps; baselines; serverinfo, which after a restart leaves the client not
+spawned). Gate (`LoopGateTests`): the port's host runs the tape alone, no capture in the loop, and after every frame
+its state must hash as the reference's frame record, at every spawn as its spawn record. Inputs taken from the
+reference: the cvars, maxclients and the rand state at the first spawn. The 10 corpus runs: all 40,000 frames and 15
+spawns (four restarts, `dev`'s changelevel to `lq_e0m1`). The long runs (`tools/longruns.sh`, new tapes, seeds
+101, 103 and 106): `lq_e0m1`, `lq_e0m3` and `lq_e0m6` × 43,200 frames (ten minutes at 72 fps; sv.time from 1.3 to
+601.3), every frame and spawn hashed alike, on Windows and Linux. Not ported yet: SV_WriteEntitiesToClient (messages
+only), dropping a client, saved games, a local client, any other console command; the message bytes are produced but
+not gated (the messages lane).
 
 ## D. Effort at 7 h/week (calendar weeks)
 

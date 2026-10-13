@@ -12,7 +12,7 @@ namespace Edict.Harness;
 /// host frame with host_framecount ≥ f. What the server sends is discarded. Open-loop, as in C.
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
-public sealed unsafe class TapeNet : INetServer, IClientConnection
+public sealed unsafe class TapeNet : INetServer, IClientConnection, IFrameCounted
 {
     private const int Connect = 0;
 

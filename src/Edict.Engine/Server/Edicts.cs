@@ -7,8 +7,8 @@ namespace Edict.Engine;
 
 /// <summary>
 /// The part of <c>edict_t</c> in front of the progs fields, as far as ported: the free flag, freetime and the world
-/// leafs the edict touches. The port lays it out its own way inside the reference's header size (docs/adr/D7); the
-/// area link lives in the server's link lists, the baseline comes with messages.
+/// leafs the edict touches, and the baseline SV_CreateBaseline sets. The port lays it out its own way inside the
+/// reference's header size (docs/adr/D7); the area link lives in the server's link lists.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 public unsafe struct EdictHeader
@@ -19,6 +19,15 @@ public unsafe struct EdictHeader
     public float FreeTime;                            // sv.time when the object was freed
     public int NumLeafs;
     public fixed short LeafNums[MaxEntLeafs];
+    public EntityState Baseline;
+}
+
+/// <summary><c>entity_state_t</c>: what a client is told about an entity at signon.</summary>
+[StructLayout(LayoutKind.Sequential)]
+public struct EntityState
+{
+    public Vec3 Origin, Angles;
+    public int ModelIndex, Frame, Colormap, Skin, Effects;
 }
 
 /// <summary>Edict allocation and numbering (pr_edict.c, progs.h).</summary>

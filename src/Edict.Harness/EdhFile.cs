@@ -15,8 +15,14 @@ public sealed class EdhFile
     public readonly record struct Spawn(string Map, uint FrameCount, double Time, int NumEdicts, ulong Edicts,
                                         ulong GlobalsTyped, ulong GlobalsRaw, ulong[] Entities);
 
+    /// <summary>The three lanes of a frame record (the state after a host frame).</summary>
+    public readonly record struct Frame(double Time, int NumEdicts, ulong Edicts, ulong GlobalsTyped, ulong GlobalsRaw);
+
     public IReadOnlyList<Spawn> Spawns { get; }
     public int Frames { get; }
+
+    /// <summary>The frame records by host_framecount (a respawned map keeps counting).</summary>
+    public IReadOnlyDictionary<uint, Frame> FrameRecords { get; }
 
     public EdhFile(string path)
     {
@@ -25,6 +31,7 @@ public sealed class EdhFile
             throw new InvalidDataException($"{path}: not an EDH1 version 2 file (run tools/captures.sh)");
         uint flags = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(8));
         var spawns = new List<Spawn>();
+        var frameRecords = new Dictionary<uint, Frame>();
         string map = "";
         int p = 12, frames = 0;
         while (p < d.Length)
@@ -53,7 +60,10 @@ public sealed class EdhFile
                     if (k == (byte)'S')
                         spawns.Add(new Spawn(map, fc, t, n, le, lt, lr, ents));
                     else
+                    {
                         frames++;
+                        frameRecords[fc] = new Frame(t, n, le, lt, lr);
+                    }
                     break;
                 }
                 default:
@@ -62,5 +72,6 @@ public sealed class EdhFile
         }
         Spawns = spawns;
         Frames = frames;
+        FrameRecords = frameRecords;
     }
 }
