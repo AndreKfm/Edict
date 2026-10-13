@@ -22,6 +22,7 @@ struct edict_s;
 void EdictCapture_Link (struct edict_s *ent, int touch);	// SV_LinkEdict, before
 void EdictCapture_Linked (struct edict_s *ent);			// SV_LinkEdict, after
 void EdictCapture_Unlink (struct edict_s *ent);			// SV_UnlinkEdict
+void EdictCapture_Spawn (void);							// after ED_LoadFromFile (through Edict_Spawned)
 
 #define EDICT_CAPTURE_ENTER(f)			(edict_capture ? EdictCapture_Enter (f) : (void)0)
 #define EDICT_CAPTURE_LEAVE(f)			(edict_capture ? EdictCapture_Leave (f) : (void)0)

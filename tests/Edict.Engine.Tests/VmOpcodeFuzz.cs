@@ -35,8 +35,8 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
             throw new InvalidOperationException("EDICT_ORACLE is not set: point it to the oracle library built by ref/build.sh (docs/TESTING.md).");
         nint h = NativeLibrary.Load(path);
         var version = (delegate* unmanaged<int>)NativeLibrary.GetExport(h, "EdictOracle_Version");
-        if (version() != 3)
-            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 3.");
+        if (version() != 4)
+            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 4.");
         return h;
     }
 

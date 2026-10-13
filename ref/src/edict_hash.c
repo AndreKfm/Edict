@@ -9,11 +9,18 @@ on memory layout enters the gated lanes: strings are hashed by content, entity r
 padding and pointers (edict_t.area) are never read. The C# port produces the same streams.
 
 File layout (all integers little-endian):
-  header   "EDH1"  u32 version  u32 flags
-  record   'M'  char map[64]  u32 progs_crc  u32 entityfields  u32 numglobals          on every new map
+  header   "EDH1"  u32 version (2)  u32 flags
+  record   'M'  char map[64]  u32 progs_crc  u32 entityfields  u32 numglobals          on every new map, and before
+                                                                                      every spawn record
+  record   'S'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
+                u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw
+                u64 entity_hash x num_edicts                                          after ED_LoadFromFile in
+                                                                                      SV_SpawnServer (patch 0005):
+                                                                                      the cut-2 frame-0 gate
   record   'F'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
                 u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw
                 [u64 entity_hash x num_edicts, if EDH_FLAG_PER_ENTITY]                on every server frame
+Version 1 had no spawn records.
 Lanes:
   edicts         sv.time, num_edicts, state, paused, serverflags, lightstyles, then (index, entity hash) pairs
   globals_typed  every globals word covered by a globaldef, typed like entity fields
@@ -21,6 +28,7 @@ Lanes:
 */
 #include "quakedef.h"
 #include "edict_hash.h"
+#include "edict_capture.h"
 
 /*
 ==============================================================================
@@ -223,7 +231,7 @@ void EdictHash_Open (char *path, int flags)
 	edh_flags = flags;
 	stream_len = 0;
 	put8 ('E'); put8 ('D'); put8 ('H'); put8 ('1');
-	put32 (1);
+	put32 (2);
 	put32 (flags);
 	FlushStream ();
 }
@@ -253,15 +261,10 @@ static void MapRecord (void)
 	FlushStream ();
 }
 
-void EdictHash_Frame (void)
+static void StateRecord (int kind, int per_entity)
 {
 	edict_u64	lane_edicts, lane_typed, lane_raw;
 	int			i, n;
-
-	if (!edh)
-		return;
-	if (progs != typed_for)
-		MapRecord ();
 
 	n = sv.num_edicts;
 	if (n > entity_hashes_size)
@@ -300,17 +303,42 @@ void EdictHash_Frame (void)
 	lane_raw = HashGlobals (0);
 
 	stream_len = 0;
-	put8 ('F');
+	put8 (kind);
 	put32 (host_framecount);
 	putdouble (sv.time);
 	put32 (n);
 	put64 (lane_edicts);
 	put64 (lane_typed);
 	put64 (lane_raw);
-	if (edh_flags & EDH_FLAG_PER_ENTITY)
+	if (per_entity)
 		for (i = 0 ; i < n ; i++)
 			put64 (entity_hashes[i]);
 	FlushStream ();
+}
+
+void EdictHash_Frame (void)
+{
+	if (!edh)
+		return;
+	if (progs != typed_for)
+		MapRecord ();
+	StateRecord ('F', edh_flags & EDH_FLAG_PER_ENTITY);
+}
+
+// The hunk may give a new map's progs the old one's address, so the map record is written here unconditionally.
+static void EdictHash_Spawn (void)
+{
+	if (!edh)
+		return;
+	MapRecord ();
+	StateRecord ('S', 1);
+}
+
+void Edict_Spawned (void)
+{
+	if (edict_capture)
+		EdictCapture_Spawn ();
+	EdictHash_Spawn ();
 }
 
 /*

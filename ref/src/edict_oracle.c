@@ -8,6 +8,7 @@ functions or the pinned C library functions through the same redirects id's code
 All arguments are blittable; strings are NUL-terminated byte buffers owned by the caller.
 */
 #include "quakedef.h"
+#include "edict_hash.h"
 
 #ifdef _WIN32
 #define EDICT_EXPORT	__declspec(dllexport)
@@ -15,7 +16,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	3
+#define ORACLE_VERSION	4
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);
@@ -34,6 +35,9 @@ EDICT_EXPORT int EdictOracle_Strcmp (const char *a, const char *b) { return strc
 // C conversions as the reference compiles them (-fno-strict-float-cast-overflow: saturating, NaN to 0)
 EDICT_EXPORT int EdictOracle_FloatToInt (float f) { return (int)f; }
 EDICT_EXPORT int EdictOracle_DoubleToInt (double d) { return (int)d; }
+
+// the reference's XXH64 (ref/src/edict_xxh64.c), which the port's hash streams must match
+EDICT_EXPORT edict_u64 EdictOracle_XXH64 (const void *data, int length) { return EdictHash_XXH64 (data, length); }
 
 // id's functions
 EDICT_EXPORT float EdictOracle_Anglemod (float a) { return anglemod (a); }

@@ -46,6 +46,8 @@ File layout (all integers little-endian):
        2 trigger)  i32 previous edict in the list (-1: the head)  diff
                                                           SV_LinkEdict returns (touch functions ran in between)
   'U'  u32 edict                                          SV_UnlinkEdict
+  'S'  u32 rand_seed  f64 sv.time  u32 svs.serverflags  64 x { u8 set  [char style[] NUL] }  diff
+                                                          after ED_LoadFromFile (patch 0005): the frame-0 state
   diff:  u32 num_edicts  u32 n  n x { u32 word  u32 value }  u32 m  m x { i32 string offset  char text[]  NUL }
          u32 h  h x { u32 edict  u32 free  u32 freetime bits }
          word w < numglobals is global w; otherwise edict (w - numglobals) / entityfields,
@@ -54,7 +56,7 @@ File layout (all integers little-endian):
 #include "quakedef.h"
 #include "edict_capture.h"
 
-#define ECP_VERSION		6
+#define ECP_VERSION		7
 #define BUFFER_SIZE		(1 << 16)
 
 extern unsigned short	pr_crc;				// pr_edict.c
@@ -419,6 +421,24 @@ void EdictCapture_Linked (edict_t *ent)
 	put8 (list);
 	put32 (node < 0 || ent->area.prev == &sv_areanodes[node].solid_edicts || ent->area.prev == &sv_areanodes[node].trigger_edicts
 		? -1 : NUM_FOR_EDICT (EDICT_FROM_AREA (ent->area.prev)));
+	Diff (-1);
+}
+
+// The frame-0 point (patch 0005, through Edict_Spawned): the engine's changes since the last spawn function and the
+// engine state the hash covers besides the VM's memory, so that the replay can hash what the reference hashed.
+void EdictCapture_Spawn (void)
+{
+	int		i;
+
+	put8 ('S');
+	putengine ();
+	put32 (svs.serverflags);
+	for (i = 0 ; i < MAX_LIGHTSTYLES ; i++)
+	{
+		put8 (sv.lightstyles[i] ? 1 : 0);
+		if (sv.lightstyles[i])
+			putname (sv.lightstyles[i]);
+	}
 	Diff (-1);
 }
 
