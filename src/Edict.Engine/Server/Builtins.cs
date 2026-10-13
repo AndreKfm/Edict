@@ -8,7 +8,8 @@ namespace Edict.Engine;
 /// <summary>
 /// The builtins (pr_cmds.c, sv_move.c) the port has so far, by their number in <c>pr_builtin[]</c> as compiled
 /// without QUAKE2. Cut 2, step 3a: the ones that work on the VM's memory, the rand stream, cvars and the precache
-/// lists. Each is gated against every call the captures recorded (tests/Edict.Engine.Tests, VmReplay).
+/// lists; step 3b: edicts (spawn, remove, find, findradius, nextent, and makestatic's freeing of the entity). Each
+/// is gated against every call the captures recorded (tests/Edict.Engine.Tests, VmReplay).
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public static unsafe class Builtins
@@ -16,7 +17,7 @@ public static unsafe class Builtins
     public const int MakeVectors = 1, Random = 7, Normalize = 9, Vlen = 12, VectoYaw = 13, PrecacheSound = 19,
         PrecacheModel = 20, Ftos = 26, Vtos = 27, Rint = 36, Floor = 37, Ceil = 38, Fabs = 43, Cvar = 45,
         ChangeYaw = 49, VectoAngles = 51, PrecacheFile = 68, CvarSet = 72, PrecacheModel2 = 75, PrecacheSound2 = 76,
-        PrecacheFile2 = 77;
+        PrecacheFile2 = 77, Spawn = 14, Remove = 15, Find = 18, FindRadius = 22, NextEnt = 47, MakeStatic = 69;
 
     private const int OfsReturn = QcVm.OfsReturn, OfsParm0 = QcVm.OfsParm0, OfsParm1 = QcVm.OfsParm0 + 3;
 
@@ -25,7 +26,7 @@ public static unsafe class Builtins
     {
         MakeVectors or Random or Normalize or Vlen or VectoYaw or PrecacheSound or PrecacheModel or Ftos or Vtos or Rint
             or Floor or Ceil or Fabs or Cvar or ChangeYaw or VectoAngles or PrecacheFile or CvarSet or PrecacheModel2
-            or PrecacheSound2 or PrecacheFile2 => true,
+            or PrecacheSound2 or PrecacheFile2 or Spawn or Remove or Find or FindRadius or NextEnt or MakeStatic => true,
         _ => false,
     };
 
@@ -52,6 +53,12 @@ public static unsafe class Builtins
             case VectoAngles: PF_vectoangles(sv); break;
             case PrecacheFile: case PrecacheFile2: PF_precache_file(sv); break;
             case CvarSet: PF_cvar_set(sv); break;
+            case Spawn: PF_Spawn(sv); break;
+            case Remove: PF_Remove(sv); break;
+            case Find: PF_Find(sv); break;
+            case FindRadius: PF_findradius(sv); break;
+            case NextEnt: PF_nextent(sv); break;
+            case MakeStatic: PF_makestatic(sv); break;
             default: throw sv.Vm.RunError(NotPorted);
         }
     }
@@ -256,4 +263,99 @@ public static unsafe class Builtins
 
         ent[EntVars.Angles + 1] = Mathlib.Anglemod(current + move);
     }
+
+    private const int OfsParm2 = QcVm.OfsParm0 + 6;
+
+    /// <summary>RETURN_EDICT: the edict's byte offset (EDICT_TO_PROG).</summary>
+    private static void ReturnEdict(Server sv, int n) => sv.Globals[OfsReturn] = n * sv.EdictSize;
+
+    /// <summary>G_EDICT as an edict number: PROG_TO_EDICT, unchecked as in C.</summary>
+    private static int GEdict(Server sv, int ofs) => sv.Globals[ofs] / sv.EdictSize;
+
+    /// <summary>G_EDICTNUM: NUM_FOR_EDICT (G_EDICT), checked against num_edicts.</summary>
+    private static int GEdictNum(Server sv, int ofs) => sv.NumForEdict(sv.Globals[ofs]);
+
+    private static void PF_Spawn(Server sv) => ReturnEdict(sv, sv.Alloc());
+
+    private static void PF_Remove(Server sv) => sv.Free(GEdict(sv, OfsParm0));
+
+    /// <summary>entity (entity start, .string field, string match) find: the next edict whose field matches.</summary>
+    private static void PF_Find(Server sv)
+    {
+        int e = GEdictNum(sv, OfsParm0);
+        int f = sv.Globals[OfsParm1];
+        byte* s = S(sv, OfsParm2);              // "if (!s)" in C: a string pointer is never null here
+
+        for (e++; e < sv.NumEdicts; e++)
+        {
+            if (sv.EdictNum(e)->Free != 0)
+                continue;
+            byte* t = sv.String(((int*)sv.Fields(e))[f]);   // E_STRING (ed, f)
+            if (CString.Strcmp(t, s) == 0)
+            {
+                ReturnEdict(sv, e);
+                return;
+            }
+        }
+
+        ReturnEdict(sv, 0);
+    }
+
+    /// <summary>
+    /// findradius (origin, radius): a chain of the entities whose centres lie within the radius. The centre is
+    /// <c>origin + (mins + maxs)*0.5</c> with a double literal, so each component is computed in double and stored
+    /// to float; the distance is Length.
+    /// </summary>
+    private static void PF_findradius(Server sv)
+    {
+        int chain = 0;
+        Vec3 org = *V(sv, OfsParm0);
+        float rad = *sv.G(OfsParm1);
+
+        for (int i = 1; i < sv.NumEdicts; i++)
+        {
+            if (sv.EdictNum(i)->Free != 0)
+                continue;
+            float* v = sv.Fields(i);
+            if (v[EntVars.Solid] == Solid.Not)
+                continue;
+            Vec3 eorg;
+            eorg.X = (float)(org.X - (v[EntVars.Origin] + (v[EntVars.Mins] + v[EntVars.Maxs]) * 0.5));
+            eorg.Y = (float)(org.Y - (v[EntVars.Origin + 1] + (v[EntVars.Mins + 1] + v[EntVars.Maxs + 1]) * 0.5));
+            eorg.Z = (float)(org.Z - (v[EntVars.Origin + 2] + (v[EntVars.Mins + 2] + v[EntVars.Maxs + 2]) * 0.5));
+            if (Mathlib.Length(eorg) > rad)
+                continue;
+
+            ((int*)v)[EntVars.Chain] = chain * sv.EdictSize;
+            chain = i;
+        }
+
+        ReturnEdict(sv, chain);
+    }
+
+    /// <summary>entity nextent (entity): the next edict in use after it, or world.</summary>
+    private static void PF_nextent(Server sv)
+    {
+        int i = GEdictNum(sv, OfsParm0);
+        while (true)
+        {
+            i++;
+            if (i == sv.NumEdicts)
+            {
+                ReturnEdict(sv, 0);
+                return;
+            }
+            if (sv.EdictNum(i)->Free == 0)
+            {
+                ReturnEdict(sv, i);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// makestatic (entity): the entity goes into the signon message as a static entity, then is freed. The signon
+    /// output comes with messages; what the VM sees, the freed entity, is here.
+    /// </summary>
+    private static void PF_makestatic(Server sv) => sv.Free(GEdict(sv, OfsParm0));
 }

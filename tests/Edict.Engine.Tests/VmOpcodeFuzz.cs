@@ -19,7 +19,7 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
     // operand slots above the system globals (GlobalVars.Count = 92)
     private const int SlotA = 100, SlotB = 103, SlotC = 106, SlotOne = 110;
     private const int NumGlobals = 128;
-    private const int NumEdicts = 4;
+    private const int DefaultEdicts = 4;
     private const int EntityFields = 120;           // > EntVars.Count: OP_STATE's fields exist
     private const int NumStatements = 8;
 
@@ -72,8 +72,10 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
 
     public bool Active { get; set; }
 
-    public VmOpcodeFuzz()
+    /// <param name="edicts">Edicts in each memory (the edict builtins need more than the VM statements).</param>
+    public VmOpcodeFuzz(int edicts = DefaultEdicts)
     {
+        NumEdicts = edicts;
         var strings = new List<byte>();
         _stringOffsets = new int[StringTable.Length];
         for (int i = 0; i < StringTable.Length; i++)
@@ -110,8 +112,8 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
         _refFunctions[1] = Progs.Functions[1];
         RefGlobals = (float*)NativeMemory.AllocZeroed(NumGlobals, 4);
         PortGlobals = (float*)NativeMemory.AllocZeroed(NumGlobals, 4);
-        RefEdicts = (byte*)NativeMemory.AllocZeroed(NumEdicts, (nuint)Stride);
-        PortEdicts = (byte*)NativeMemory.AllocZeroed(NumEdicts, (nuint)Stride);
+        RefEdicts = (byte*)NativeMemory.AllocZeroed((nuint)NumEdicts, (nuint)Stride);
+        PortEdicts = (byte*)NativeMemory.AllocZeroed((nuint)NumEdicts, (nuint)Stride);
     }
 
     public byte* Strings => Progs.Strings;
@@ -190,17 +192,32 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
     /// <summary>Equal bits, or (with <paramref name="nanClass"/>) both NaN.</summary>
     public static bool Same(uint a, uint b, bool nanClass) => a == b || (nanClass && IsNaN(a) && IsNaN(b));
 
-    /// <summary>Null if both memories agree word for word (NaN as a class if asked), else the first difference.</summary>
-    public string? Compare(bool nanClass)
+    /// <summary>
+    /// Null if both memories agree word for word (NaN as a class if asked), else the first difference. The edict
+    /// headers must be unchanged, or with <paramref name="headers"/> (reference layout, port layout) agree in their
+    /// free flag and freetime.
+    /// </summary>
+    public string? Compare(bool nanClass, Func<int, (int Free, uint FreeTime)>? headers = null)
     {
         for (int i = 0; i < NumGlobals; i++)
             if (!Same(((uint*)RefGlobals)[i], ((uint*)PortGlobals)[i], nanClass))
                 return $"global {i}: port {Hex(((uint*)PortGlobals)[i])}, reference {Hex(((uint*)RefGlobals)[i])}";
         for (int e = 0; e < NumEdicts; e++)
         {
-            var r = new ReadOnlySpan<byte>(RefEdicts + e * Stride, Header);
-            if (!r.SequenceEqual(new ReadOnlySpan<byte>(PortEdicts + e * Stride, Header)))
-                return $"edict {e}: the header changed";
+            if (headers is null)
+            {
+                var r = new ReadOnlySpan<byte>(RefEdicts + e * Stride, Header);
+                if (!r.SequenceEqual(new ReadOnlySpan<byte>(PortEdicts + e * Stride, Header)))
+                    return $"edict {e}: the header changed";
+            }
+            else
+            {
+                (int free, uint freetime) = headers(e);
+                var port = (EdictHeader*)(PortEdicts + e * Stride);
+                if (port->Free != free || BitConverter.SingleToUInt32Bits(port->FreeTime) != freetime)
+                    return $"edict {e} header: port free={port->Free} freetime={Hex(BitConverter.SingleToUInt32Bits(port->FreeTime))}, " +
+                           $"reference free={free} freetime={Hex(freetime)}";
+            }
             for (int f = 0; f < EntityFields; f++)
             {
                 uint x = *(uint*)(RefEdicts + e * Stride + Header + 4 * f), y = *(uint*)(PortEdicts + e * Stride + Header + 4 * f);
@@ -218,7 +235,10 @@ public sealed unsafe class VmOpcodeFuzz : IDisposable
 
     public int FieldPointer(int e, int field) => e * Stride + Header + 4 * field;
 
-    public const int A = SlotA, B = SlotB, C = SlotC, One = SlotOne, Fields = EntityFields, Edicts = NumEdicts;
+    public const int A = SlotA, B = SlotB, C = SlotC, One = SlotOne, Fields = EntityFields, Edicts = DefaultEdicts;
+
+    /// <summary>Edicts in each memory.</summary>
+    public int NumEdicts { get; }
 
     /// <summary>splitmix64 and the float inputs of the fuzz.</summary>
     public struct Rng(ulong seed)

@@ -14,7 +14,7 @@ namespace Edict.Engine.Tests;
 public sealed class ReplayDivergence(string message) : Exception(message);
 
 /// <summary>
-/// Replays a VM capture (ref/src/edict_capture.c, version 3) through the port (cut 2, steps 2 and 3): the engine's
+/// Replays a VM capture (ref/src/edict_capture.c, version 4) through the port (cut 2, steps 2 and 3): the engine's
 /// changes come from the capture and are applied; the port's VM runs; the builtins the port has
 /// (<see cref="Builtins.Has"/>) run too, the others are replayed from the capture. At every boundary the words that
 /// changed must be exactly the ones that changed in the reference: up to a builtin call and up to the return to the
@@ -26,7 +26,7 @@ public sealed class ReplayDivergence(string message) : Exception(message);
 public sealed unsafe class VmReplay : IDisposable
 {
     public const int NumBuiltins = 79;      // pr_numbuiltins: pr_builtin[] compiled without QUAKE2
-    private const int Version = 3;
+    private const int Version = 4;
 
     private readonly byte[] _d;
     private int _p;
@@ -47,6 +47,7 @@ public sealed unsafe class VmReplay : IDisposable
     private byte* _stringTemp;
     private readonly List<nint> _ownStrings = [];
     private int[] _shadow = [];
+    private uint[] _shadowHeader = [];             // free, freetime bits per edict
     private int _numGlobals, _entityFields, _header, _stride, _numStrings;
     private readonly ReplayStrings _strings = new();
     private readonly Dictionary<int, string> _names = [];
@@ -206,6 +207,7 @@ public sealed unsafe class VmReplay : IDisposable
         int maxEdicts = I32();
         _numStrings = I32();
         int stringTempOffset = I32();
+        int maxClients = I32();
         int numCvars = I32();
         var cvars = new List<(byte[], byte[])>();
         for (int i = 0; i < numCvars; i++)
@@ -226,11 +228,16 @@ public sealed unsafe class VmReplay : IDisposable
         _edicts = (byte*)NativeMemory.AllocZeroed((nuint)maxEdicts, (nuint)_stride);
         _stringTemp = (byte*)NativeMemory.AllocZeroed(Server.StringTempSize);
         _shadow = new int[_numGlobals + maxEdicts * _entityFields];
+        _shadowHeader = new uint[2 * maxEdicts];
         _strings.Clear();
         _names.Clear();
 
         var qcvm = new QcVm(_progs, _globals, _edicts, _header, NumBuiltins);
-        _sv = new Server(qcvm, _progs, _globals, _edicts, _header, new Cvars(cvars), _strings, _stringTemp, stringTempOffset);
+        _sv = new Server(qcvm, _progs, _globals, _edicts, _header, new Cvars(cvars), _strings, _stringTemp, stringTempOffset)
+        {
+            MaxEdicts = maxEdicts,
+            MaxClients = maxClients,
+        };
 
         // SV_SpawnServer's precache entries: "" first, then the world and its inline models
         string worldName = $"maps/{_map}.bsp";
@@ -278,7 +285,7 @@ public sealed unsafe class VmReplay : IDisposable
     /// <summary>The engine's or a replayed builtin's changes: applied to memory and shadow; strings recorded.</summary>
     private void Apply()
     {
-        I32();                              // num_edicts: the memory is allocated for max_edicts
+        _sv!.NumEdicts = I32();
         int n = I32();
         for (int i = 0; i < n; i++)
         {
@@ -300,6 +307,17 @@ public sealed unsafe class VmReplay : IDisposable
                 temp[Math.Min(text.Length, Server.StringTempSize - 1)] = 0;
             }
         }
+        int h = I32();
+        for (int i = 0; i < h; i++)
+        {
+            int e = I32();
+            uint free = (uint)I32(), freetime = (uint)I32();
+            EdictHeader* ed = _sv.EdictNum(e);
+            ed->Free = (int)free;
+            ed->FreeTime = BitConverter.UInt32BitsToSingle(freetime);
+            _shadowHeader[2 * e] = free;
+            _shadowHeader[2 * e + 1] = freetime;
+        }
     }
 
     /// <summary>
@@ -309,6 +327,8 @@ public sealed unsafe class VmReplay : IDisposable
     private void Check(string boundary)
     {
         int numEdicts = I32();
+        if (numEdicts != _sv!.NumEdicts)
+            throw Fail($"{boundary}: num_edicts is {_sv.NumEdicts}, the reference's {numEdicts}");
         int n = I32();
         int r = 0;                          // next recorded change
         CheckSegment(0, new Span<int>(_globals, _numGlobals), boundary, ref r, n);
@@ -328,6 +348,34 @@ public sealed unsafe class VmReplay : IDisposable
             if (!port.SequenceEqual(text))
                 throw Fail($"{boundary}: string at offset {ofs} is \"{Encoding.Latin1.GetString(port)}\", the reference's is \"{Encoding.Latin1.GetString(text)}\"");
         }
+        CheckHeaders(boundary, numEdicts);
+    }
+
+    /// <summary>The free flags and freetimes the port changed must be the ones the reference changed.</summary>
+    private void CheckHeaders(string boundary, int numEdicts)
+    {
+        int h = I32(), r = 0;
+        for (int e = 0; e < numEdicts; e++)
+        {
+            EdictHeader* ed = _sv!.EdictNum(e);
+            uint free = (uint)ed->Free, freetime = BitConverter.SingleToUInt32Bits(ed->FreeTime);
+            bool changed = free != _shadowHeader[2 * e] || freetime != _shadowHeader[2 * e + 1];
+            bool recorded = r < h && (int)U32At(_p + 12 * r) == e;
+            if (recorded)
+            {
+                uint rf = U32At(_p + 12 * r + 4), rt = U32At(_p + 12 * r + 8);
+                if (rf != free || rt != freetime)
+                    throw Fail($"{boundary}: edict {e} is free={free} freetime={BitConverter.UInt32BitsToSingle(freetime):R}, the reference's free={rf} freetime={BitConverter.UInt32BitsToSingle(rt):R}");
+                r++;
+            }
+            else if (changed)
+                throw Fail($"{boundary}: edict {e} became free={free} freetime={BitConverter.UInt32BitsToSingle(freetime):R}; the reference did not change it");
+            _shadowHeader[2 * e] = free;
+            _shadowHeader[2 * e + 1] = freetime;
+        }
+        if (r != h)
+            throw Fail($"{boundary}: the reference changed the header of edict {U32At(_p + 12 * r)}, the port did not");
+        _p += 12 * h;
     }
 
     // One contiguous run of words (the globals, or one edict's fields) starting at word index first. Unchanged

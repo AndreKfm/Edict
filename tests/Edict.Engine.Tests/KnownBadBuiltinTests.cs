@@ -45,6 +45,14 @@ public sealed class KnownBadBuiltinTests
     [InlineData(BuiltinTests.Mutation.CvarWithAtof)]
     [InlineData(BuiltinTests.Mutation.PrecacheNoReturn)]
     [InlineData(BuiltinTests.Mutation.FtosAlwaysFixed)]
+    [InlineData(BuiltinTests.Mutation.AllocNoRelax)]
+    [InlineData(BuiltinTests.Mutation.AllocFloatTime)]
+    [InlineData(BuiltinTests.Mutation.AllocFromOne)]
+    [InlineData(BuiltinTests.Mutation.FreeKeepsOrigin)]
+    [InlineData(BuiltinTests.Mutation.FindTakesFree)]
+    [InlineData(BuiltinTests.Mutation.FindradiusFloatCentre)]
+    [InlineData(BuiltinTests.Mutation.FindradiusTakesNotSolid)]
+    [InlineData(BuiltinTests.Mutation.NextentTakesFree)]
     public void Known_bad_variant_is_detected(BuiltinTests.Mutation m)
     {
         string? d = Run(m);

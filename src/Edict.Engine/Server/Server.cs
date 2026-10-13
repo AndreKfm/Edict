@@ -22,7 +22,7 @@ public unsafe interface IEngineStrings
 /// Edict headers, area nodes and messages come with steps 3b and 3c.
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
-public sealed unsafe class Server
+public sealed unsafe partial class Server
 {
     public const int MaxModels = 256, MaxSounds = 256;
     public const int StringTempSize = 128;            // pr_string_temp[128]
@@ -36,6 +36,7 @@ public sealed unsafe class Server
     private readonly byte*[] _modelPrecache;
     private readonly byte* _stringTemp;
     private readonly int _numStrings;
+    private readonly int _entityFields, _edictSize;
 
     public QcVm Vm { get; }
     public Progs Progs { get; }
@@ -71,6 +72,10 @@ public sealed unsafe class Server
         _stringTemp = stringTemp;
         StringTempOffset = stringTempOffset;
         _numStrings = progs.NumStrings;
+        _entityFields = progs.EntityFields;
+        _edictSize = headerBytes + _entityFields * 4;
+        if (sizeof(EdictHeader) > headerBytes)
+            throw new InvalidOperationException("the port's edict header does not fit the reference's");
         _soundPrecache = new byte*[MaxSounds];
         _modelPrecache = new byte*[MaxModels];
     }

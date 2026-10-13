@@ -19,8 +19,12 @@ public sealed unsafe class BuiltinTests
 {
     private static readonly nint Lib = NativeLibrary.Load(Environment.GetEnvironmentVariable("EDICT_ORACLE")
         ?? throw new InvalidOperationException("EDICT_ORACLE is not set (docs/TESTING.md)"));
-    private static readonly delegate* unmanaged<int, int, float*, int, byte*, int, int, void*, int, int, uint, uint> BuiltinFn =
-        (delegate* unmanaged<int, int, float*, int, byte*, int, int, void*, int, int, uint, uint>)NativeLibrary.GetExport(Lib, "EdictOracle_Builtin");
+    private static readonly delegate* unmanaged<int, int, float*, int, byte*, int, int, void*, int, int, uint, int*, int, int, double, uint> BuiltinFn =
+        (delegate* unmanaged<int, int, float*, int, byte*, int, int, void*, int, int, uint, int*, int, int, double, uint>)NativeLibrary.GetExport(Lib, "EdictOracle_Builtin");
+    private static readonly delegate* unmanaged<void*, int, int, int, int*, float*, void> HeaderFn =
+        (delegate* unmanaged<void*, int, int, int, int*, float*, void>)NativeLibrary.GetExport(Lib, "EdictOracle_EdictHeader");
+
+    private const int FuzzEdicts = 32;
 
     private static readonly delegate* unmanaged<byte*, float> QAtofFn =
         (delegate* unmanaged<byte*, float>)NativeLibrary.GetExport(Lib, "EdictOracle_QAtof");
@@ -63,7 +67,7 @@ public sealed unsafe class BuiltinTests
     internal static string? FirstDivergence(Action<Server, int>? call = null, int random = 50_000)
     {
         call ??= Builtins.Call;
-        using var f = new VmOpcodeFuzz();
+        using var f = new VmOpcodeFuzz(FuzzEdicts);
         int numStrings = f.Progs.NumStrings;
         int tempOfs = numStrings;                   // the temp right after the strings, on both sides
         byte* refStrings = (byte*)NativeMemory.AllocZeroed((nuint)(numStrings + Server.StringTempSize));
@@ -83,16 +87,40 @@ public sealed unsafe class BuiltinTests
                 cvarList.Add((name, Encoding.ASCII.GetBytes(CvarValue(ref rng))));
             }
             var sv = new Server(vm, f.Progs, (int*)f.PortGlobals, f.PortEdicts, f.Header, new Cvars(cvarList), strings,
-                                portTemp, tempOfs);
+                                portTemp, tempOfs) { MaxEdicts = FuzzEdicts };
+            int numEdicts = 2;              // the reference's sv.num_edicts; the port's is set alongside
+            sv.NumEdicts = numEdicts;
+
+            // the edict headers on both sides (reference layout through the oracle, port layout directly)
+            void Header(int e, int free, uint freetime)
+            {
+                float t = BitConverter.UInt32BitsToSingle(freetime);
+                HeaderFn(f.RefEdicts, Fields, e, 1, &free, &t);
+                var h = (EdictHeader*)(f.PortEdicts + e * f.Stride);
+                h->Free = free;
+                h->FreeTime = BitConverter.UInt32BitsToSingle(freetime);
+            }
+
+            (int, uint) RefHeader(int e)
+            {
+                int free = 0;
+                float t = 0;
+                HeaderFn(f.RefEdicts, Fields, e, 0, &free, &t);
+                return (free, BitConverter.SingleToUInt32Bits(t));
+            }
 
             string? Run(int num, int argc, string what)
             {
                 uint seed = rng.Bits();
+                int n = numEdicts;
                 uint refSeed = BuiltinFn(num, argc, f.RefGlobals, NumGlobalsOf(f), refStrings, numStrings, tempOfs,
-                                         f.RefEdicts, Fields, 0, seed);
+                                         f.RefEdicts, Fields, 0, seed, &n, FuzzEdicts, sv.MaxClients, sv.Time);
                 sv.Rand.Srand(seed);
+                sv.NumEdicts = numEdicts;
                 call(sv, num);
-                string? d = f.Compare(nanClass: true);       // the builtins here only compute (docs/adr/D8)
+                string? d = sv.NumEdicts != n ? $"num_edicts: port {sv.NumEdicts}, reference {n}" : null;
+                numEdicts = n;
+                d ??= f.Compare(nanClass: true, RefHeader);  // computed results: NaN as a class (docs/adr/D8)
                 if (d is null && sv.Rand.Seed != refSeed)
                     d = $"rand seed afterwards: port 0x{sv.Rand.Seed:X8}, reference 0x{refSeed:X8}";
                 if (d is null && ((int*)f.RefGlobals)[QcVm.OfsReturn] == tempOfs)
@@ -121,15 +149,15 @@ public sealed unsafe class BuiltinTests
 
             // one-vector builtins: edges in every component combination of two values, then random vectors
             int[] vectorBuiltins = [Builtins.MakeVectors, Builtins.Normalize, Builtins.Vlen, Builtins.VectoYaw, Builtins.VectoAngles];
-            uint[] e = Rng.Edges;
+            uint[] edgeBits = Rng.Edges;
             foreach (int num in vectorBuiltins)
             {
-                for (int i = 0; i < e.Length; i++)
-                    for (int j = 0; j < e.Length; j++)
+                for (int i = 0; i < edgeBits.Length; i++)
+                    for (int j = 0; j < edgeBits.Length; j++)
                     {
                         f.Scramble(ref rng);
-                        Vector(OfsParm0, e[i], e[j], e[(i + j) % e.Length]);
-                        if (Run(num, 1, $"({Hex(e[i])}, {Hex(e[j])}, {Hex(e[(i + j) % e.Length])})") is { } d)
+                        Vector(OfsParm0, edgeBits[i], edgeBits[j], edgeBits[(i + j) % edgeBits.Length]);
+                        if (Run(num, 1, $"({Hex(edgeBits[i])}, {Hex(edgeBits[j])}, {Hex(edgeBits[(i + j) % edgeBits.Length])})") is { } d)
                             return d;
                     }
                 for (int n = 0; n < random; n++)
@@ -151,7 +179,7 @@ public sealed unsafe class BuiltinTests
             // one-float builtins
             foreach (int num in new[] { Builtins.Fabs, Builtins.Floor, Builtins.Ceil, Builtins.Rint, Builtins.Ftos })
             {
-                IEnumerable<uint> inputs = e.Concat(Enumerable.Range(0, random).Select(_ => rng.Below(4) == 0
+                IEnumerable<uint> inputs = edgeBits.Concat(Enumerable.Range(0, random).Select(_ => rng.Below(4) == 0
                     ? BitConverter.SingleToUInt32Bits(rng.Below(20000) / 8f - 1250)        // halves, tenths, integers
                     : rng.Float()));
                 foreach (uint x in inputs.ToArray())
@@ -194,6 +222,101 @@ public sealed unsafe class BuiltinTests
                 uint port = ((uint*)f.PortGlobals)[QcVm.OfsReturn];
                 if (port != BitConverter.SingleToUInt32Bits(reference))
                     return $"builtin #{Builtins.Cvar} \"{Encoding.ASCII.GetString(value)}\": port {Hex(port)}, reference Q_atof {Hex(BitConverter.SingleToUInt32Bits(reference))}";
+            }
+
+            // edicts: headers, num_edicts, maxclients and sv.time chosen so that ED_Alloc's tests sit on their edges
+            uint FreeTime(double time) => rng.Below(10) switch
+            {
+                0 => 0,
+                1 => BitConverter.SingleToUInt32Bits(1.99999988f),
+                2 => BitConverter.SingleToUInt32Bits(2f),
+                3 => BitConverter.SingleToUInt32Bits(2.00000024f),
+                4 => BitConverter.SingleToUInt32Bits((float)(time - 0.5)),
+                5 => BitConverter.SingleToUInt32Bits(MathF.BitDecrement((float)(time - 0.5))),
+                6 => BitConverter.SingleToUInt32Bits(MathF.BitIncrement((float)(time - 0.5))),
+                7 => rng.Float(),
+                _ => BitConverter.SingleToUInt32Bits((float)(time * ((rng.Next() >> 11) * (1.0 / 9007199254740992.0)))),
+            };
+
+            void SetUpEdicts(double time)
+            {
+                f.Scramble(ref rng);
+                sv.Time = time;
+                sv.MaxClients = 1 + rng.Below(3);
+                numEdicts = sv.MaxClients + 1 + rng.Below(FuzzEdicts - sv.MaxClients - 2);   // ED_Alloc can append
+                for (int e = 0; e < FuzzEdicts; e++)
+                    Header(e, e > 0 && rng.Below(3) == 0 ? 1 : 0, FreeTime(time));
+            }
+
+            double Time() => rng.Below(4) switch
+            {
+                0 => rng.Below(40) * 0.25,
+                1 => rng.Below(4000) * (double)(float)0.013889 + 1,
+                2 => (rng.Next() >> 11) * (1.0 / 9007199254740992.0) * 1e6,
+                _ => (rng.Next() >> 11) * (1.0 / 9007199254740992.0) * 5,
+            };
+
+            for (int n = 0; n < random; n++)
+            {
+                SetUpEdicts(Time());
+                if (Run(Builtins.Spawn, 0, $"spawn #{n}, time {sv.Time:R}") is { } d)
+                    return d;
+            }
+            // remove (ED_Free); makestatic frees the same way but writes the signon buffer first, which the oracle has not
+            foreach (int num in new[] { Builtins.Remove })
+                for (int n = 0; n < random / 4; n++)
+                {
+                    SetUpEdicts(Time());
+                    int e = rng.Below(numEdicts);
+                    f.Global(OfsParm0, (uint)f.EdictOffset(e));
+                    if (Run(num, 1, $"edict {e}, time {sv.Time:R}") is { } d)
+                        return d;
+                }
+            for (int n = 0; n < random / 4; n++)
+            {
+                SetUpEdicts(Time());
+                int e = rng.Below(numEdicts);
+                f.Global(OfsParm0, (uint)f.EdictOffset(e));
+                if (Run(Builtins.NextEnt, 1, $"after edict {e}") is { } d)
+                    return d;
+            }
+
+            // find: string fields with values from the strings block, empty and equal strings at other offsets
+            int[] stringFields = [EntVars.Classname, EntVars.Model, EntVars.Netname, 3, Fields - 1];
+            for (int n = 0; n < random; n++)
+            {
+                SetUpEdicts(Time());
+                int field = stringFields[rng.Below(stringFields.Length)];
+                for (int e = 0; e < FuzzEdicts; e++)
+                    f.Field(e, field, (uint)f.StringOffset(rng.Below(f.StringCount)));
+                int start = rng.Below(numEdicts);
+                f.Global(OfsParm0, (uint)f.EdictOffset(start));
+                f.Global(OfsParm0 + 3, (uint)field);
+                f.Global(OfsParm0 + 6, (uint)f.StringOffset(rng.Below(f.StringCount)));
+                if (Run(Builtins.Find, 3, $"from edict {start}, field {field}") is { } d)
+                    return d;
+            }
+
+            // findradius: centres, solids, free edicts and radii from edges and game-like values
+            for (int n = 0; n < random; n++)
+            {
+                SetUpEdicts(Time());
+                for (int e = 0; e < FuzzEdicts; e++)
+                {
+                    uint solid = rng.Below(4) switch { 0 => 0, 1 => 0x80000000u, 2 => BitConverter.SingleToUInt32Bits(Solid.BBox), _ => rng.Float() };
+                    f.Field(e, EntVars.Solid, solid);
+                    for (int k = 0; k < 3; k++)
+                    {
+                        f.Field(e, EntVars.Origin + k, rng.Float());
+                        f.Field(e, EntVars.Mins + k, rng.Below(2) == 0 ? BitConverter.SingleToUInt32Bits(-16f) : rng.Float());
+                        f.Field(e, EntVars.Maxs + k, rng.Below(2) == 0 ? BitConverter.SingleToUInt32Bits(16f) : rng.Float());
+                    }
+                }
+                Vector(OfsParm0, rng.Float(), rng.Float(), rng.Float());
+                uint rad = rng.Below(3) switch { 0 => BitConverter.SingleToUInt32Bits(rng.Below(1000)), 1 => Rng.Edges[rng.Below(Rng.Edges.Length)], _ => rng.Float() };
+                f.Global(OfsParm0 + 3, rad);
+                if (Run(Builtins.FindRadius, 2, $"radius {Hex(rad)}") is { } d)
+                    return d;
             }
 
             // changeyaw: self's angles[1], ideal_yaw and yaw_speed
@@ -246,6 +369,32 @@ public sealed unsafe class BuiltinTests
         CvarWithAtof,           // Cvar_VariableValue with atof instead of Q_atof
         PrecacheNoReturn,       // precache_* without the return value
         FtosAlwaysFixed,        // ftos always "%5.1f"
+        AllocNoRelax,           // ED_Alloc without "freetime < 2"
+        AllocFloatTime,         // ED_Alloc's sv.time - freetime > 0.5 in float
+        AllocFromOne,           // ED_Alloc scans from edict 1, not maxclients+1
+        FreeKeepsOrigin,        // ED_Free leaves origin as it was
+        FindTakesFree,          // find does not skip free edicts
+        FindradiusFloatCentre,  // findradius's centre (mins + maxs)*0.5f in float
+        FindradiusTakesNotSolid,// findradius includes SOLID_NOT
+        NextentTakesFree,       // nextent returns free edicts too
+    }
+
+    // ED_Alloc with the mistakes above (the port's Server.Alloc otherwise)
+    private static int MutantAlloc(Server sv, Mutation m)
+    {
+        int i;
+        for (i = m == Mutation.AllocFromOne ? 1 : sv.MaxClients + 1; i < sv.NumEdicts; i++)
+        {
+            EdictHeader* e = sv.EdictNum(i);
+            bool old = m == Mutation.AllocFloatTime ? (float)sv.Time - e->FreeTime > 0.5f : sv.Time - e->FreeTime > 0.5;
+            if (e->Free != 0 && ((m != Mutation.AllocNoRelax && e->FreeTime < 2) || old))
+                break;
+        }
+        if (i == sv.NumEdicts)
+            sv.NumEdicts++;
+        new Span<byte>(sv.Fields(i), sv.Progs.EntityFields * 4).Clear();
+        sv.EdictNum(i)->Free = 0;
+        return i;
     }
 
     private static float* G(Server sv, int ofs) => sv.G(ofs);
@@ -341,6 +490,72 @@ public sealed unsafe class BuiltinTests
                 buf[..n].CopyTo(temp);
                 temp[n] = 0;
                 sv.Globals[QcVm.OfsReturn] = sv.StringTempOffset;
+                return;
+            }
+            case Mutation.AllocNoRelax or Mutation.AllocFloatTime or Mutation.AllocFromOne when num == Builtins.Spawn:
+                sv.Globals[QcVm.OfsReturn] = MutantAlloc(sv, m) * sv.EdictSize;
+                return;
+            case Mutation.FreeKeepsOrigin when num == Builtins.Remove:
+            {
+                int e = sv.Globals[OfsParm0] / sv.EdictSize;
+                float* v = sv.Fields(e);
+                float x = v[EntVars.Origin], y = v[EntVars.Origin + 1], z = v[EntVars.Origin + 2];
+                sv.Free(e);
+                v[EntVars.Origin] = x;
+                v[EntVars.Origin + 1] = y;
+                v[EntVars.Origin + 2] = z;
+                return;
+            }
+            case Mutation.FindTakesFree when num == Builtins.Find:
+            {
+                int e = sv.NumForEdict(sv.Globals[OfsParm0]), f = sv.Globals[OfsParm0 + 3];
+                byte* s = sv.String(sv.Globals[OfsParm0 + 6]);
+                for (e++; e < sv.NumEdicts; e++)
+                    if (CString.Strcmp(sv.String(((int*)sv.Fields(e))[f]), s) == 0)
+                    {
+                        sv.Globals[QcVm.OfsReturn] = e * sv.EdictSize;
+                        return;
+                    }
+                sv.Globals[QcVm.OfsReturn] = 0;
+                return;
+            }
+            case Mutation.FindradiusFloatCentre or Mutation.FindradiusTakesNotSolid when num == Builtins.FindRadius:
+            {
+                int chain = 0;
+                Vec3 org = *(Vec3*)G(sv, OfsParm0);
+                float rad = *G(sv, OfsParm0 + 3);
+                for (int i = 1; i < sv.NumEdicts; i++)
+                {
+                    if (sv.EdictNum(i)->Free != 0)
+                        continue;
+                    float* v = sv.Fields(i);
+                    if (m != Mutation.FindradiusTakesNotSolid && v[EntVars.Solid] == Solid.Not)
+                        continue;
+                    Vec3 d;
+                    if (m == Mutation.FindradiusFloatCentre)
+                    {
+                        d.X = org.X - (v[EntVars.Origin] + (v[EntVars.Mins] + v[EntVars.Maxs]) * 0.5f);
+                        d.Y = org.Y - (v[EntVars.Origin + 1] + (v[EntVars.Mins + 1] + v[EntVars.Maxs + 1]) * 0.5f);
+                        d.Z = org.Z - (v[EntVars.Origin + 2] + (v[EntVars.Mins + 2] + v[EntVars.Maxs + 2]) * 0.5f);
+                    }
+                    else
+                    {
+                        d.X = (float)(org.X - (v[EntVars.Origin] + (v[EntVars.Mins] + v[EntVars.Maxs]) * 0.5));
+                        d.Y = (float)(org.Y - (v[EntVars.Origin + 1] + (v[EntVars.Mins + 1] + v[EntVars.Maxs + 1]) * 0.5));
+                        d.Z = (float)(org.Z - (v[EntVars.Origin + 2] + (v[EntVars.Mins + 2] + v[EntVars.Maxs + 2]) * 0.5));
+                    }
+                    if (Mathlib.Length(d) > rad)
+                        continue;
+                    ((int*)v)[EntVars.Chain] = chain * sv.EdictSize;
+                    chain = i;
+                }
+                sv.Globals[QcVm.OfsReturn] = chain * sv.EdictSize;
+                return;
+            }
+            case Mutation.NextentTakesFree when num == Builtins.NextEnt:
+            {
+                int i = sv.NumForEdict(sv.Globals[OfsParm0]) + 1;
+                sv.Globals[QcVm.OfsReturn] = i == sv.NumEdicts ? 0 : i * sv.EdictSize;
                 return;
             }
         }

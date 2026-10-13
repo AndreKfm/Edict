@@ -293,6 +293,18 @@ R7: 10 builtin mutants (random by 32768, vectoyaw in float, rint with a float su
 sin, anglemod in float, a strict bound in changeyaw, atof for cvar, precache without return value, ftos always
 "%5.1f"), all detected; first by the fuzz for 9, by the replay for the precache one. Cvar via atof was blind on
 game values (the cvars are integers) until the fuzz got cvar values with decimals, exponents and hex.
+Step 3b done (2026-10-13): edicts. `Server`: `EdictHeader` (free, freetime; the port's own layout inside the
+reference's 108 bytes), `EDICT_NUM`, `NUM_FOR_EDICT`, `ED_Alloc` (first free edict after the clients that was
+freed in the first two seconds or more than half a second ago, else a new one; `MAX_EDICTS` compared as in C),
+`ED_Free` (unlinking from the world comes with 3c); builtins spawn, remove, find, findradius (the centre in
+double: `(mins + maxs)*0.5`), nextent, and makestatic's freeing (its signon output comes with messages).
+Capture version 4: `svs.maxclients` per map, the free flag and freetime of every edict whose header changed in
+every diff, and a new map record when the same map spawns again: five of the ten tape runs restart their map
+after the player dies, which the capture had not noticed (the shadow then compared against the old spawn). The
+builtin fuzz sets reference headers through `EdictOracle_EdictHeader` and puts ED_Alloc's tests on their edges
+(freetime 2 and its neighbours, `sv.time - freetime` at 0.5 and one ulp off, NaN). R7: 8 more builtin mutants
+(alloc without the two-second rule, with a float time difference, from edict 1; free keeping origin; find and
+nextent taking free edicts; findradius with a float centre or taking SOLID_NOT), all detected; 18 in all.
 **Cut 3:** `SV_Physics*`, `sv_user.c`, `SV_ReadClientMessage`, tape replay. Gate: per-frame hash, ≥ 3 maps × 10 min.
 
 ## D. Effort at 7 h/week (calendar weeks)
