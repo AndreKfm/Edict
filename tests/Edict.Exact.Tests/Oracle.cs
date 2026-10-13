@@ -21,8 +21,8 @@ internal static unsafe class Oracle
                 "EDICT_ORACLE is not set: point it to the oracle library built by ref/build.sh (docs/TESTING.md).");
         nint handle = NativeLibrary.Load(path);
         var version = (delegate* unmanaged<int>)NativeLibrary.GetExport(handle, "EdictOracle_Version");
-        if (version() != 2)
-            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 2.");
+        if (version() != 3)
+            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 3.");
         return handle;
     }
 

@@ -15,7 +15,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	2
+#define ORACLE_VERSION	3
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);
@@ -196,4 +196,162 @@ EDICT_EXPORT int EdictOracle_BoxOnPlaneSide (float *emins, float *emaxs, float *
 	p.dist = dist;
 	p.type = type;
 	return BOX_ON_PLANE_SIDE (emins, emaxs, &p);
+}
+
+/*
+==============================================================================
+A world in the oracle (level 1 for world.c, sv_move.c, the PVS and the builtins that use them)
+
+The caller passes a map's BSP file; Mod_LoadBrushModel loads it as SV_SpawnServer's Mod_ForName would, onto the
+oracle's own hunk, and SV_ClearWorld sets up the area nodes. sv.models[] gets the world and its inline models, as
+SV_SpawnServer sets them. Edicts live in caller memory as for EdictOracle_Builtin (EdictOracle_World sets that
+memory up for the calls that follow); entities are linked with SV_LinkEdict itself, without touch functions.
+==============================================================================
+*/
+
+void Mod_LoadBrushModel (model_t *mod, void *buffer);	// model.c, not declared in a header
+void SV_NewChaseDir (edict_t *actor, edict_t *enemy, float dist);	// sv_move.c, likewise
+model_t *Mod_FindName (char *name);	// model.c, likewise
+short ShortSwap (short l);	// common.c, likewise
+short ShortNoSwap (short l);
+int LongSwap (int l);
+int LongNoSwap (int l);
+float FloatSwap (float f);
+float FloatNoSwap (float f);
+extern char		loadname[32];		// model.c
+extern model_t	*loadmodel;
+extern byte		checkpvs[MAX_MAP_LEAFS/8];	// pr_cmds.c
+
+#define ORACLE_HUNK	(64 * 1024 * 1024)
+
+static model_t	oracle_world;
+static int		oracle_mark = -1;
+
+// Returns the world's numleafs (visleafs), or -1 if there is no hunk.
+EDICT_EXPORT int EdictOracle_LoadWorld (void *bsp, const char *name)
+{
+	int		i;
+	char	sub[8];
+
+	if (oracle_mark < 0)
+	{
+		void	*hunk = malloc (ORACLE_HUNK);
+
+		if (!hunk)
+			return -1;
+		// COM_Init's byte order setup (little-endian), which the model loader reads through
+		BigShort = ShortSwap;
+		LittleShort = ShortNoSwap;
+		BigLong = LongSwap;
+		LittleLong = LongNoSwap;
+		BigFloat = FloatSwap;
+		LittleFloat = FloatNoSwap;
+		Memory_Init (hunk, ORACLE_HUNK);
+		Mod_Init ();
+		oracle_mark = Hunk_LowMark ();
+	}
+	Hunk_FreeToLowMark (oracle_mark);
+	memset (&oracle_world, 0, sizeof (oracle_world));
+	strcpy (oracle_world.name, name);
+	COM_FileBase (oracle_world.name, loadname);
+	loadmodel = &oracle_world;
+	Mod_LoadBrushModel (&oracle_world, bsp);
+
+	memset (sv.models, 0, sizeof (sv.models));
+	sv.worldmodel = &oracle_world;
+	sv.models[1] = sv.worldmodel;
+	for (i = 1 ; i < sv.worldmodel->numsubmodels ; i++)
+	{
+		sprintf (sub, "*%i", i);
+		sv.models[i + 1] = Mod_FindName (sub);
+	}
+	SV_ClearWorld ();
+	return sv.worldmodel->numleafs;
+}
+
+// The edict memory and the server state that SV_Move, SV_LinkEdict and the builtins read.
+EDICT_EXPORT void EdictOracle_World (void *edicts, int entityfields, int num_edicts, int max_edicts, int maxclients)
+{
+	pr_edict_size = entityfields * 4 + sizeof (edict_t) - sizeof (entvars_t);
+	sv.edicts = edicts;
+	sv.num_edicts = num_edicts;
+	sv.max_edicts = max_edicts;
+	svs.maxclients = maxclients;
+}
+
+// SV_LinkEdict (n, false); the edict's leafs are returned (num_leafs, leafnums up to 16).
+EDICT_EXPORT int EdictOracle_LinkEdict (int n, short *leafnums)
+{
+	edict_t	*e = EDICT_NUM (n);
+
+	SV_LinkEdict (e, false);
+	memcpy (leafnums, e->leafnums, sizeof (e->leafnums));
+	return e->num_leafs;
+}
+
+EDICT_EXPORT void EdictOracle_UnlinkEdict (int n) { SV_UnlinkEdict (EDICT_NUM (n)); }
+
+// SV_Move; out: allsolid, startsolid, inopen, inwater, fraction, endpos[3], normal[3], dist (as words), and the
+// trace entity's number (-1: NULL) as the return value.
+EDICT_EXPORT int EdictOracle_Move (float *start, float *mins, float *maxs, float *end, int type, int passedict,
+	float *out)
+{
+	trace_t	tr = SV_Move (start, mins, maxs, end, type, passedict < 0 ? NULL : EDICT_NUM (passedict));
+	float	*endpos = out + 5, *normal = out + 8;
+
+	((int *)out)[0] = tr.allsolid;
+	((int *)out)[1] = tr.startsolid;
+	((int *)out)[2] = tr.inopen;
+	((int *)out)[3] = tr.inwater;
+	out[4] = tr.fraction;
+	VectorCopy (tr.endpos, endpos);
+	VectorCopy (tr.plane.normal, normal);
+	out[11] = tr.plane.dist;
+	return tr.ent ? NUM_FOR_EDICT (tr.ent) : -1;
+}
+
+// Mod_PointInLeaf on the world: the leaf's index.
+EDICT_EXPORT int EdictOracle_PointInLeaf (float *p) { return Mod_PointInLeaf (p, sv.worldmodel) - sv.worldmodel->leafs; }
+
+// Mod_LeafPVS of leaf n: (numleafs + 7) >> 3 bytes into out; returns that count.
+EDICT_EXPORT int EdictOracle_LeafPvs (int n, byte *out)
+{
+	int		row = (sv.worldmodel->numleafs + 7) >> 3;
+
+	memcpy (out, Mod_LeafPVS (sv.worldmodel->leafs + n, sv.worldmodel), row);
+	return row;
+}
+
+// PF_checkclient's state: sv.lastcheck, sv.lastchecktime and checkpvs; set, then read back.
+EDICT_EXPORT void EdictOracle_CheckState (int set, int *lastcheck, double *lastchecktime, byte *pvs)
+{
+	if (set)
+	{
+		sv.lastcheck = *lastcheck;
+		sv.lastchecktime = *lastchecktime;
+		memcpy (checkpvs, pvs, sizeof (checkpvs));
+	}
+	*lastcheck = sv.lastcheck;
+	*lastchecktime = sv.lastchecktime;
+	memcpy (pvs, checkpvs, sizeof (checkpvs));
+}
+
+// SV_NewChaseDir (actor, enemy, dist) with rand seeded first; globals as PF_changeyaw reads them (self = actor).
+// Returns the seed afterwards. Without triggers in the world, SV_movestep's relinking runs no QuakeC.
+EDICT_EXPORT unsigned int EdictOracle_NewChaseDir (float *globals, int actor, int enemy, float dist, unsigned int seed)
+{
+	pr_globals = globals;
+	pr_global_struct = (globalvars_t *)globals;
+	srand (seed);
+	SV_NewChaseDir (EDICT_NUM (actor), EDICT_NUM (enemy), dist);
+	return edict_rand_state ();
+}
+
+// The cvar values PF_aim reads (var->value; nothing registers the cvars in the oracle).
+EDICT_EXPORT void EdictOracle_AimCvars (float aim, float tp)
+{
+	extern cvar_t	sv_aim;
+
+	sv_aim.value = aim;
+	teamplay.value = tp;
 }
