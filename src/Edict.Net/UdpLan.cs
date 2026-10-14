@@ -16,7 +16,7 @@ namespace Edict.Net;
 /// it (PartialIPAddress), another name looked up. The calls go to ws2_32 on Windows and to libc on Linux, without
 /// managed allocations in the frame's reads and writes.
 /// </summary>
-public sealed unsafe partial class UdpLan : INetLan
+public sealed unsafe partial class UdpLan : INetLan, IHostPort
 {
     private const int MaxSockets = 64, AfInet = 2, SockDgram = 2, IpprotoUdp = 17;
     private const string FrameCall = "a socket call with blittable arguments on a non-blocking socket: nothing managed is allocated, nothing waits";

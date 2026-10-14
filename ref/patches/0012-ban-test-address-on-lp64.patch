@@ -1,0 +1,21 @@
+EDICT 0012: the ban test's client address through the system's sockaddr_in on Linux
+
+Category: 64-bit correctness, no change on Windows (P6 step 9.4).
+Outside Windows and NeXT, net_dgrm.c declares its own struct in_addr for the ban test, a union whose S_addr is an
+unsigned long: 8 bytes on LP64, so the union is 8-aligned, sin_addr lands at offset 8 instead of 4 and the test
+reads sin_zero, which is 0. 0 & banMask equals the default banAddr 0, and every client that connects is told
+"You have been banned." (found by the interop test, tools/interop.sh: the reference's server on Linux x86-64 refused
+the port's client and any other). On Linux the system's headers declare the address as it is, as NeXT's branch does.
+On Windows (LLP64, windows.h) nothing changes, so the oracle and the corpora are the same.
+
+--- a/net_dgrm.c
++++ b/net_dgrm.c
+@@ -25,7 +25,7 @@
+ #ifdef BAN_TEST
+ #if defined(_WIN32)
+ #include <windows.h>
+-#elif defined (NeXT)
++#elif defined (NeXT) || defined (__linux__)
+ #include <sys/socket.h>
+ #include <arpa/inet.h>
+ #else

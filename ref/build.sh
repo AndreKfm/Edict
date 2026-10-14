@@ -31,6 +31,13 @@ if [ -n "${SOUND:-}" ]; then
   FILES="$(echo $FILES | sed 's/snd_null/snd_dma snd_mix snd_mem edict_snd/')"
   EXTRA_CFLAGS="$EXTRA_CFLAGS -DEDICT_SOUND"
 fi
+# NET=1: the network build (P6 step 9.4, outside the proof): net_bsd.c's driver tables (the loopback, then the
+# datagram driver over net_udp.c) and the wall clock (edict_sys.c), for the interop test with the port. Linux only.
+if [ -n "${NET:-}" ]; then
+  [ "$EXE" = ".exe" ] && { echo "NET=1: Linux only (net_udp.c)"; exit 2; }
+  FILES="$FILES net_bsd net_udp"
+  EXTRA_CFLAGS="$EXTRA_CFLAGS -DEDICT_NET"
+fi
 # C89 code: gnu89 (implicit declarations), -fcommon (tentative definitions in headers).
 # edict_libc.h pins implementation-defined C library results that reach the state (docs/PLAN.md D3).
 # -fno-strict-float-cast-overflow: out-of-range float-to-int conversions saturate to the target range and NaN

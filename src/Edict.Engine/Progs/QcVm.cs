@@ -9,6 +9,12 @@ namespace Edict.Engine;
 /// <summary>A Host_Error in the reference: the frame is abandoned (PR_RunError ends in one).</summary>
 public sealed class HostErrorException(string message) : Exception(message);
 
+/// <summary>A Host_EndGame in the reference: the game ends (the server said disconnect), the frame is abandoned.</summary>
+public sealed class EndGameException(string message) : Exception(message);
+
+/// <summary>A Con_Printf and CL_Disconnect in the reference (CL_SendMove's lost connection); the port abandons the frame.</summary>
+public sealed class DisconnectException(string message) : Exception(message);
+
 /// <summary>
 /// What the VM needs from the engine around it: the builtins, string contents, the server state, and a capture point.
 /// A struct type parameter of <see cref="QcVm.Execute"/>, so the calls are direct (docs/PLAN.md B.4).

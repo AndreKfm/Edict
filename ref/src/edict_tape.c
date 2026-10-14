@@ -225,6 +225,7 @@ static void Tape_Close (qsocket_t *sock)
 	((tapeclient_t *)sock->driverdata)->sock = NULL;
 }
 
+#ifndef EDICT_NET		// the network build has net_bsd.c's tables
 net_driver_t net_drivers[MAX_NET_DRIVERS] =
 {
 	{
@@ -245,6 +246,7 @@ net_driver_t net_drivers[MAX_NET_DRIVERS] =
 	}
 };
 int net_numdrivers = 1;
+#endif
 
 /*
 A listen server (P5, docs/PLAN.md): without -dedicated the table's one driver is net_loop.c's loopback instead, at
@@ -293,5 +295,7 @@ void EdictTape_UseLoopback (void)
 	net_drivers[0] = loop;
 }
 
+#ifndef EDICT_NET
 net_landriver_t	net_landrivers[MAX_NET_DRIVERS];
 int net_numlandrivers = 0;
+#endif

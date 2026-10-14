@@ -9,5 +9,6 @@
   <ItemGroup>
     <ProjectReference Include="../Edict.Engine/Edict.Engine.csproj" />
     <ProjectReference Include="../Edict.Gl/Edict.Gl.csproj" />
+    <ProjectReference Include="../Edict.Net/Edict.Net.csproj" />
   </ItemGroup>
 </Project>

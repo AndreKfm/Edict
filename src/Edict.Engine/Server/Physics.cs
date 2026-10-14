@@ -1009,10 +1009,13 @@ public sealed unsafe partial class Server
     public SizeBuf CommandText { get; set; } = null!;
 
     /// <summary>
-    /// The console a listen server's Con_Printf writes to (the local client's screen); null for a dedicated server,
-    /// whose console output is stdout only (cls.state == ca_dedicated).
+    /// The console a listen server's Con_Printf writes to (the local client's screen); for a dedicated server its
+    /// stdout (a game's <see cref="ConsoleBuffer"/>) or none (the harness: cls.state == ca_dedicated prints nothing).
     /// </summary>
-    public Screen? Con { get; set; }
+    public IConsole? Con { get; set; }
+
+    /// <summary>Sys_Printf's stdout: a game's dedicated server's (the says, the removed clients); null otherwise.</summary>
+    public IConsole? SysOut { get; set; }
 
     /// <summary>Cbuf_AddText.</summary>
     public void AddCommandText(byte* text)

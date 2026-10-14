@@ -34,3 +34,9 @@ symbol = "cs:*/M:System.Runtime.InteropServices.Marshal.GetLastPInvokeError"
 constraints = ["All"]
 runtime = "*"
 reason = "reads the error the marshaller saved after a SetLastError import (the UDP driver's EAGAIN); a thread-static field, no allocation"
+
+[[member]]
+symbol = "cs:*/M:System.Diagnostics.Stopwatch.GetTimestamp"
+constraints = ["All"]
+runtime = "*"
+reason = "Sys_FloatTime of a game's network (outside the proof): QueryPerformanceCounter or clock_gettime, no allocation, no lock"

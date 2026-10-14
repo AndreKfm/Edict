@@ -145,6 +145,25 @@ public sealed unsafe partial class Screen
         }
     }
 
+    /// <summary>The console's lines, the oldest kept first, without the high bit (diagnostics and tests).</summary>
+    [NoAllocUnchecked("diagnostics")]
+    public byte[] ConsoleText()
+    {
+        var text = new List<byte>();
+        if (_lineWidth <= 0)
+            return [];
+        for (int l = Math.Max(0, _current - _totalLines + 1); l <= _current; l++)
+        {
+            int y = l % _totalLines, end = _lineWidth;
+            while (end > 0 && (_conText[y * _lineWidth + end - 1] & 127) == ' ')
+                end--;
+            for (int x = 0; x < end; x++)
+                text.Add((byte)(_conText[y * _lineWidth + x] & 127));
+            text.Add((byte)'\n');
+        }
+        return [.. text];
+    }
+
     /// <summary>Con_Printf of a text without conversions.</summary>
     public void Printf(ReadOnlySpan<byte> text)
     {
@@ -179,6 +198,12 @@ public sealed unsafe partial class Screen
         int n = Edict.Exact.CFormat.Int(value, t);
         return Msg(t[..n]);
     }
+
+    IConsole IConsole.Msg(ReadOnlySpan<byte> text) => Msg(text);
+
+    IConsole IConsole.Msg(byte* s) => Msg(s);
+
+    IConsole IConsole.MsgInt(int value) => MsgInt(value);
 
     private static readonly SysErrorException MsgTooLong = new("Con_Printf: a message longer than msg[MAXPRINTMSG]");
 

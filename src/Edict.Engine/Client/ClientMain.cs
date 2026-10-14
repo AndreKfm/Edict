@@ -54,7 +54,7 @@ public sealed unsafe partial class ClientState
     }
 
     private static readonly HostErrorException LostConnectionWrite = new("CL_WriteToServer: lost server connection");
-    private static readonly HostErrorException LostConnectionMove = new("CL_SendMove: lost server connection (CL_Disconnect is not ported)");
+    private static readonly DisconnectException LostConnectionMove = new("CL_SendMove: lost server connection");
     private const int ClcMove = 3;
 
     /// <summary>
@@ -101,18 +101,40 @@ public sealed unsafe partial class ClientState
     {
         OldTime = Time;
         Time += FrameTime;
+        ReadMessages(false);
+    }
 
-        int ret;
-        do
+    /// <summary>The rest of <see cref="ReadFromServer"/> once the host loaded a suspended server info's models.</summary>
+    public void ResumeRead()
+    {
+        PendingServerInfo = false;
+        ReadMessages(true);
+    }
+
+    private void ReadMessages(bool resume)
+    {
+        if (resume)
         {
-            ret = GetMessage();
-            if (ret == -1)
-                throw LostConnection;
-            if (ret == 0)
-                break;
-            LastReceivedMessage = (float)RealTime;
-            ParseServerMessage();
-        } while (ret != 0 && State == CaConnected);
+            ParseServerMessage(resume: true);
+            if (PendingServerInfo)
+                return;
+        }
+        if (!resume || State == CaConnected)
+        {
+            int ret;
+            do
+            {
+                ret = GetMessage();
+                if (ret == -1)
+                    throw LostConnection;
+                if (ret == 0)
+                    break;
+                LastReceivedMessage = (float)RealTime;
+                ParseServerMessage();
+                if (PendingServerInfo)
+                    return;     // the host loads the models, then ResumeRead
+            } while (ret != 0 && State == CaConnected);
+        }
 
         RelinkEntities();
         UpdateTEnts();

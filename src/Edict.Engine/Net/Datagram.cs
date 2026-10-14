@@ -203,6 +203,9 @@ public sealed unsafe class Datagram
     /// <summary>The pool's sockets, in the order they were made (the tests compare them by their place).</summary>
     public ReadOnlySpan<QSocket> Sockets => _sockets;
 
+    /// <summary>The i-th LAN driver.</summary>
+    public INetLan Lan(int i) => _lans[i];
+
     /// <summary>SetNetTime: net_time from Sys_FloatTime.</summary>
     public double SetNetTime()
     {

@@ -973,7 +973,30 @@ before a present (a wait now stands between them); a demo played while a listen 
 CL_PlayDemo_f to the listen host. The gates end a run as the reference's harness does, with the frame a played demo
 ends in. R9 (`tools/r9-net.sh`): Linux release and ASan/UBSan write data/multi and the step's listen runs record for
 record; the sanitizer's reports are the original's known ones (draw.c, model.c) and the offsetof idiom of
-EDICT_FROM_AREA in `edict_capture.c`, filtered as in `tools/r9-screen.sh`.
+EDICT_FROM_AREA in `edict_capture.c`, filtered as in `tools/r9-screen.sh`. (9.4, outside the proof) Real UDP: the
+LAN driver `src/Edict.Net/UdpLan.cs` (net_udp.c and net_wins.c over libc or ws2_32, non-blocking sockets,
+SIO_UDP_CONNRESET off on Windows), net_main.c's layer `NetMain` (the loopback, then the datagram driver; listen,
+NET_Connect, net_messagetimeout; `DatagramConnection` gives each reader its own copy of net_message) and the host's
+answers `HostNet` (Sys_FloatTime on the wall clock, the server info, the player and rule queries). The game:
+`Host.CreateGame` with the LAN driver (-listen [n], -port, -nolan; maxclientslimit 4), the commands connect,
+listen, maxplayers and port, Host_Error and Host_EndGame caught as C's longjmp does (the message, the server shut
+down, the client disconnected; svc_disconnect ends the game), CL_SendMove's lost connection, Host_ShutdownServer's
+waits on C's clock (3 s for the pending messages, NET_SendToAll's 5 s for svc_disconnect and its ack). A remote
+server's signon: the server info's parse stops before CL_ClearState when a model is not loaded, the host loads the
+models and precaches the sounds (the load path), and the parse resumes at the svc_serverinfo byte. The dedicated
+server: `Host.CreateDedicated` and `edict -dedicated [n]` (no window; stdin into the command buffer, Con_Printf and
+Sys_Printf to stdout through `ConsoleBuffer`, a frame each sys_ticrate; startdemos starts "map start"; quit shuts
+the server down). The console's target is `IConsole` now (the screen's console, or the dedicated server's buffer).
+As in WinQuake, COM_Parse splits "host:port" at the colon: `connect "host:port"` or -port. Tests: `UdpGameTests`
+(a dedicated server on its own thread and a client over 127.0.0.1: signon, a say both ways, a disconnect, a
+changelevel the client follows with its own model loads, a quit while the next level's signon is in flight, which
+must end the game by svc_disconnect), `InteropTests` with the reference's network build (`ref/build.sh` NET=1:
+net_bsd.c's tables, net_udp.c, the wall clock; Linux) through `tools/interop.sh` in WSL: the port's client on the
+reference's dedicated server and the reference's client on the port's, each signs on, says a line the server prints
+and echoes, and leaves. Found by the interop test: the original's ban test declares its own in_addr with an unsigned
+long outside Windows and NeXT, so on LP64 it reads sin_zero and bans every client; patch 0012 takes the system's
+headers on Linux (nothing changes on Windows: the oracle and the corpora are the same). R7 group `udp`: all 5
+detected (a quit with the signon in flight was added for NET_SendToAll's wait).
 
 ## D. Effort at 7 h/week (calendar weeks)
 

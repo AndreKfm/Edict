@@ -130,7 +130,7 @@ public sealed unsafe partial class Server
                 Hooks.ExecuteProgram(Globals[GlobalVars.ClientDisconnect]);
                 Globals[GlobalVars.Self] = saveSelf;
             }
-            // Sys_Printf ("Client %s removed\n", host_client->name)
+            SysOut?.Msg("Client "u8).Msg(host.NamePtr).Msg(" removed\n"u8).EndMsg();   // Sys_Printf
         }
 
         // break the net connection
@@ -353,7 +353,7 @@ public sealed unsafe partial class Server
             ClientPrint(text);
         }
         _hostClient = saveIndex;
-        // Sys_Printf ("%s", &text[1])
+        SysOut?.Msg(text + 1).EndMsg();     // Sys_Printf ("%s", &text[1]) of a dedicated server
     }
 
     /// <summary>Host_Tell_f: the name and the text to the first spawned client of that name.</summary>

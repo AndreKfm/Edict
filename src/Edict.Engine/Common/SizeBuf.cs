@@ -108,7 +108,6 @@ public sealed unsafe class SizeBuf
         Write((byte*)&l, 4);
     }
 
-    /// <summary>MSG_WriteString: the string and its terminator; "" for null.</summary>
     /// <summary>MSG_WriteString of a text in a span: up to its first zero (or its end), and the zero.</summary>
     public void WriteString(ReadOnlySpan<byte> s)
     {
@@ -121,6 +120,7 @@ public sealed unsafe class SizeBuf
         d[n] = 0;
     }
 
+    /// <summary>MSG_WriteString: the string and its terminator; "" for null.</summary>
     public void WriteString(byte* s)
     {
         if (s == null)
@@ -166,6 +166,13 @@ public sealed unsafe class MsgReader
     public void BeginReading()
     {
         ReadCount = 0;
+        BadRead = false;
+    }
+
+    /// <summary>The read position set back (a parse suspended to be resumed there).</summary>
+    public void Seek(int readCount)
+    {
+        ReadCount = readCount;
         BadRead = false;
     }
 

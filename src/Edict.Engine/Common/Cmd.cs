@@ -33,7 +33,7 @@ public sealed unsafe class Cmd
     public SizeBuf Text { get; } = new(8192);
 
     /// <summary>The console Con_Printf writes to; null for a dedicated server (ca_dedicated: no output).</summary>
-    public Screen? Con { get; set; }
+    public IConsole? Con { get; set; }
 
     /// <summary>MAX_NUM_ARGVS: COM_InitArgv keeps this many arguments, the program's name among them.</summary>
     public const int MaxNumArgvs = 50;
@@ -334,7 +334,7 @@ public sealed unsafe class Cmd
     public Message Msg(ReadOnlySpan<byte> text) => new Message(Con).Msg(text);
 
     /// <summary>A Con_Printf being built; nothing is printed without a console.</summary>
-    public readonly struct Message(Screen? con)
+    public readonly struct Message(IConsole? con)
     {
         public Message Msg(ReadOnlySpan<byte> text)
         {

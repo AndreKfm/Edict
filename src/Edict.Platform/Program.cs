@@ -1,8 +1,10 @@
 // Copyright (C) 2026 Andre Kaufmann
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Edict.Engine;
+using Edict.Net;
 
 namespace Edict.Platform;
 
@@ -27,9 +29,11 @@ internal interface IGameWindow : IScreenSink, IMouse, IDisposable
 
 /// <summary>
 /// edict: the game (sys_win.c's WinMain loop). The game directory is -basedir's (default: the current directory,
-/// else EDICT_DATA), the arguments are Quake's ("+map start" when none names a map; -nosound for none); each turn of
-/// the loop pumps the window's events and runs Host_Frame with the time since the last turn, which Host_FilterTime
-/// holds to 72 frames a second, and feeds the sound device what the frame mixed.
+/// else EDICT_DATA), the arguments are Quake's ("+map start" when none names a map or a server to connect to;
+/// -nosound for none; -listen [n], -port n, -nolan for the network); each turn of the loop pumps the window's events
+/// and runs Host_Frame with the time since the last turn, which Host_FilterTime holds to 72 frames a second, and
+/// feeds the sound device what the frame mixed. With -dedicated [n] it is a server alone, without a window: its
+/// console reads stdin and prints to stdout, and a frame runs every sys_ticrate seconds.
 /// </summary>
 internal static class Program
 {
@@ -68,6 +72,8 @@ internal static class Program
             wav = argv[wv + 1];
             argv.RemoveRange(wv, 2);
         }
+        if (argv.Contains("-dedicated"))
+            return RunDedicated(basedir, argv, maxFrames);
         if (!argv.Contains("+map") && !argv.Contains("+playdemo") && !argv.Contains("+connect"))
             argv.AddRange(["+map", "start"]);
 
@@ -80,7 +86,9 @@ internal static class Program
         try
         {
             using var files = new QFileSystem(basedir);
-            using Host host = Host.CreateGame(files, argv, [("r_gpu", window.HasGl ? "1" : "0")], sound: true);
+            var lan = new UdpLan();
+            using Host host = Host.CreateGame(files, argv, [("r_gpu", window.HasGl ? "1" : "0")], sound: true, lan: lan);
+            NameHost(host, lan);
             Screen screen = host.Screen!;
             screen.Sink = window;
             window.Attach(screen);
@@ -117,6 +125,71 @@ internal static class Program
         {
             audio.Dispose();
             window.Dispose();
+        }
+    }
+
+    /// <summary>UDP_Init's hostname: the machine's name (15 characters) while it is still "UNNAMED".</summary>
+    private static unsafe void NameHost(Host host, UdpLan lan)
+    {
+        fixed (byte* n = "hostname\0"u8)
+        {
+            if (new ReadOnlySpan<byte>(host.Cvars.VariableString(n), 8).SequenceEqual("UNNAMED\0"u8) && lan.MachineName.Length > 0)
+            {
+                string name = lan.MachineName.Length > 15 ? lan.MachineName[..15] : lan.MachineName;
+                fixed (byte* v = System.Text.Encoding.Latin1.GetBytes(name + "\0"))
+                    host.Cvars.Set(n, v);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The dedicated server (sys_win.c with cls.state == ca_dedicated): no window and no sound; Sys_ConsoleInput's
+    /// lines from stdin into the command buffer before each frame, Con_Printf to stdout after it; a frame each
+    /// sys_ticrate seconds.
+    /// </summary>
+    private static unsafe int RunDedicated(string basedir, List<string> argv, int maxFrames)
+    {
+        try
+        {
+            using var files = new QFileSystem(basedir);
+            var output = new ConsoleBuffer();
+            var lan = new UdpLan();
+            using Host host = Host.CreateDedicated(files, argv, lan, output);
+            NameHost(host, lan);
+            using Stream stdout = Console.OpenStandardOutput();
+            var input = new ConcurrentQueue<string>();
+            var reader = new Thread(() =>
+            {
+                while (Console.In.ReadLine() is { } line)
+                    input.Enqueue(line);
+            }) { IsBackground = true };
+            reader.Start();
+            var clock = Stopwatch.StartNew();
+            double oldtime = clock.Elapsed.TotalSeconds;
+            while (host.FrameCount < maxFrames && !host.QuitRequested)
+            {
+                double ticrate;
+                fixed (byte* t = "sys_ticrate\0"u8)
+                    ticrate = host.Cvars.Value(t);
+                double newtime = clock.Elapsed.TotalSeconds;
+                if (newtime - oldtime < ticrate)
+                {
+                    Thread.Sleep(1);
+                    continue;
+                }
+                while (input.TryDequeue(out string? line))
+                    host.AddText(System.Text.Encoding.Latin1.GetBytes(line + "\n"));
+                host.Frame((float)(newtime - oldtime));
+                oldtime = newtime;
+                output.Drain(stdout);
+            }
+            output.Drain(stdout);
+            return 0;
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"{e.GetType().Name}: {e.Message}\n\n{e.StackTrace}");
+            return 1;
         }
     }
 

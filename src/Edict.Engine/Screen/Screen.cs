@@ -21,7 +21,7 @@ public interface IScreenSink
 /// for the reference's -edict2d, which runs the view and clears its rectangle.
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
-public sealed unsafe partial class Screen
+public sealed unsafe partial class Screen : IConsole
 {
     public const int Width = 320, Height = 200, NumPages = 1;
 

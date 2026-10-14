@@ -24,6 +24,10 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
     private readonly int _numBuiltins;
     private readonly Client[] _clients;
     private readonly INetServer _net;
+    private readonly Loopback? _loop;                  // net_loop.c: a listen server's local client connects through it
+    private readonly NetMain? _netMain;                // a game's net_main.c: the loopback and the datagram driver
+    private readonly bool _game, _dedicated;
+    private int _maxClients;                           // svs.maxclients; the array holds svs.maxclientslimit
     private ClientConsole? _console;                   // a listen server's client: its commands, its screen
     private CRand _rand;
     private int _serverflags;                          // svs.serverflags
@@ -45,6 +49,19 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
 
     /// <summary>host_frametime.</summary>
     public double FrameTime { get; private set; }
+
+    /// <summary>svs.maxclients.</summary>
+    public int MaxClients
+    {
+        [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+        get => _maxClients;
+    }
+
+    /// <summary>A dedicated server's "quit": the platform ends.</summary>
+    public bool QuitRequested { get; private set; }
+
+    /// <summary>A game's network (net_main.c), or null.</summary>
+    public NetMain? Net => _netMain;
 
     /// <summary>Called at the frame-0 point of every spawn (after ED_LoadFromFile), as the reference's spawn record.</summary>
     public Action<Server>? Spawned { get; set; }
@@ -95,21 +112,98 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
     /// reference's, and a console command the port lacks printing that it is not ported instead of stopping.
     /// </summary>
     /// <param name="sound">The game's sound (snd_dma.c, mixed into <see cref="Sound"/>'s DMA buffer for the platform to play).</param>
+    /// <param name="lan">The LAN driver (UDP) of the datagram driver; null for the loopback alone.</param>
     [NoAllocUnchecked("load path")]
     public static Host CreateGame(QFileSystem files, IReadOnlyList<string> commandLine,
-                                  IReadOnlyList<(string Name, string Default)>? platformCvars = null, bool sound = false)
+                                  IReadOnlyList<(string Name, string Default)>? platformCvars = null, bool sound = false,
+                                  INetLan? lan = null)
     {
         string cmdline = string.Join(' ', ["edict", .. commandLine]);
         if (cmdline.Length > 255)
             cmdline = cmdline[..255];
         var cvars = Cvars.FromRegistry([("m_filter", "0"), .. platformCvars ?? []], SoundCvars(sound, commandLine));
-        return new Host(files, cvars, 1, 0, new Loopback(1 << 20), ReferenceEdictHeaderBytes, ReferenceNumBuiltins,
-            commandLine, cmdline, withScreen: true, game: true, sound: sound);
+        // Host_FindMaxClients: -listen [n] (8 without a number)
+        int maxclients = MaxClientsOf(commandLine, "-listen", 1);
+        int limit = Math.Max(maxclients, 4);
+        NetMain net = MakeNet(cvars, lan, limit + 1);    // net_numsockets: one more for the local client
+        var host = new Host(files, cvars, maxclients, 0, net, ReferenceEdictHeaderBytes, ReferenceNumBuiltins,
+            commandLine, cmdline, withScreen: true, game: true, sound: sound, maxclientsLimit: limit);
+        host.StartNet(commandLine, listen: ArgIndex(commandLine, "-listen") >= 0);
+        return host;
+    }
+
+    /// <summary>
+    /// A dedicated server (cls.state == ca_dedicated, P6 step 9.4): no client, -dedicated [n] slots (8 without a
+    /// number), the datagram driver listening, Con_Printf into <paramref name="output"/> (the platform's stdout), and
+    /// quake.rc run in the first frame; startdemos starts "map start" when no map was given.
+    /// </summary>
+    [NoAllocUnchecked("load path")]
+    public static Host CreateDedicated(QFileSystem files, IReadOnlyList<string> commandLine, INetLan lan, IConsole output)
+    {
+        var cvars = Cvars.FromRegistry();
+        int maxclients = MaxClientsOf(commandLine, "-dedicated", 8);
+        int limit = Math.Max(maxclients, 4);
+        NetMain net = MakeNet(cvars, lan, limit);
+        var host = new Host(files, cvars, maxclients, 0, net, ReferenceEdictHeaderBytes, ReferenceNumBuiltins,
+            commandLine, null, withScreen: false, game: true, dedicated: true, maxclientsLimit: limit);
+        host.Cmd.Con = output;
+        host.StartNet(commandLine, listen: true);
+        host.AddText("exec quake.rc\n"u8);
+        return host;
+    }
+
+    private static int ArgIndex(IReadOnlyList<string> commandLine, string name)
+    {
+        for (int i = 0; i < commandLine.Count && i < Cmd.MaxNumArgvs - 1; i++)
+            if (commandLine[i] == name)
+                return i;
+        return -1;
+    }
+
+    /// <summary>Host_FindMaxClients' svs.maxclients: the number after the parameter (8 without one), else the default.</summary>
+    private static int MaxClientsOf(IReadOnlyList<string> commandLine, string parm, int otherwise)
+    {
+        int i = ArgIndex(commandLine, parm);
+        if (i < 0)
+            return otherwise;
+        int n = i + 1 < commandLine.Count ? Edict.Exact.CAtof.QAtoi(System.Text.Encoding.Latin1.GetBytes(commandLine[i + 1])) : 8;
+        if (n < 1)
+            n = 8;
+        else if (n > ClientState.MaxScoreboard)
+            n = ClientState.MaxScoreboard;
+        return n;
+    }
+
+    private static NetMain MakeNet(Cvars cvars, INetLan? lan, int numSockets)
+    {
+        if (lan is null)
+            return new NetMain(new Loopback(1 << 20), null, null);
+        var hn = new HostNet(cvars);
+        return new NetMain(new Loopback(1 << 20), new Datagram(hn, [lan], numSockets, 1), hn) { Rules = hn };
+    }
+
+    /// <summary>NET_Init's rest once the host is there: -port, the LAN drivers (-nolan), listening; deathmatch for maxclients above 1.</summary>
+    private void StartNet(IReadOnlyList<string> commandLine, bool listen)
+    {
+        fixed (byte* dm = "deathmatch\0"u8)
+            Cvars.SetValue(dm, _maxClients > 1 ? 1 : 0);
+        NetMain net = _netMain!;
+        if (net.Host is HostNet hn)
+            hn.Host = this;
+        int p = ArgIndex(commandLine, "-port");
+        if (p < 0)
+            p = ArgIndex(commandLine, "-udpport");
+        if (p >= 0 && p + 1 < commandLine.Count && net.Dgrm?.Lan(0) is IHostPort hp)
+            hp.HostPort = Edict.Exact.CAtof.QAtoi(System.Text.Encoding.Latin1.GetBytes(commandLine[p + 1]));
+        if (net.Dgrm is { } d && d.Init(ArgIndex(commandLine, "-nolan") >= 0) < 0)
+            Cmd.Printf("no LAN driver: the network is the loopback alone\n"u8);
+        if (listen)
+            net.Listen(true);
     }
 
     private Host(QFileSystem files, Cvars cvars, int maxclients, uint randSeed, INetServer net, int headerBytes,
                  int numBuiltins, IReadOnlyList<string>? commandLine, string? cmdline, bool withScreen, bool game = false,
-                 bool sound = false, IScreenSink? sink = null)
+                 bool sound = false, IScreenSink? sink = null, bool dedicated = false, int maxclientsLimit = 0)
     {
         _files = files;
         Cvars = cvars;
@@ -118,19 +212,41 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
         _models = new ModelCache(files);
         _headerBytes = headerBytes;
         _numBuiltins = numBuiltins;
-        _clients = new Client[maxclients];
-        for (int i = 0; i < maxclients; i++)
+        _clients = new Client[Math.Max(maxclients, maxclientsLimit)];
+        for (int i = 0; i < _clients.Length; i++)
             _clients[i] = new Client();
+        _maxClients = maxclients;
         _net = net;
+        _loop = net as Loopback ?? (net as NetMain)?.Loop;
+        _netMain = net as NetMain;
+        _game = game;
+        _dedicated = dedicated;
         _rand.Srand(randSeed);
-        _firstFrame = net is not Loopback;
+        _firstFrame = !game && net is not Loopback;
         Cmd = new Cmd(cvars, files) { CommandLine = commandLine ?? [], Interactive = game };
         Cmd.Add("map", Map);
         Cmd.Add("restart", Restart);
         Cmd.Add("changelevel", Changelevel);
-        if (net is Loopback)
+        if (_netMain is not null)
         {
-            Cl = new ClientState(cvars, _models, randSeed, Cmd.Text) { ListenServer = this };
+            Cmd.Add("listen", ListenCommand);
+            Cmd.Add("maxplayers", MaxPlayers);
+            Cmd.Add("port", Port);
+        }
+        if (dedicated)
+        {
+            Cmd.Add("startdemos", () => { if (Sv is not { Active: true }) AddText("map start\n"u8); });
+            Cmd.Add("bind", () => { });         // Key_Init's commands: a dedicated server has no keys to bind
+            Cmd.Add("unbindall", () => { });
+            Cmd.Add("quit", () =>                           // Host_Quit_f: the server shut down, the platform ends
+            {
+                ShutdownServer(false);
+                QuitRequested = true;
+            });
+        }
+        if (_loop is not null && !dedicated)
+        {
+            Cl = new ClientState(cvars, _models, randSeed, Cmd.Text) { ListenServer = this, LoadsModels = game };
             _console = new ClientConsole(Cmd, cvars, Cl, () => Sv is { Active: true });
             Cmd.Add("playdemo", PlayDemo);
             if (SoundCvars(sound, Cmd.CommandLine))
@@ -138,6 +254,8 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
             _console.LocalStatus = () => Sv!.ConsoleStatus();
             _console.LocalKick = () => Sv!.ConsoleKick(Cmd.Argc > 1 ? [.. Cmd.Argv(0), (byte)' ', .. Cmd.Args] : Cmd.Argv(0),
                                                        CvarBytes("_cl_name"));
+            if (_netMain is not null)
+                Cmd.Add("connect", Connect);
             if (cmdline is not null)
                 _console.Startup(files, _models, cmdline, withScreen, harness: !game, sound: sound ? this : null, sink: sink);
         }
@@ -174,7 +292,10 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
         // stop all client sounds immediately
         if (Cl is { State: ClientState.CaConnected } cl)
             cl.Disconnect();
-        sv.ShutdownClients(crash);
+        if (_netMain?.Host is { } clock)
+            sv.ShutdownClients(crash, clock.FloatTime);
+        else
+            sv.ShutdownClients(crash);
         _rand = sv.Rand;
         FreeServer();
     }
@@ -219,6 +340,56 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
     /// (less than 1/72 s since the last one): only the rand draw and the real time happened.
     /// </summary>
     public bool Frame(float time)
+    {
+        if (!_game)
+            return HostFrame(time);
+        try
+        {
+            if (_netMain is { } nm)
+                fixed (byte* t = "net_messagetimeout\0"u8)
+                    nm.MessageTimeout = Cvars.Value(t);
+            return HostFrame(time);
+        }
+        catch (HostErrorException e)
+        {
+            HostError(e.Message);
+        }
+        catch (EndGameException e)
+        {
+            EndGame(e.Message);
+        }
+        catch (DisconnectException e)
+        {
+            _clientReading = false;
+            Cmd.Msg(System.Text.Encoding.Latin1.GetBytes(e.Message)).Msg("\n"u8).End();
+            Cl?.Disconnect();
+        }
+        return true;
+    }
+
+    /// <summary>Host_Error in a game: the message, the server shut down, the client disconnected, the frame abandoned.</summary>
+    private void HostError(string message)
+    {
+        _clientReading = false;
+        Cmd.Msg("Host_Error: "u8).Msg(System.Text.Encoding.Latin1.GetBytes(message)).Msg("\n"u8).End();
+        ShutdownServer(false);
+        if (_dedicated)
+            throw new SysErrorException("Host_Error: " + message);
+        Cl?.Disconnect();
+        _console?.StopDemoLoop();
+    }
+
+    /// <summary>Host_EndGame in a game: the server shut down, the client disconnected (the demo loop is not ported).</summary>
+    private void EndGame(string message)
+    {
+        _clientReading = false;
+        ShutdownServer(false);
+        if (_dedicated)
+            throw new SysErrorException("Host_EndGame: " + message);
+        Cl?.Disconnect();
+    }
+
+    private bool HostFrame(float time)
     {
         if (!_firstFrame)
             Rand().Next();          // keep the random time dependent
@@ -279,6 +450,8 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
                 cl.Rand = rand;
                 _clientReading = true;
                 cl.ReadFromServer();
+                while (cl.PendingServerInfo)
+                    LoadServerInfo(cl);
                 _clientReading = false;
                 rand = cl.Rand;
             }
@@ -296,6 +469,107 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
 
         FrameCount++;
         return true;
+    }
+
+    /// <summary>A remote server's info: its models and sounds loaded (CL_ParseServerInfo's loads), then the read resumed.</summary>
+    private void LoadServerInfo(ClientState cl)
+    {
+        (List<byte[]> models, List<byte[]> sounds) = cl.PendingNames();
+        _models.LoadForClient(models);
+        if (Sound is { } snd)
+            foreach (byte[] name in sounds)
+                snd.PrecacheSound(name);
+        cl.ResumeRead();
+    }
+
+    private int ArgInt(int i) => Edict.Exact.CAtof.QAtoi(Cmd.Argv(i));
+
+    /// <summary>Host_Connect_f: a demo stopped, CL_EstablishConnection to the server named, Host_Reconnect_f.</summary>
+    private void Connect()
+    {
+        _console!.StopDemoLoop();       // stop demo loop in case this fails
+        if (Cl!.DemoPlayback)
+        {
+            Cl.StopPlayback();
+            Cl.Disconnect();
+        }
+        // CL_EstablishConnection
+        Cl.Disconnect();
+        IClientConnection? c;
+        fixed (byte* h = (byte[])[.. Cmd.Argv(1), 0])
+            c = _netMain!.Connect(h);
+        if (c is null)
+            throw new HostErrorException("CL_Connect: connect failed\n");
+        Cl.EstablishConnection(c);
+        _console.Reconnect();
+    }
+
+    /// <summary>NET_Listen_f.</summary>
+    private void ListenCommand()
+    {
+        if (Cmd.Argc != 2)
+        {
+            Cmd.Msg("\"listen\" is \""u8).Int(_netMain!.Listening ? 1 : 0).Msg("\"\n"u8).End();
+            return;
+        }
+        _netMain!.Listen(ArgInt(1) != 0);
+    }
+
+    /// <summary>Host_Maxplayers_f: svs.maxclients while no server runs (up to svs.maxclientslimit), listen and deathmatch with it.</summary>
+    private void MaxPlayers()
+    {
+        if (Cmd.Argc != 2)
+        {
+            Cmd.Msg("\"maxplayers\" is \""u8).Int(_maxClients).Msg("\"\n"u8).End();
+            return;
+        }
+        if (Sv is { Active: true })
+        {
+            Cmd.Printf("maxplayers can not be changed while a server is running.\n"u8);
+            return;
+        }
+        int n = ArgInt(1);
+        if (n < 1)
+            n = 1;
+        if (n > _clients.Length)
+        {
+            n = _clients.Length;
+            Cmd.Msg("\"maxplayers\" set to \""u8).Int(n).Msg("\"\n"u8).End();
+        }
+        bool listening = _netMain!.Listening;
+        if (n == 1 && listening)
+            AddText("listen 0\n"u8);
+        if (n > 1 && !listening)
+            AddText("listen 1\n"u8);
+        _maxClients = n;
+        fixed (byte* dm = "deathmatch\0"u8)
+        fixed (byte* v = n == 1 ? "0\0"u8 : "1\0"u8)
+            Cvars.Set(dm, v);
+    }
+
+    /// <summary>NET_Port_f: the port the datagram driver listens on; a listening server listens again on the new one.</summary>
+    private void Port()
+    {
+        IHostPort? hp = _netMain!.Dgrm?.Lan(0) as IHostPort;
+        if (Cmd.Argc != 2)
+        {
+            Cmd.Msg("\"port\" is \""u8).Int(hp?.HostPort ?? Datagram.DefaultHostPort).Msg("\"\n"u8).End();
+            return;
+        }
+        int n = ArgInt(1);
+        if (n < 1 || n > 65534)
+        {
+            Cmd.Printf("Bad value, must be between 1 and 65534\n"u8);
+            return;
+        }
+        if (hp is not null)
+            hp.HostPort = n;
+        if (_netMain.Listening)
+        {
+            // force a change to the new port
+            AddText("listen 0\n"u8);
+            AddText("listen 1\n"u8);
+        }
     }
 
     /// <summary>A cvar's string (load path and console commands).</summary>
@@ -363,7 +637,7 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
         {
             if (Cmd.Argc > 2)
                 throw new InvalidOperationException("map with spawn parms (cls.spawnparms) is not ported");
-            Cl.EstablishConnection(((Loopback)_net).Connect());     // connect local
+            Cl.EstablishConnection(_loop!.Connect());     // connect local
         }
     }
 
@@ -471,12 +745,13 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
         var sv = new Server(vm, _progs, _globals, _edicts, _headerBytes, Cvars, _hunk, _stringTemp, tempOfs)
         {
             MaxEdicts = Server.MaxEdictsDefault,
-            MaxClients = _clients.Length,
+            MaxClients = _maxClients,
         };
         sv.Clients = _clients;
         sv.Net = _net;
         sv.CommandText = Cmd.Text;
-        sv.Con = Screen;            // a listen server prints to its client's console
+        sv.Con = Screen ?? Cmd.Con; // a listen server prints to its client's console, a dedicated one to stdout
+        sv.SysOut = _dedicated ? Cmd.Con : null;
         sv.ServerFlags = _serverflags;
         sv.Rand = rand;
         sv.Hooks = new GameHooks(sv);

@@ -40,6 +40,7 @@ public sealed unsafe partial class ClientState
 
     private static readonly HostErrorException BadServerMessage = new("CL_ParseServerMessage: Bad server message");
     private static readonly HostErrorException IllegibleMessage = new("CL_ParseServerMessage: Illegible server message");
+    private static readonly EndGameException ServerDisconnected = new("Server disconnected");
     private static readonly HostErrorException NotPorted = new("CL_ParseServerMessage: a message the port does not have yet (disconnect, sellscreen)");
     private static readonly HostErrorException WrongProtocol = new("CL_ParseServerMessage: Server is not protocol 15");
     private static readonly HostErrorException BadEntityNum = new("CL_EntityNum: an invalid number");
@@ -59,12 +60,15 @@ public sealed unsafe partial class ClientState
     public SizeBuf NetMessage { get; }
     private readonly MsgReader _reader;
 
-    /// <summary>CL_ParseServerMessage: one message, command by command.</summary>
-    private void ParseServerMessage()
+    /// <summary>CL_ParseServerMessage: one message, command by command (resumed where a server info was suspended).</summary>
+    private void ParseServerMessage(bool resume = false)
     {
         MsgReader r = _reader;
-        OnGround = 0;               // unless the server says otherwise
-        r.BeginReading();
+        if (!resume)
+        {
+            OnGround = 0;           // unless the server says otherwise
+            r.BeginReading();
+        }
         while (true)
         {
             if (r.BadRead)
@@ -116,6 +120,8 @@ public sealed unsafe partial class ClientState
                     break;
                 case SvcServerInfo:
                     ParseServerInfo();
+                    if (PendingServerInfo)
+                        return;
                     Con?.RecalcRefdef();    // leave intermission full screen
                     break;
                 case SvcSetAngle:
@@ -266,12 +272,70 @@ public sealed unsafe partial class ClientState
                     }
                     break;
                 case SvcDisconnect:
+                    throw ServerDisconnected;   // Host_EndGame ("Server disconnected\n")
                 case SvcSellScreen:
                     throw NotPorted;
                 default:
                     throw IllegibleMessage;
             }
         }
+    }
+
+    /// <summary>
+    /// A client that may play on a remote server (a game's, P6 step 9.4): the server info's models are loaded by the
+    /// host first (<see cref="PendingServerInfo"/>), not found among a listen server's or a demo's.
+    /// </summary>
+    public bool LoadsModels { get; set; }
+
+    /// <summary>A server info waits for its models: the host loads <see cref="PendingNames"/>, then <see cref="ResumeRead"/>.</summary>
+    public bool PendingServerInfo { get; private set; }
+
+    /// <summary>Whether every model the server info at the read position names can be looked up.</summary>
+    private bool ServerInfoKnown()
+    {
+        MsgReader r = _reader;
+        int at = r.ReadCount;
+        r.ReadLong();
+        r.ReadByte();
+        r.ReadByte();
+        r.ReadString();
+        bool known = true;
+        for (int n = 1; n < MaxModels && known; n++)
+        {
+            byte* str = r.ReadString();
+            if (str[0] == 0 || r.BadRead)
+                break;
+            known = _models.ClientModelKnown(str);
+        }
+        r.Seek(at);
+        return known;
+    }
+
+    /// <summary>The model and sound names of the suspended server info (the load path's copy).</summary>
+    [NoAllocUnchecked("map load: a remote server's info")]
+    public (List<byte[]> Models, List<byte[]> Sounds) PendingNames()
+    {
+        MsgReader r = _reader;
+        int at = r.ReadCount;
+        r.ReadByte();       // svc_serverinfo
+        r.ReadLong();
+        r.ReadByte();
+        r.ReadByte();
+        r.ReadString();
+        var lists = (Models: new List<byte[]>(), Sounds: new List<byte[]>());
+        foreach (List<byte[]> list in (List<byte[]>[])[lists.Models, lists.Sounds])
+            while (!r.BadRead)
+            {
+                byte* str = r.ReadString();
+                int len = 0;
+                while (str[len] != 0)
+                    len++;
+                if (len == 0)
+                    break;
+                list.Add(new ReadOnlySpan<byte>(str, len).ToArray());
+            }
+        r.Seek(at);
+        return lists;
     }
 
     /// <summary>Cbuf_AddText: the stuffed text for the host's command buffer (dropped when it would overflow, as C does).</summary>
@@ -331,6 +395,13 @@ public sealed unsafe partial class ClientState
     private void ParseServerInfo()
     {
         MsgReader r = _reader;
+        if (LoadsModels && !ServerInfoKnown())
+        {
+            // a remote server's models: the host loads them, then the parse resumes at this svc_serverinfo
+            PendingServerInfo = true;
+            r.Seek(r.ReadCount - 1);
+            return;
+        }
         // wipe the client_state_t struct
         ClearState();
 

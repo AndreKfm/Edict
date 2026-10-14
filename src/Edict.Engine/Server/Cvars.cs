@@ -153,6 +153,25 @@ public sealed unsafe class Cvars
     /// <summary>Whether a cvar has this name (Cvar_FindVar).</summary>
     public bool Exists(byte* name) => Find(name) >= 0;
 
+    /// <summary>The number of cvars, for a walk of the list (the network's rule queries).</summary>
+    public int Count => _vars.Length;
+
+    /// <summary>The list index of a cvar, or -1.</summary>
+    public int IndexOf(byte* name) => Find(name);
+
+    /// <summary>The name of the cvar at a list index.</summary>
+    public ReadOnlySpan<byte> NameAt(int i) => _vars[i].Name;
+
+    /// <summary>The string of the cvar at a list index (without its terminating zero).</summary>
+    public ReadOnlySpan<byte> StringAt(int i)
+    {
+        byte[] s = _vars[i].String;
+        int n = 0;
+        while (s[n] != 0)
+            n++;
+        return new ReadOnlySpan<byte>(s, 0, n);
+    }
+
     /// <summary>The value field (<c>var->value</c>) that engine code reads; 0 for an unknown name.</summary>
     public float Value(byte* name)
     {

@@ -32,6 +32,9 @@ public sealed unsafe class NetMain : INetServer
 
     private readonly INetHost? _host;
 
+    /// <summary>What the datagram driver reads of the host, or null.</summary>
+    public INetHost? Host => _host;
+
     [NoAllocUnchecked("load path: one connection per qsocket of the pool")]
     public NetMain(Loopback loop, Datagram? dgrm, INetHost? host)
     {
@@ -106,6 +109,12 @@ public sealed unsafe class NetMain : INetServer
     }
 
     internal void Print(ReadOnlySpan<byte> text) => _host?.Print(text);
+}
+
+/// <summary>net_hostport, which a LAN driver listens on (NET_Port_f, -port).</summary>
+public interface IHostPort
+{
+    int HostPort { get; set; }
 }
 
 /// <summary>

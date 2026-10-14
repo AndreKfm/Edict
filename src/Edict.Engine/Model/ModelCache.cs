@@ -139,6 +139,36 @@ public sealed unsafe class ModelCache : IModelSource, IDisposable
         PrepareClientLookups();
     }
 
+    private byte[][] _clientTried = [];     // names a remote server's info named (loaded or not)
+
+    /// <summary>
+    /// A remote server's model list loaded for its client (P6 step 9.4, outside the proof): Mod_ForName (name, false)
+    /// on each name in order (the world before its inline models), every name remembered as tried.
+    /// </summary>
+    [NoAllocUnchecked("map load: a remote server's info")]
+    public void LoadForClient(IReadOnlyList<byte[]> names)
+    {
+        foreach (byte[] name in names)
+        {
+            ClientModel(name, crash: false);
+            _clientTried = [.. _clientTried, [.. name, 0]];
+        }
+        PrepareClientLookups();
+    }
+
+    /// <summary>Whether the client's server info can look the name up: loaded, or tried by <see cref="LoadForClient"/>.</summary>
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    public bool ClientModelKnown(byte* name)
+    {
+        if (LoadedClientModel(name) != null)
+            return true;
+        for (int i = 0; i < _clientTried.Length; i++)
+            fixed (byte* n = _clientTried[i])
+                if (CString.Strcmp(n, name) == 0)
+                    return true;
+        return false;
+    }
+
     /// <summary>The loaded maps for <see cref="LoadedClientModel"/> (a listen server's client uses the server's models).</summary>
     [NoAllocUnchecked("load path")]
     public void PrepareClientLookups()

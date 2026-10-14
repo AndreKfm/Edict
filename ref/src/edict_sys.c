@@ -203,10 +203,24 @@ void Sys_Quit (void)
 	exit (0);
 }
 
+#ifdef EDICT_NET
+#include <time.h>
+#include <unistd.h>
+
+// the network build (build.sh NET=1, outside the proof): the wall clock, as sys_linux.c's
+double Sys_FloatTime (void)
+{
+	struct timespec	ts;
+
+	clock_gettime (CLOCK_MONOTONIC, &ts);
+	return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+#else
 double Sys_FloatTime (void)
 {
 	return edict_clock;
 }
+#endif
 
 char *Sys_ConsoleInput (void)
 {
@@ -286,6 +300,34 @@ int main (int argc, char **argv)
 	if (COM_CheckParm ("-edictclient"))
 		scr_skipupdate = true;
 	Host_Init (&parms);
+#ifdef EDICT_NET
+	// the network build: frames on the wall clock (a dedicated server's each sys_ticrate), n of them run, then exit
+	{
+		extern cvar_t	sys_ticrate;
+		double	oldtime = Sys_FloatTime (), newtime;
+
+		for (frame = 0 ; frame < frames ; )
+		{
+			newtime = Sys_FloatTime ();
+			if (isDedicated && newtime - oldtime < sys_ticrate.value)
+			{
+				usleep (1000);
+				continue;
+			}
+			before = host_framecount;
+			Host_Frame (newtime - oldtime);
+			oldtime = newtime;
+			if (host_framecount != before)
+				frame++;
+			else
+				usleep (1000);
+			fflush (stdout);
+		}
+		Host_Shutdown ();
+		fflush (stdout);
+		return 0;
+	}
+#endif
 	Cvar_Set ("host_framerate", EDICT_FRAMETIME);
 	client = COM_CheckParm ("-edictclient") != 0 || COM_CheckParm ("-edictscreen") != 0;
 	client_seed = edict_rand_state ();

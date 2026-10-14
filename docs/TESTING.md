@@ -226,7 +226,10 @@ and the messages to each client. The listen gates cover the local client's side 
 start-client-cmds, start-playdemo, lq_e0m1-disconnect, start-argv). `DatagramFuzzTests` is net_dgrm.c's level 1: it needs the
 oracle of version 9 (built with `ref/build.sh`: net_dgrm.c and `ref/src/edict_memnet.c` are in it).
 `tools/r9-net.sh` is R9 for the multiplayer corpus and the new listen runs (release and ASan by default). R7 groups
-`multi`, `listennet`, `datagram`.
+`multi`, `listennet`, `datagram`. Outside the proof (step 9.4): `UdpGameTests` runs a dedicated server and a client
+over UDP on 127.0.0.1 (quick tier, about 2 s); `InteropTests` needs the reference's network build (EDICT_NETREF,
+`ref/build.sh` with NET=1, Linux) and is skipped without it: `sh tools/interop.sh` in WSL builds it, copies the tree
+without bin and obj and runs both classes there (about 35 s). R7 group `udp`.
 
 ### Test tiers (2026-10-13)
 
