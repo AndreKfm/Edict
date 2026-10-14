@@ -108,6 +108,7 @@ public sealed unsafe partial class Screen
         _buffer = (byte*)Marshal.UnsafeAddrOfPinnedArrayElement(_frame, 0);
         _fullbright = 256 - BitConverter.ToInt32(_colormap, 2048 * 4);
         _palette = new byte[768];
+        InitWorld();
         _centerString = new byte[1024];
         _gammaTable = new byte[256];
         _pal = new byte[768];
@@ -327,13 +328,6 @@ public sealed unsafe partial class Screen
             pvrect.Y >>= 1;
             pvrect.Height >>= 1;
         }
-    }
-
-    /// <summary>R_ViewChanged (r_main.c), the part that sets r_refdef.vrect; the renderer's scales follow in step 4.</summary>
-    private void ViewChanged(VRect pvrect, int lineadj)
-    {
-        _recalcRefdef = false;
-        SetVrect(pvrect, ref RefdefVrect, lineadj);
     }
 
     /// <summary>SCR_DrawRam.</summary>

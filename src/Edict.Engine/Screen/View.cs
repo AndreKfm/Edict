@@ -172,41 +172,22 @@ public sealed unsafe partial class Screen
     private static readonly SysErrorException NullWorldModel = new("R_RenderView: NULL worldmodel");
 
     /// <summary>
-    /// R_RenderView as far as the client's state sees it: R_SetupFrame's view leaf, R_DrawParticles' movement of the
+    /// R_RenderView as far as the client's state sees it: R_SetupFrame, R_MarkLeaves and the world's walk (the
+    /// statics into cl_visedicts), R_DrawEntitiesOnList's console output, R_DrawParticles' movement of the
     /// particles, V_SetContentsColor. Drawing the world, the entities and the particles is steps 4 and 5.
     /// </summary>
     private void RenderView3D()
     {
         if (_cl.Entities[0].Model == null || _cl.WorldModel == null)
             throw NullWorldModel;
-        // R_SetupFrame
-        if (_cl.MaxClients > 1)
-        {
-            CvarSet("r_draworder\0"u8, "0\0"u8);
-            CvarSet("r_fullbright\0"u8, "0\0"u8);
-            CvarSet("r_ambient\0"u8, "0\0"u8);
-            CvarSet("r_drawflat\0"u8, "0\0"u8);
-        }
-        _viewLeafContents = PointInLeafContents(ViewOrg, _cl.WorldModel);
-        CacheThrash = false;
-        // R_MarkLeaves, R_EdgeDrawing, R_DrawEntitiesOnList, R_DrawViewModel: steps 4 and 5
+        SetupFrame();
+        MarkLeaves();       // done here so we know if we're in water
+        RenderWorld();      // R_EdgeDrawing's R_RenderWorld; R_DrawBEntitiesOnList draws only
+        DrawEntitiesOnList();
+        // R_DrawViewModel draws only
         _cl.RunParticles(CvarValue("sv_gravity\0"u8));      // R_DrawParticles
         // D_WarpScreen: step 4
         SetContentsColor(_viewLeafContents);
-    }
-
-    /// <summary>Mod_PointInLeaf's leaf contents.</summary>
-    private static int PointInLeafContents(in Vec3 p, Model* model)
-    {
-        int child = 0;
-        while (child >= 0)
-        {
-            MNode* node = model->Nodes + child;
-            MPlane* plane = model->Planes + node->PlaneNum;
-            float d = Vec3.Dot(p, plane->Normal) - plane->Dist;
-            child = d > 0 ? node->Children[0] : node->Children[1];
-        }
-        return model->Leafs[-1 - child].Contents;
     }
 
     /// <summary>V_SetContentsColor: the contents' color shift (cshift_empty, _lava, _slime, _water).</summary>

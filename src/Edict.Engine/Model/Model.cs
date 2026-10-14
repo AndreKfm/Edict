@@ -133,6 +133,7 @@ public unsafe struct Model
     public float Radius;
     public int SyncType;                              // synctype_t: ST_SYNC 0, ST_RAND 1 (alias and sprite headers)
     public int Flags;                                 // EF_ROCKET, EF_GIB, ... (alias header; 0 for brush and sprite)
+    public int NumFrames;                             // the alias or sprite header's numframes (0 for brush)
 
     public int FirstModelSurface, NumModelSurfaces;
 

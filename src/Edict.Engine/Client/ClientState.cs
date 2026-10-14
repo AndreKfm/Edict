@@ -190,6 +190,7 @@ public sealed unsafe partial class ClientState
         InitParticles();
         _move = new SizeBuf(128);
         Buttons = new KButton[NumButtons];
+        InitEfrags();
     }
 
     private readonly SizeBuf _move;                    // CL_SendMove's buf[128]
@@ -219,6 +220,8 @@ public sealed unsafe partial class ClientState
         }
         new Span<ClientEntity>(TempEntities).Clear();
         new Span<Beam>(Beams).Clear();
+        // allocate the efrags and chain together into a free list
+        ClearEfrags();
         // cl_static_entities is not cleared: a slot keeps what a statics of an earlier map left in it
     }
 
@@ -232,6 +235,7 @@ public sealed unsafe partial class ClientState
     /// <summary>memset (&amp;cl, 0, sizeof(cl)).</summary>
     private void ClearCl()
     {
+        FreeEfrag = -1;                                // cl.free_efrags
         MoveMessages = 0;
         CmdViewAngles = default;
         CmdForwardMove = CmdSideMove = CmdUpMove = 0;

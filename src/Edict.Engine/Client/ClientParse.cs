@@ -393,7 +393,9 @@ public sealed unsafe partial class ClientState
         // local state
         WorldModel = (Model*)ModelPrecache[1];
         Entities[0].Model = WorldModel;
-        ClearParticles();               // R_NewMap
+        NewMapEfrags();                 // R_NewMap: no efrags in the leafs; r_viewleaf NULL (the screen's)
+        ClearParticles();
+        Con?.NewMap();
     }
 
     /// <summary>CL_ParseUpdate: an entity update; its first one completes the signon.</summary>
@@ -555,7 +557,8 @@ public sealed unsafe partial class ClientState
         ent.SkinNum = ent.Baseline.Skin;
         ent.Effects = ent.Baseline.Effects;
         ent.Origin = ent.Baseline.Origin;
-        ent.Angles = ent.Baseline.Angles;   // R_AddEfrags: the renderer's
+        ent.Angles = ent.Baseline.Angles;
+        AddEfrags(i);
     }
 
     /// <summary>V_ParseDamage as far as it is state: the face's pain time and the damage color shift.</summary>

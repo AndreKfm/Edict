@@ -224,6 +224,7 @@ public sealed unsafe class ModelCache : IModelSource, IDisposable
             m = NewModel(ModelType.Alias);
             m->Mins = new Vec3(-16, -16, -16);
             m->Maxs = new Vec3(16, 16, 16);
+            m->NumFrames = BinaryPrimitives.ReadInt32LittleEndian(d[68..]);    // mdl_t.numframes
             m->SyncType = BinaryPrimitives.ReadInt32LittleEndian(d[72..]);     // mdl_t.synctype
             m->Flags = BinaryPrimitives.ReadInt32LittleEndian(d[76..]);        // mdl_t.flags
         }
@@ -231,6 +232,7 @@ public sealed unsafe class ModelCache : IModelSource, IDisposable
         {
             int width = BinaryPrimitives.ReadInt32LittleEndian(d[16..]), height = BinaryPrimitives.ReadInt32LittleEndian(d[20..]);
             m = NewModel(ModelType.Sprite);
+            m->NumFrames = BinaryPrimitives.ReadInt32LittleEndian(d[24..]);    // dsprite_t.numframes
             m->SyncType = BinaryPrimitives.ReadInt32LittleEndian(d[32..]);     // dsprite_t.synctype; flags 0
             m->Mins = new Vec3(-width / 2, -width / 2, -height / 2);
             m->Maxs = new Vec3(width / 2, width / 2, height / 2);
