@@ -11,6 +11,10 @@
 #   - every temp entity type (lightning from the view entity too), particles of every count (255 is 1024), damage,
 #     stats, killed monsters and found secrets, light styles, the scoreboard, setangle, setpause, the bonus flash,
 #     intermission, finale and cutscene, cdtrack, nops, prints
+#   - from seed 5 on, the screen's profile (P6, step 3: what the 2D layer shows): four clients (seed 5 a deathmatch),
+#     frags with ties, prints with the chat marks 1 and 2, with \r and with words longer than a line, center prints
+#     of one to six lines and of lines longer than 40 characters, and late in the demo the intermission, a finale
+#     with a long text and a cutscene, after frames with a view and a gun; seeds 1 to 4 draw as before
 # Usage: python3 -I tools/demogen.py <data dir (libreq-v0.09-beta)> <seed> <frames> <out.dem>
 import os, random, struct, sys
 
@@ -78,12 +82,17 @@ class Ent:
 def generate(datadir, seed, frames):
     rng = random.Random(seed)
     extra = write_models(datadir)
+    screen = seed >= 5
     maxclients = rng.choice([1, 2, 4])
+    if screen:
+        maxclients = 4
     models = ['maps/start.bsp'] + ['*%d' % i for i in range(1, 31)] + [
         'progs/player.mdl', 'progs/armor.mdl', 'progs/grenade.mdl', 'progs/missile.mdl', 'progs/gib1.mdl',
         'progs/zom_gib.mdl', 'progs/w_spike.mdl', 'progs/k_spike.mdl', 'progs/v_spike.mdl', 'progs/lavaball.mdl',
         'progs/s_explod.spr', 'progs/s_bubble.spr'] + extra
     nmodels = 1 + len(models)
+    # the screen's profile draws the gun (R_DrawViewModel), which must be an alias model
+    weapons = [1 + i for i, n in enumerate(models) if n.endswith('.mdl')] if screen else None
     sounds = ['weapons/r_exp3.wav', 'misc/h2ohit1.wav', 'player/death1.wav']
     out = []                                           # (view angles, message bytes)
     view = [0.0, 0.0, 0.0]
@@ -99,7 +108,10 @@ def generate(datadir, seed, frames):
     # signon 1: SV_SendServerinfo
     m = Msg()
     m.byte(8); m.string('\x02\nVERSION 1.09 SERVER (62091 CRC)\n')
-    m.byte(11); m.long(15); m.byte(maxclients); m.byte(rng.randrange(2)); m.string('Synthetic Demo %d' % seed)
+    gametype = rng.randrange(2)
+    if screen:
+        gametype = 1 if seed == 5 else 0
+    m.byte(11); m.long(15); m.byte(maxclients); m.byte(gametype); m.string('Synthetic Demo %d' % seed)
     for n in models:
         m.string(n)
     m.string('')
@@ -157,7 +169,7 @@ def generate(datadir, seed, frames):
     for s in (11, 12, 13, 14):
         m.byte(3); m.byte(s); m.long(rng.randrange(100))
     m.byte(10); m.angle(10); m.angle(200); m.angle(0)
-    clientdata(m, rng)
+    clientdata(m, rng, weapons)
     m.byte(25); m.byte(3)
     emit(m)
 
@@ -185,7 +197,7 @@ def generate(datadir, seed, frames):
             last_light = None
         m = Msg()
         m.byte(7); m.float(t)
-        clientdata(m, rng)
+        clientdata(m, rng, weapons)
         for num, e in ents.items():
             if rng.random() < 0.08:
                 continue                                # left out of a packet: CL_RelinkEntities drops its model
@@ -197,12 +209,18 @@ def generate(datadir, seed, frames):
             for i in range(3):
                 m.coord(0)
         else:
-            extras(m, rng, ents, maxclients, nmodels)
+            extras(m, rng, ents, maxclients, nmodels, screen, weapons)
+        if screen and frame == frames * 6 // 10:
+            m.byte(30)                                   # svc_intermission, after frames with a view and a gun
+        elif screen and frame == frames * 75 // 100:
+            m.byte(31); m.string(LONG_FINALE)            # svc_finale: printed a character at a time
+        elif screen and frame == frames * 9 // 10:
+            m.byte(34); m.string('a cutscene\nof two lines')
         emit(m)
     return out
 
 
-def clientdata(m, rng):
+def clientdata(m, rng, weapons=None):
     bits = 1 << 9                                       # SU_ITEMS always
     for b in range(15):
         if b != 8 and b != 9 and rng.random() < 0.4:
@@ -220,7 +238,8 @@ def clientdata(m, rng):
     m.long(rng.getrandbits(31))
     for b in (1 << 12, 1 << 13, 1 << 14):
         if bits & b:
-            m.byte(rng.randrange(256))
+            v = rng.randrange(256)
+            m.byte(weapons[v % len(weapons)] if weapons and b == 1 << 14 else v)
     m.short(rng.randrange(-50, 300))
     for _ in range(6):
         m.byte(rng.randrange(256))
@@ -279,7 +298,20 @@ def update(m, rng, e, nmodels, maxclients):
         if bits & ab: m.angle(e.angles[i])
 
 
-def extras(m, rng, ents, maxclients, nmodels):
+LONG_FINALE = ('Congratulations and well done! You have beaten the hideous Shub-Niggurath, and her hundreds\n'
+               'of ugly changelings and monsters. You have proven that your skill and your cunning are greater\n'
+               'than all the powers of Quake. You are the master now.\nThe end.')
+
+PRINTS = ['a print\n', '\x01a chat line\n', '\x02a colored line\n', 'a carriage\rreturn\n',
+          'a word longer than the console is wide: abcdefghijklmnopqrstuvwxyzabcdefghijklmnop\n',
+          'two\nlines\n', 'no newline', '\x02', '']
+
+CENTERS = ['a centerprint', 'two\nlines', 'three\nshort\nlines', 'exactly\nfour\nlines\nhere',
+           'five\nlines\nare\nmore\nthan four', 'one\ntwo\nthree\nfour\nfive\nsix',
+           'a line of more than forty characters, which the scan cuts', '', '\n\n']
+
+
+def extras(m, rng, ents, maxclients, nmodels, screen=False, weapons=None):
     for _ in range(rng.choice([0, 0, 1, 2, 3])):
         k = rng.randrange(20)
         if k < 6:
@@ -309,7 +341,10 @@ def extras(m, rng, ents, maxclients, nmodels):
             m.short((rng.randrange(1, 40) << 3) | rng.randrange(8)); m.byte(rng.randrange(1, 4))
             for i in range(3): m.coord(rng.uniform(-800, 800))
         elif k == 9:
-            m.byte(3); m.byte(rng.randrange(32)); m.long(rng.randrange(-5, 200))
+            stat, value = rng.randrange(32), rng.randrange(-5, 200)
+            if weapons and stat == 2:
+                value = weapons[value % len(weapons)]     # STAT_WEAPON: the gun's model
+            m.byte(3); m.byte(stat); m.long(value)
         elif k == 10:
             m.byte(rng.choice([27, 28]))
         elif k == 11:
@@ -318,7 +353,7 @@ def extras(m, rng, ents, maxclients, nmodels):
             i = rng.randrange(maxclients)
             c = rng.randrange(3)
             if c == 0: m.byte(13); m.byte(i); m.string(rng.choice(['x', 'player', 'a much longer name']))
-            elif c == 1: m.byte(14); m.byte(i); m.short(rng.randrange(-5, 50))
+            elif c == 1: m.byte(14); m.byte(i); m.short(rng.choice([0, 3, 3, -2, 12]) if screen else rng.randrange(-5, 50))
             else: m.byte(17); m.byte(i); m.byte(rng.randrange(256))
         elif k == 13:
             m.byte(10)
@@ -327,6 +362,8 @@ def extras(m, rng, ents, maxclients, nmodels):
             m.byte(24); m.byte(rng.randrange(2))
         elif k == 15:
             m.byte(9); m.string('bf\n')
+        elif k == 16 and screen:
+            m.byte(8); m.string(rng.choice(PRINTS))      # the intermission comes late, from the frames
         elif k == 16:
             c = rng.randrange(6)
             if c == 0: m.byte(30)
@@ -335,9 +372,9 @@ def extras(m, rng, ents, maxclients, nmodels):
             elif c == 3: m.byte(32); m.byte(rng.randrange(10)); m.byte(rng.randrange(10))
             else: m.byte(1)
         elif k == 17:
-            m.byte(8); m.string('a print\n')
+            m.byte(8); m.string(rng.choice(PRINTS) if screen else 'a print\n')
         elif k == 18:
-            m.byte(26); m.string('a centerprint')
+            m.byte(26); m.string(rng.choice(CENTERS) if screen else 'a centerprint')
         else:
             m.byte(16); m.short(rng.randrange(1, 300))  # stopsound
 

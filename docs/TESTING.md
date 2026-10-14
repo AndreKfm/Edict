@@ -177,6 +177,14 @@ The listen server's gate is `ListenGateTests`: the port's host with its local cl
 (`sh tools/listen.sh ~/edict-ref data/listen`; `ONLY="<run> ..."` for some), the server's spawn and frame records
 and the client's records after every frame; a run's console commands are in `<run>.cmd`. R7 group `listen`.
 
+P6, step 3: `ScreenGateTests` starts the port's client as the reference starts (the arguments from the cmdline cvar,
+or from a listen run's `<run>.args`) and compares every present of data/screen2d (frame buffer and palette, in
+order), every client record and, in the listen runs, every server record. For localizing: `EDICT_SCREENRUN=<run>`
+runs one, `EDICT_PORTDUMP=<file>` writes the port's first differing frame in -edictscreendump's format (compare it
+with the reference's dump: `tools/screen.py diff`), `EDICT_CLIENTDUMP=<file>` (a reference -edictclientdump) names
+the first differing byte of a client lane, `EDICT_PORTSTREAM=<file>` writes the port's entities lane, and
+`EDICT_SCREENTRACE=1` prints the view's inputs for the first frames. R7 group `screen`.
+
 ### Test tiers (2026-10-13)
 
 Not every change needs every test. Three tiers, chosen by what a run has to answer:

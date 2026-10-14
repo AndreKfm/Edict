@@ -728,6 +728,54 @@ by kind:
   SPR_ORIENTED, SPR_VP_PARALLEL_ORIENTED) and sprite frame groups, alias skin groups (R_AliasSetupSkin), back-facing
   triangles on a seam (R_AliasClipTriangle, D_DrawSubdiv), particles closer than d_pix_max allows (D_DrawParticle's
   default size). As with ST_RAND in P5, by copies of LibreQuake's models and sprites with the header changed.
+Step 3 (2026-10-14), the console, the 2D layer and the view. The gate needs frames without the 3D view, which is
+steps 4 and 5, so the reference got a mode for it without a line in id's files: screen.c is compiled with
+`-DV_RenderView=EdictV_RenderView`, and with `-edict2d` the wrapper (edict_vid.c) runs V_RenderView, with all it does
+to the client's state, and then clears r_refdef.vrect; the client records are the same with and without it. The 2D
+corpus (`EXTRA="-edict2d +showram 0" tools/screens.sh`, data/screen2d: the 17 demos and 12 listen runs) also turns
+off SCR_DrawRam, whose icon is the 3D renderer's surface cache thrashing. The port:
+- the start as the reference's: the cvars at their defaults from the reference's registry (`tools/registry.py`:
+  the names and order of the 'I' record, the defaults from the build's preprocessed sources; 131 cvars, 109
+  commands), Host_Init's console lines (Con_Init comes before con_initialized, so "Console initialized." reaches
+  only stdout; "Exe:" with the pinned build time, the heap, "256k surface cache"), the cvars Host_Init's code sets
+  (registered and cmdline, deathmatch, r_maxedges, r_maxsurfs), and quake.rc in the first frame with LibreQuake's
+  configs and the command line's "+" commands. After frame 0 every cvar is the reference's;
+- `Cmd` (cmd.c: Cbuf, the tokenizer, the command table of the reference, aliases with C's trailing space,
+  Cvar_Command, exec, echo, stuffcmds, wait, "Unknown command"; a command of the table the port lacks stops with an
+  error), `Keys` (bind, unbind, unbindall, key_dest, the input lines), the client's buttons and impulse;
+- `Screen`: the frame buffer and the palette, console.c (Con_Print's wrapping and colors, Con_Printf's screen
+  update while the signon is incomplete: frame 0 alone has 65 presents), draw.c's 8-bit primitives, screen.c
+  (SCR_UpdateScreen, the console's height and speed, center prints, the loading plaque, the icons), sbar.c for id1,
+  view.c (the palette with the color shifts and gamma 1; V_RenderView with V_CalcRefdef's bob, roll, idle sway,
+  pitch drift, gun and stair-step smoothing; the damage kick);
+- of the 3D renderer, what the client's state sees: R_DrawParticles' movement and expiry (r_part.c is now
+  complete), V_SetContentsColor, and the world's walk — R_ViewChanged's frustum, R_SetupFrame, R_MarkLeaves with the
+  PVS, R_RecursiveWorldNode's culling and order, the statics' efrags (R_AddEfrags) and R_StoreEfrags, which put the
+  statics a frame sees into cl_visedicts — and R_DrawEntitiesOnList's console message for a sprite frame that does
+  not exist (the synthetic demos send such frames);
+- the server's console output reaches the listen client's console (ED_ParseEdict's "'mapversion' is not a field"
+  is on screen at every LibreQuake map), and the listen host is now on the same Cmd and console as the client's.
+Found on the way, all by the gate: V_CalcRefdef's stair-step block has an else branch (an extract that ended at a
+column-0 brace had cut it off; a temporary trace in a debug build of the reference showed oldz at 424 in frame 0);
+cl_parse.c calls Sbar_Changed for every stat that changes and sets vid.recalc_refdef at the intermission, the finale,
+the cutscene and the server info, which the client without a screen had no use for; SV_SpawnServer leaves
+host_frametime at 0.1 for the rest of the frame, which the screen's update reads; and tan was the platform's (now
+pinned, see A.1). Gate (`ScreenGateTests`): all 29 runs, 151,171 presents, every frame buffer, palette, client record
+and (in the listen runs) server record the reference's; 19 s for the demos, 33 s for the listen runs. The allocation
+gate covers the screen (`AllocationTests.Screen_frames_allocate_nothing`: no frame allocates but frame 0 and those
+that ran a command). R7 (`screen`, 53 mutants of the console, the commands, draw.c, the status bar, the view, the
+particles and the world's walk) first: 30 detected, 23 survived. The synthetic demos got two seeds with the screen's
+profile (`tools/demogen.py` 5 and 6; seeds 1 to 4 are byte for byte what they were): four clients, seed 5 a
+deathmatch, frags with ties, prints with the chat marks and \r and words longer than a line, center prints of one
+to six lines, a late intermission, a finale with a long text and a cutscene after frames with a view and a gun,
+the gun an alias model (a random one made the reference's R_DrawViewModel stop with "Mod_Extradata: caching
+failed"). The port played both through on the first run, in the client gate and the screen gate, and five more
+mutants were detected. Of the other 18, three are equivalent (listed in `tools/mutate.py`) and 15 are known blind
+spots of the 2D gate, each with its reason: eight draw only into the 3D view or move only what is drawn (the center
+string's erase, the tiles at the console's edge, the view's origin and angles, the frustum's planes, the particles'
+motion), which the full frames of steps 4 and 5 see; three need the platform's input (the console during a
+changelevel, a view size above 100, an alias that reads Cmd_Args); three need exact equalities the frame clock does
+not hit, and one another frame time. Of the 50 mutants left, 35 detected.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
