@@ -30,10 +30,13 @@ int edict_rand (void);
 void edict_srand (unsigned int seed);
 unsigned int edict_rand_state (void);	// the seed as it is now (record mode, edict_capture.c)
 
-// sin, cos, atan, atan2: fdlibm algorithms (edict_libm.c). Results of libm differ between C libraries in the
-// last bit; sqrt, floor, ceil and fabs are exact in IEEE arithmetic and stay with the C library.
+// sin, cos, tan, atan, atan2: fdlibm algorithms (edict_libm.c; tan since P6, for the field of view of the screen
+// and the renderer). Results of libm differ between C libraries in the last bit; sqrt, floor, ceil and fabs are
+// exact in IEEE arithmetic and stay with the C library. pow (view.c's BuildGammaTable, only for a gamma other than
+// 1) is not pinned yet.
 double edict_sin (double x);
 double edict_cos (double x);
+double edict_tan (double x);
 double edict_atan (double x);
 double edict_atan2 (double y, double x);
 
@@ -57,6 +60,7 @@ double edict_atof (const char *s);
 #define srand	edict_srand
 #define sin		edict_sin
 #define cos		edict_cos
+#define tan		edict_tan
 #define atan	edict_atan
 #define atan2	edict_atan2
 #define sprintf	edict_sprintf

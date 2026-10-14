@@ -21,8 +21,8 @@ internal static unsafe class Oracle
                 "EDICT_ORACLE is not set: point it to the oracle library built by ref/build.sh (docs/TESTING.md).");
         nint handle = NativeLibrary.Load(path);
         var version = (delegate* unmanaged<int>)NativeLibrary.GetExport(handle, "EdictOracle_Version");
-        if (version() != 7)
-            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 7.");
+        if (version() != 8)
+            throw new InvalidOperationException($"Oracle version {version()} at {path}, expected 8.");
         return handle;
     }
 
@@ -30,6 +30,7 @@ internal static unsafe class Oracle
 
     private static readonly delegate* unmanaged<double, double> SinFn = (delegate* unmanaged<double, double>)Get("EdictOracle_Sin");
     private static readonly delegate* unmanaged<double, double> CosFn = (delegate* unmanaged<double, double>)Get("EdictOracle_Cos");
+    private static readonly delegate* unmanaged<double, double> TanFn = (delegate* unmanaged<double, double>)Get("EdictOracle_Tan");
     private static readonly delegate* unmanaged<double, double> AtanFn = (delegate* unmanaged<double, double>)Get("EdictOracle_Atan");
     private static readonly delegate* unmanaged<double, double, double> Atan2Fn = (delegate* unmanaged<double, double, double>)Get("EdictOracle_Atan2");
     private static readonly delegate* unmanaged<uint, void> SrandFn = (delegate* unmanaged<uint, void>)Get("EdictOracle_Srand");
@@ -45,6 +46,7 @@ internal static unsafe class Oracle
 
     public static double Sin(double x) => SinFn(x);
     public static double Cos(double x) => CosFn(x);
+    public static double Tan(double x) => TanFn(x);
     public static double Atan(double x) => AtanFn(x);
     public static double Atan2(double y, double x) => Atan2Fn(y, x);
     public static void Srand(uint seed) => SrandFn(seed);

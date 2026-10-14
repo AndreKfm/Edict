@@ -61,6 +61,7 @@ int main (void)
 	stat_t a = {"sin, [-4pi, 4pi]"}, b = {"cos, [-4pi, 4pi]"}, c = {"sin/cos, Quake angles (float deg)"};
 	stat_t d = {"sin/cos, [-1e5, 1e5]"}, e = {"atan, any double"}, f = {"atan2, any doubles"};
 	stat_t g = {"atan2, Quake vectors (float)"}, h = {"sin/cos/atan2, special values"};
+	stat_t t1 = {"tan, (-pi/2, pi/2)"}, t2 = {"tan, [-1e5, 1e5]"}, t3 = {"tan, fov/360*pi (float fov)"};
 	long i;
 	int j, k;
 	static const double special[] = { 0.0, -0.0, 1e-310, -1e-310, 1e-30, 1.0, -1.0, 1.5707963267948966,
@@ -92,13 +93,26 @@ int main (void)
 		float vx = (float)uniform (-4096, 4096), vy = (float)uniform (-4096, 4096);
 		check (&g, vy, edict_atan2 (vy, vx), atan2 (vy, vx));
 	}
+	for (i = 0 ; i < 5000000 ; i++)
+	{
+		double x = uniform (-1.5707963267948966, 1.5707963267948966);
+		check (&t1, x, edict_tan (x), tan (x));
+		x = uniform (-1e5, 1e5);
+		check (&t2, x, edict_tan (x), tan (x));
+		// CalcFov and R_ViewChanged: tan (fov_x/360*M_PI) of a float fov in 10..170
+		float fov = (float)uniform (10, 170);
+		x = fov / 360 * 3.14159265358979323846;
+		check (&t3, x, edict_tan (x), tan (x));
+	}
 	for (j = 0 ; j < ns ; j++)
 	{
+		check (&h, special[j], edict_tan (special[j]), tan (special[j]));
 		check (&h, special[j], edict_sin (special[j]), sin (special[j]));
 		check (&h, special[j], edict_cos (special[j]), cos (special[j]));
 		for (k = 0 ; k < ns ; k++)
 			check (&h, special[j], edict_atan2 (special[j], special[k]), atan2 (special[j], special[k]));
 	}
 	report (&a); report (&b); report (&c); report (&d); report (&e); report (&f); report (&g); report (&h);
+	report (&t1); report (&t2); report (&t3);
 	return 0;
 }

@@ -47,7 +47,9 @@ before anything depends on them.
   Implemented 2026-10-12: `ref/src/edict_libm.c` (sin, cos, atan, atan2; fdlibm algorithms as carried by musl,
   written from the published algorithms, Sun notice kept), redirected by the force-included `edict_libc.h`.
   `sqrt`, `floor`, `ceil`, `fabs` stay with the C library (exact in IEEE). `tan` and `pow` are only called by
-  client/renderer code (`r_main.c`, `screen.c`, `view.c`) and are left for P5. Accuracy against glibc
+  client/renderer code (`r_main.c`, `screen.c`, `view.c`); `tan` is pinned since P6 (2026-10-14, the field of view of
+  SCR_CalcRefdef and R_ViewChanged; max 1 ulp from glibc, 96 % bit-identical; fov 90 gives glibc's bits, so no
+  corpus changed), `pow` is reached only by BuildGammaTable for a gamma other than 1 and is not pinned yet. Accuracy against glibc
   (`ref/tests/libm_accuracy.c`): max 1 ulp on 10^7 sin/cos arguments in [−4π, 4π], on Quake-style float angles,
   on [−10^5, 10^5], on 5·10^6 atan/atan2 arguments of any magnitude; 82–99.98 % bit-identical to glibc.
   Deviation: |x| ≥ 2^20·π/2 is reduced with `fmod (x, 2π)` instead of `__rem_pio2_large`; deterministic but

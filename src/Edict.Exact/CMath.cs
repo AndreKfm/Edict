@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 namespace Edict.Exact;
 
 /// <summary>
-/// The reference's pinned sin, cos, atan and atan2 (ref/src/edict_libm.c), operation for operation, so that results
+/// The reference's pinned sin, cos, tan, atan and atan2 (ref/src/edict_libm.c), operation for operation, so that results
 /// are bit-identical to the C reference on every platform. Never use <see cref="Math.Sin"/> and friends in simulation
 /// code: their last bit depends on the runtime and the C library underneath.
 /// </summary>
@@ -160,6 +160,83 @@ public static class CMath
             2 => -KCos(y0, y1),
             _ => KSin(y0, y1, 1),
         };
+    }
+
+    private static ReadOnlySpan<double> T =>
+    [
+        3.33333333333334091986e-01,
+        1.33333333333201242699e-01,
+        5.39682539762260521377e-02,
+        2.18694882948595424599e-02,
+        8.86323982359930005737e-03,
+        3.59207910759131235356e-03,
+        1.45620945432529025516e-03,
+        5.88041240820264096874e-04,
+        2.46463134818469906812e-04,
+        7.81794442939557092300e-05,
+        7.14072491382608190305e-05,
+        -1.85586374855275456654e-05,
+        2.59073051863633712884e-05,
+    ];
+
+    private const double Pio4Lo = 3.06161699786838301793e-17;
+
+    private static double Low0(double x) => Unsafe.BitCast<ulong, double>(Unsafe.BitCast<double, ulong>(x) & 0xffffffff00000000UL);
+
+    /// <summary>tan (x + y) on [-pi/4, pi/4], or -1 / tan (x + y) if <paramref name="odd"/> (k_tan).</summary>
+    private static double KTan(double x, double y, int odd)
+    {
+        uint hx = Hi(x);
+        bool big = (hx & 0x7fffffff) >= 0x3FE59428;    // |x| >= 0.6744
+        bool sign = false;
+        if (big)
+        {
+            sign = (hx >> 31) != 0;
+            if (sign)
+            {
+                x = -x;
+                y = -y;
+            }
+            x = (Pio4 - x) + (Pio4Lo - y);
+            y = 0.0;
+        }
+        double z = x * x;
+        double w = z * z;
+        double r = T[1] + w * (T[3] + w * (T[5] + w * (T[7] + w * (T[9] + w * T[11]))));
+        double v = z * (T[2] + w * (T[4] + w * (T[6] + w * (T[8] + w * (T[10] + w * T[12])))));
+        double s = z * x;
+        r = y + z * (s * (r + v) + y) + s * T[0];
+        w = x + r;
+        if (big)
+        {
+            s = 1 - 2 * odd;
+            v = s - 2.0 * (x + (r - w * w / (w + s)));
+            return sign ? -v : v;
+        }
+        if (odd == 0)
+            return w;
+        // -1.0 / (x + r) has up to 2 ulp error, so it is computed accurately
+        double w0 = Low0(w);
+        v = r - (w0 - x);       // w0 + v = r + x
+        double a = -1.0 / w;
+        double a0 = Low0(a);
+        return a0 + a * (1.0 + a0 * w0 + a0 * v);
+    }
+
+    /// <summary>tan as the reference computes it (edict_tan).</summary>
+    public static double Tan(double x)
+    {
+        uint ix = Hi(x) & 0x7fffffff;
+        if (ix <= 0x3fe921fb)
+        {
+            if (ix < 0x3e400000)
+                return x;
+            return KTan(x, 0.0, 0);
+        }
+        if (ix >= 0x7ff00000)
+            return x - x;
+        int n = RemPio2(x, out double y0, out double y1);
+        return KTan(y0, y1, n & 1);
     }
 
     private static ReadOnlySpan<double> AtanHi =>

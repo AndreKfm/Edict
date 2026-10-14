@@ -56,9 +56,11 @@ public sealed class CMathTests
 
     [Fact] public void Sin_edges() => Unary("sin", CMath.Sin, Oracle.Sin, Edges);
     [Fact] public void Cos_edges() => Unary("cos", CMath.Cos, Oracle.Cos, Edges);
+    [Fact] public void Tan_edges() => Unary("tan", CMath.Tan, Oracle.Tan, Edges);
     [Fact] public void Atan_edges() => Unary("atan", CMath.Atan, Oracle.Atan, Edges);
 
     [Fact] public void Sin_random() => Unary("sin", CMath.Sin, Oracle.Sin, UniformSet(1, 1_000_000, -12.566370614359172, 12.566370614359172).Concat(UniformSet(2, 1_000_000, -1e5, 1e5)).Concat(AnySet(3, 1_000_000)));
+    [Fact] public void Tan_random() => Unary("tan", CMath.Tan, Oracle.Tan, UniformSet(11, 1_000_000, -1.5707963267948966, 1.5707963267948966).Concat(UniformSet(12, 1_000_000, -1e5, 1e5)).Concat(AnySet(13, 1_000_000)));
     [Fact] public void Cos_random() => Unary("cos", CMath.Cos, Oracle.Cos, UniformSet(4, 1_000_000, -12.566370614359172, 12.566370614359172).Concat(UniformSet(5, 1_000_000, -1e5, 1e5)).Concat(AnySet(6, 1_000_000)));
     [Fact] public void Atan_random() => Unary("atan", CMath.Atan, Oracle.Atan, UniformSet(7, 1_000_000, -10, 10).Concat(AnySet(8, 1_000_000)));
 

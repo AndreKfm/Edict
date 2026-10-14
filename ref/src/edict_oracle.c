@@ -16,7 +16,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	7
+#define ORACLE_VERSION	8
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);
@@ -26,6 +26,7 @@ EDICT_EXPORT int EdictOracle_Version (void) { return ORACLE_VERSION; }
 // pinned C library (edict_libc.h redirects these names, exactly as in id's code)
 EDICT_EXPORT double EdictOracle_Sin (double x) { return sin (x); }
 EDICT_EXPORT double EdictOracle_Cos (double x) { return cos (x); }
+EDICT_EXPORT double EdictOracle_Tan (double x) { return tan (x); }
 EDICT_EXPORT double EdictOracle_Atan (double x) { return atan (x); }
 EDICT_EXPORT double EdictOracle_Atan2 (double y, double x) { return atan2 (y, x); }
 EDICT_EXPORT void EdictOracle_Srand (unsigned int seed) { srand (seed); }

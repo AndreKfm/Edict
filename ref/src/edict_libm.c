@@ -2,12 +2,12 @@
 Copyright (C) 2026 Andre Kaufmann
 SPDX-License-Identifier: GPL-2.0-or-later
 
-Edict reference build: pinned sin, cos, atan, atan2 (docs/PLAN.md D3). The C# port implements the same
+Edict reference build: pinned sin, cos, tan, atan, atan2 (docs/PLAN.md D3). The C# port implements the same
 operations in the same order, so both sides produce identical bits on every platform, independent of the C
 library the reference is built with.
 
-Algorithms and constants follow fdlibm as carried by musl (sin.c, cos.c, __sin.c, __cos.c, __rem_pio2.c,
-atan.c, atan2.c), written from the published algorithms. fdlibm notice:
+Algorithms and constants follow fdlibm as carried by musl (sin.c, cos.c, tan.c, __sin.c, __cos.c, __tan.c,
+__rem_pio2.c, atan.c, atan2.c), written from the published algorithms. fdlibm notice:
 
     Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved.
     Developed at SunPro, a Sun Microsystems, Inc. business.
@@ -192,6 +192,98 @@ double edict_cos (double x)
 	case 2:		return -k_cos (y[0], y[1]);
 	default:	return  k_sin (y[0], y[1], 1);
 	}
+}
+
+/*
+==============================================================================
+tan (musl's __tan.c and tan.c)
+==============================================================================
+*/
+
+static const double T[] =
+{
+	 3.33333333333334091986e-01,	// 3FD55555 55555563
+	 1.33333333333201242699e-01,	// 3FC11111 1110FE7A
+	 5.39682539762260521377e-02,	// 3FABA1BA 1BB341FE
+	 2.18694882948595424599e-02,	// 3F9664F4 8406D637
+	 8.86323982359930005737e-03,	// 3F8226E3 E96E8493
+	 3.59207910759131235356e-03,	// 3F6D6D22 C9560328
+	 1.45620945432529025516e-03,	// 3F57DBC8 FEE08315
+	 5.88041240820264096874e-04,	// 3F4344D8 F2F26501
+	 2.46463134818469906812e-04,	// 3F3026F7 1A8D1068
+	 7.81794442939557092300e-05,	// 3F147E88 A03792A6
+	 7.14072491382608190305e-05,	// 3F12B80F 32F0A7E9
+	-1.85586374855275456654e-05,	// BEF375CB DB605373
+	 2.59073051863633712884e-05,	// 3EFB2A70 74BF7AD4
+};
+static const double
+	pio4lo = 3.06161699786838301793e-17;	// 3C81A626 33145C07 (pio4: above, with rem_pio2)
+
+static double low0 (double x)
+{
+	u64 u = bits (x) & 0xffffffff00000000ULL;
+
+	memcpy (&x, &u, 8);
+	return x;
+}
+
+// tan (x + y) on [-pi/4, pi/4], or -1 / tan (x + y) if odd
+static double k_tan (double x, double y, int odd)
+{
+	double			z, r, v, w, s, a, w0, a0;
+	unsigned int	hx = hi (x);
+	int				big = (hx & 0x7fffffff) >= 0x3FE59428, sign = 0;	// |x| >= 0.6744
+
+	if (big)
+	{
+		sign = hx >> 31;
+		if (sign)
+		{
+			x = -x;
+			y = -y;
+		}
+		x = (pio4 - x) + (pio4lo - y);
+		y = 0.0;
+	}
+	z = x * x;
+	w = z * z;
+	r = T[1] + w * (T[3] + w * (T[5] + w * (T[7] + w * (T[9] + w * T[11]))));
+	v = z * (T[2] + w * (T[4] + w * (T[6] + w * (T[8] + w * (T[10] + w * T[12])))));
+	s = z * x;
+	r = y + z * (s * (r + v) + y) + s * T[0];
+	w = x + r;
+	if (big)
+	{
+		s = 1 - 2 * odd;
+		v = s - 2.0 * (x + (r - w * w / (w + s)));
+		return sign ? -v : v;
+	}
+	if (!odd)
+		return w;
+	// -1.0 / (x + r) has up to 2 ulp error, so it is computed accurately
+	w0 = low0 (w);
+	v = r - (w0 - x);		// w0 + v = r + x
+	a0 = a = -1.0 / w;
+	a0 = low0 (a0);
+	return a0 + a * (1.0 + a0 * w0 + a0 * v);
+}
+
+double edict_tan (double x)
+{
+	double			y[2];
+	int				n;
+	unsigned int	ix = hi (x) & 0x7fffffff;
+
+	if (ix <= 0x3fe921fb)			// |x| <= pi/4
+	{
+		if (ix < 0x3e400000)		// |x| < 2^-27
+			return x;
+		return k_tan (x, 0.0, 0);
+	}
+	if (ix >= 0x7ff00000)			// inf or nan
+		return x - x;
+	n = rem_pio2 (x, y);			// before y is read: C leaves the order of arguments open
+	return k_tan (y[0], y[1], n & 1);
 }
 
 /*
