@@ -545,6 +545,13 @@ every frame, the walk down the world's hull 0; the VM 23 %, SV_SendClientMessage
 Each variant passed the loop gate (10 corpus runs, the long run of `lq_e0m3`) and the allocation gate. Result
 (BenchmarkDotNet, as in step 2): the ten-minute run 7.07 µs per frame (reference 13.6, **0.52**), `lq_e0m3` corpus
 8.20 µs (0.57), `start` 4.32 µs (0.96).
+Measured and dropped (2026-10-14): pr_xstatement set only at calls instead of at every statement (it is read only by
+PR_EnterFunction): 304 ms before and after. The interpreter's own time is under 14 % of the frame, so even a
+fifth faster interpreter would give less than 3 %.
+P4 closed (2026-10-14), within its time box: the host loop allocates nothing outside a spawn, and the frame runs in
+half the reference's time. Left in the profile: the VM (23 %, with the builtins it calls), SV_WriteEntitiesToClient
+(13 %), checkclient (5 %), SV_CleanupEnts (3 %); each a few per cent at most. Open: the frame benchmark on .NET 11
+at GA (section G) and on Linux.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
