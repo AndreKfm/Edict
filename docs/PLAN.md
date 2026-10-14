@@ -623,6 +623,16 @@ has set cl.time to 0 and the client reads without looking at the times; each see
 goes back makes f negative and frac above 1: in (1, 1.01] and above 1.01; f exactly 0.1f; f == 0 with an explosion's
 die equal to cl.time). With them (23,554 client frames more, identical on Windows and Linux, the port's on the first
 run) all 24 non-equivalent mutants are detected.
+Step 4 (2026-10-14), the milestone checks of the client. R9 (`tools/r9-client.sh`): the reference at -O0 and with
+ASan/UBSan plays all 17 demos and writes every client record as the release build does; the sanitizers report only
+the two findings of E.3 (draw.c:885, model.c:666). The engine suite on Linux: 307 tests green. The allocation gate
+covers the client (`AllocationTests.Client_frames_allocate_nothing`): no bytes in any client frame but frame 0
+(playdemo loads the demo and its models) and the frames that ran a command. It failed in about every second full
+run, in one random frame of one random demo, by 6–8 KB, and never when it ran alone: the thread's count comes from
+its allocation context, and a GC that a test running in parallel starts can retire that context mid-frame and move
+the count by its unused rest. The gate now runs in a collection of its own that runs alone (four runs green in a
+row where two of four had failed). The client's host runs the engine's type initializers at its start, as the
+server's does.
 
 ## D. Effort at 7 h/week (calendar weeks)
 

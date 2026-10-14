@@ -75,13 +75,15 @@ public sealed unsafe class Host : IDisposable
     /// <summary>
     /// Runs the type initializer of every engine type now, on the load path. The static readonly fields are mostly
     /// preallocated exceptions, read only when thrown, so a type's first static read can come late: Server's came in
-    /// SV_SendServerinfo at the first client connect and allocated its 4,672 bytes of statics inside a frame.
+    /// SV_SendServerinfo at the first client connect and allocated its 4,672 bytes of statics inside a frame. Tiered
+    /// compilation can also run a type's initializer at the entry of a method that only names one of its statics on a
+    /// throw path, when that method is recompiled: in whichever frame that happens (the client's gate saw it once).
     /// </summary>
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2026",
         Justification = "the engine's own types; types a trimmer removed have no type initializer left to run")]
     [System.Diagnostics.CodeAnalysis.UnconditionalSuppressMessage("Trimming", "IL2059",
         Justification = "the engine's own types; types a trimmer removed have no type initializer left to run")]
-    private static void InitializeTypes()
+    internal static void InitializeTypes()
     {
         foreach (Type t in typeof(Host).Assembly.GetTypes())
             if (!t.ContainsGenericParameters)

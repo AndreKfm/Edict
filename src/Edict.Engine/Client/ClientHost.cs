@@ -31,6 +31,9 @@ public sealed unsafe class ClientHost : IDisposable
     /// <summary>host_frametime.</summary>
     public double FrameTime { get; private set; }
 
+    /// <summary>The console commands executed so far (the allocation gate counts their frames apart).</summary>
+    public int CommandsExecuted { get; private set; }
+
     /// <summary>Whether the demo has ended (the harness ends its run with it).</summary>
     public bool Ended => _played && !Cl.DemoPlayback;
 
@@ -42,6 +45,7 @@ public sealed unsafe class ClientHost : IDisposable
         Cvars = cvars;
         _models = new ModelCache(files);
         Cl = new ClientState(cvars, _models, randSeed, _cmdText);
+        Host.InitializeTypes();     // every engine type's statics now, not in a frame
     }
 
     /// <summary>Cbuf_AddText.</summary>
@@ -156,6 +160,7 @@ public sealed unsafe class ClientHost : IDisposable
         }
         if (argv.Count == 0)
             return;
+        CommandsExecuted++;
 
         string cmd = System.Text.Encoding.Latin1.GetString(argv[0]).ToLowerInvariant();
         switch (cmd)
