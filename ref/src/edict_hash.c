@@ -20,7 +20,11 @@ File layout (all integers little-endian):
   record   'F'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
                 u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw  u64 lane_messages
                 [u64 entity_hash x num_edicts, if EDH_FLAG_PER_ENTITY]                on every server frame
-  record   'C'  u32 host_framecount  u64 cl.time bits  u32 cl.num_entities
+  record   'I'  u32 rand state  u32 numcvars  numcvars x { char name[] NUL  char string[] NUL }
+                                                                                      once before the first host
+                                                                                      frame (-edictclient): the
+                                                                                      client's inputs from Host_Init
+  record   'C'  u32 host_framecount  u64 cl.time bits  u32 cl.num_entities  u32 rand state
                 u64 lane_client  u64 lane_entities  u64 lane_effects
                 [u64 entity_hash x cl.num_entities, if EDH_FLAG_PER_ENTITY]           after every host frame of a
                                                                                       demo playback (-edictclient)
@@ -452,6 +456,43 @@ trivial_accept, topnode) and the scoreboard's translation tables (derived from t
 */
 
 extern int			num_temp_entities;			// cl_tent.c
+
+/*
+Diagnostic: -edictclientdump <first> <last> <file> writes, for the client records of host_framecount first to last,
+the canonical streams themselves instead of only their hashes, to name the field where a lane differs:
+  record   u32 host_framecount  u8 kind  u32 index  u32 length  byte stream[length]
+kinds: 'e' one of cl_entities (index), 'E' the entities lane, 'c' the client lane, 'f' the effects lane.
+*/
+static FILE	*client_dump;
+static int	client_dump_first, client_dump_last;
+
+static void ClientDump (int kind, int index)
+{
+	unsigned char	h[13];
+	unsigned int	v[3];
+	int				i, j;
+
+	if (!client_dump || host_framecount < client_dump_first || host_framecount > client_dump_last)
+		return;
+	v[0] = (unsigned int)host_framecount;
+	v[1] = (unsigned int)index;
+	v[2] = (unsigned int)stream_len;
+	for (i = 0 ; i < 3 ; i++)
+		for (j = 0 ; j < 4 ; j++)
+			h[(i == 0 ? 0 : 1 + 4 * i) + j] = (unsigned char)(v[i] >> (8 * j));
+	h[4] = (unsigned char)kind;
+	if (fwrite (h, 1, 13, client_dump) != 13 || fwrite (stream, 1, stream_len, client_dump) != (size_t)stream_len)
+		Sys_Error ("EdictHash: write failed");
+}
+
+void EdictHash_OpenClientDump (char *path, int first, int last)
+{
+	client_dump = fopen (path, "wb");
+	if (!client_dump)
+		Sys_Error ("EdictHash: cannot open %s", path);
+	client_dump_first = first;
+	client_dump_last = last;
+}
 extern particle_t	*active_particles, *free_particles;	// r_part.c
 
 static void putvec (vec3_t v)
@@ -580,6 +621,7 @@ static edict_u64 HashClientState (void)
 	for (i = 0 ; i < cl_numvisedicts ; i++)
 		PutEntityRef (cl_visedicts[i]);
 	put32 (edict_rand_state ());
+	ClientDump ('c', 0);
 	return EdictHash_XXH64 (stream, stream_len);
 }
 
@@ -587,6 +629,7 @@ static edict_u64 HashClientEntity (entity_t *e)
 {
 	stream_len = 0;
 	PutClientEntity (e);
+	ClientDump ('e', e - cl_entities);
 	return EdictHash_XXH64 (stream, stream_len);
 }
 
@@ -619,7 +662,29 @@ static edict_u64 HashClientEffects (void)
 	for (n = 0, p = free_particles ; p ; p = p->next)
 		n++;
 	put32 (n);
+	ClientDump ('f', 0);
 	return EdictHash_XXH64 (stream, stream_len);
+}
+
+void EdictHash_ClientStart (void)
+{
+	cvar_t	*var;
+	int		n;
+
+	if (!edh)
+		return;
+	stream_len = 0;
+	put8 ('I');
+	put32 (edict_rand_state ());
+	for (n = 0, var = cvar_vars ; var ; var = var->next)
+		n++;
+	put32 (n);
+	for (var = cvar_vars ; var ; var = var->next)
+	{
+		putstring (var->name);
+		putstring (var->string);
+	}
+	FlushStream ();
 }
 
 void EdictHash_ClientFrame (void)
@@ -653,6 +718,7 @@ void EdictHash_ClientFrame (void)
 	for (i = 0 ; i < num_temp_entities ; i++)
 		PutClientEntity (&cl_temp_entities[i]);
 	PutClientEntity (&cl.viewent);
+	ClientDump ('E', 0);
 	lane_entities = EdictHash_XXH64 (stream, stream_len);
 	lane_client = HashClientState ();
 	lane_effects = HashClientEffects ();
@@ -662,6 +728,7 @@ void EdictHash_ClientFrame (void)
 	put32 (host_framecount);
 	putdouble (cl.time);
 	put32 (n);
+	put32 (edict_rand_state ());
 	put64 (lane_client);
 	put64 (lane_entities);
 	put64 (lane_effects);
@@ -707,4 +774,7 @@ void EdictHash_Close (void)
 	if (emg)
 		fclose (emg);
 	emg = NULL;
+	if (client_dump)
+		fclose (client_dump);
+	client_dump = NULL;
 }

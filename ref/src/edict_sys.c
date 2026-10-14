@@ -27,6 +27,8 @@ Arguments (besides Quake's own):
                      renderer is phase 6 of docs/PLAN.md, and its long-for-pointer arithmetic breaks on 64-bit
                      Windows); for demo playback (+playdemo) without -dedicated. The run ends with the demo (the
                      frame in which CL_StopPlayback ran is the last).
+  -edictclientdump <first> <last> <file>
+                     the client records' canonical streams for host_framecount first to last (edict_hash.c)
 The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
 */
 #include "quakedef.h"
@@ -261,6 +263,9 @@ int main (int argc, char **argv)
 	i = COM_CheckParm ("-edicthash");
 	if (i && i < com_argc - 1)
 		EdictHash_Open (com_argv[i + 1], COM_CheckParm ("-edictperent") ? EDH_FLAG_PER_ENTITY : 0);
+	i = COM_CheckParm ("-edictclientdump");
+	if (i && i < com_argc - 3)
+		EdictHash_OpenClientDump (com_argv[i + 3], Q_atoi (com_argv[i + 1]), Q_atoi (com_argv[i + 2]));
 	i = COM_CheckParm ("-edictmessages");
 	if (i && i < com_argc - 1)
 		EdictHash_OpenMessages (com_argv[i + 1]);
@@ -273,6 +278,8 @@ int main (int argc, char **argv)
 		scr_skipupdate = true;
 	Host_Init (&parms);
 	Cvar_Set ("host_framerate", EDICT_FRAMETIME);
+	if (COM_CheckParm ("-edictclient"))
+		EdictHash_ClientStart ();
 
 	for (frame = 0 ; frame < frames ; frame++)
 	{

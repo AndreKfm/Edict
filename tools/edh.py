@@ -24,8 +24,12 @@ def read(path):
             fc, t, n, le, lt, lr, *lm = struct.unpack_from(rec, d, p); p += rl
             ents = list(struct.unpack_from('<%dQ' % n, d, p)); p += 8 * n
             spawns.append((fc, t, n, le, lt, lr, ents, maps[-1][1], lm[0] if lm else None))
+        elif k == b'I':             # version 4: the client's inputs, before the first host frame
+            p += 4; nv, = struct.unpack_from('<I', d, p); p += 4
+            for _ in range(2 * nv):
+                p = d.index(b'\0', p) + 1
         elif k == b'C':             # version 4: a client frame of a demo playback
-            fc, t, n, lc, le, lf = struct.unpack_from('<IdIQQQ', d, p); p += 40
+            fc, t, n, rs, lc, le, lf = struct.unpack_from('<IdIIQQQ', d, p); p += 44
             ents = []
             if flags & 1:
                 ents = list(struct.unpack_from('<%dQ' % n, d, p)); p += 8 * n

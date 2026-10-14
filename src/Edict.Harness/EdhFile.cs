@@ -21,8 +21,13 @@ public sealed class EdhFile
                                         ulong Messages);
 
     /// <summary>A client record: the client's state after a host frame of a demo playback (P5).</summary>
-    public readonly record struct ClientFrame(uint FrameCount, double Time, int NumEntities, ulong Client, ulong Entities,
-                                              ulong Effects, ulong[] PerEntity);
+    public readonly record struct ClientFrame(uint FrameCount, double Time, int NumEntities, uint RandState, ulong Client,
+                                              ulong Entities, ulong Effects, ulong[] PerEntity);
+
+    /// <summary>The client's inputs ('I'): the rand state before the first host frame, and the cvars.</summary>
+    public uint ClientRandState { get; private set; }
+
+    public IReadOnlyList<(byte[] Name, byte[] Value)> ClientCvars { get; private set; } = [];
 
     public IReadOnlyList<Spawn> Spawns { get; }
 
@@ -77,19 +82,38 @@ public sealed class EdhFile
                     }
                     break;
                 }
+                case (byte)'I':
+                {
+                    ClientRandState = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(p));
+                    int nv = BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(p + 4));
+                    p += 8;
+                    var cvars = new List<(byte[], byte[])>(nv);
+                    for (int i = 0; i < nv; i++)
+                    {
+                        int e = Array.IndexOf(d, (byte)0, p);
+                        byte[] name = d[p..e];
+                        p = e + 1;
+                        e = Array.IndexOf(d, (byte)0, p);
+                        cvars.Add((name, d[p..e]));
+                        p = e + 1;
+                    }
+                    ClientCvars = cvars;
+                    break;
+                }
                 case (byte)'C':
                 {
                     uint fc = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(p));
                     double t = BinaryPrimitives.ReadDoubleLittleEndian(d.AsSpan(p + 4));
                     int n = BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(p + 12));
-                    ulong lc = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 16));
-                    ulong le = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 24));
-                    ulong lf = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 32));
-                    p += 40;
+                    uint rs = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(p + 16));
+                    ulong lc = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 20));
+                    ulong le = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 28));
+                    ulong lf = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 36));
+                    p += 44;
                     var ents = new ulong[(flags & 1) != 0 ? n : 0];
                     for (int i = 0; i < ents.Length; i++, p += 8)
                         ents[i] = BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p));
-                    clients.Add(new ClientFrame(fc, t, n, lc, le, lf, ents));
+                    clients.Add(new ClientFrame(fc, t, n, rs, lc, le, lf, ents));
                     break;
                 }
                 default:

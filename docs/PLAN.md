@@ -576,7 +576,10 @@ an index), `effects` (dynamic lights, beams, the numbers of active and free part
 because client state depends on rand (a muzzle flash's light radius, an entity's syncbase when its model changes, a
 lightning beam's roll), and the particle functions draw from it once per particle they get from the free list; with
 no R_DrawParticles the list runs out and stays out, so the port has to model which particles are taken, not what
-they do. Corpus: the 10 corpus runs and the 3 long runs, 77,253 client frames; Windows and Linux identical on every
+they do. A record `'I'` before the first frame gives the port the client's inputs from Host_Init (the rand state, all
+cvars, e.g. LibreQuake's default.cfg values), and every `'C'` record carries the rand state in plain as well;
+`-edictclientdump <first> <last> <file>` writes the canonical streams themselves for a range of frames, so that a
+difference can be named down to the field. Corpus: the 10 corpus runs and the 3 long runs, 77,253 client frames; Windows and Linux identical on every
 record and entity, two Windows runs identical, and server runs hash as before (version 4 adds only the record kind).
 Found on the way: after a restart the tape's client never sends prespawn again, so the client stays at signon 1, and
 CL_GetMessage, which reads without waiting until the signon is complete, parses the rest of the demo in one frame;

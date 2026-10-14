@@ -21,6 +21,10 @@ void EdictHash_OpenMessages (char *path);
 void EdictHash_Sent (int kind, const void *data, int length);
 // Called after every host frame that ran while sv.active; writes one frame record.
 void EdictHash_Frame (void);
+// Called once before the first host frame with -edictclient: the client's inputs (rand state, cvars).
+void EdictHash_ClientStart (void);
+// Diagnostic: -edictclientdump <first> <last> <file>, the client records' canonical streams for those frames.
+void EdictHash_OpenClientDump (char *path, int first, int last);
 // Called after every host frame; writes one client record while a demo plays back.
 void EdictHash_ClientFrame (void);
 // Called after ED_LoadFromFile in SV_SpawnServer (patch 0005): the spawn records of the hash and the capture.
