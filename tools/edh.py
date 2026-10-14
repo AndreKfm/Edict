@@ -6,9 +6,9 @@ import struct, sys
 def read(path):
     d = open(path, 'rb').read(); p = 12
     assert d[:4] == b'EDH1'; ver, flags = struct.unpack_from('<II', d, 4)
-    assert ver in (1, 2, 3, 4, 5), path
+    assert ver in (1, 2, 3, 4, 5, 6), path
     rec = '<IdIQQQQ' if ver >= 3 else '<IdIQQQ'; rl = struct.calcsize(rec)
-    maps, frames, spawns, clients, screens = [], [], [], [], []
+    maps, frames, spawns, clients, screens, sounds = [], [], [], [], [], []
     while p < len(d):
         k = d[p:p+1]; p += 1
         if k == b'M':
@@ -36,8 +36,11 @@ def read(path):
             clients.append((fc, t, n, lc, le, lf, ents))
         elif k == b'V':             # version 5: a present of the screen (VID_Update)
             screens.append(struct.unpack_from('<IIIQQ', d, p)); p += 28
+        elif k == b'A':             # version 6: the sound build's DMA buffer after a frame
+            sounds.append(struct.unpack_from('<IIIQ', d, p)); p += 20
         else: raise SystemExit('bad record at %d' % (p-1))
     read.screens = screens
+    read.sounds = sounds
     return maps, frames, spawns, clients
 cmd = sys.argv[1]
 if cmd == 'summary':
@@ -46,6 +49,10 @@ if cmd == 'summary':
         sc = read.screens
         print('screen presents:', len(sc), 'framecount', sc[0][0], '..', sc[-1][0], ' distinct frame buffers:',
               len({v[3] for v in sc}), ' palettes:', len({v[4] for v in sc}))
+    if read.sounds:
+        so = read.sounds
+        print('sound frames:', len(so), 'framecount', so[0][0], '..', so[-1][0], ' paintedtime', so[0][1], '..', so[-1][1],
+              ' distinct buffers:', len({v[3] for v in so}))
     if cl:
         print('client frames:', len(cl), 'framecount', cl[0][0], '..', cl[-1][0], ' cl.time', cl[0][1], '..', cl[-1][1],
               ' num_entities', min(c[2] for c in cl), '..', max(c[2] for c in cl), ' distinct client-lane:',
@@ -63,7 +70,16 @@ if cmd == 'summary':
         changed = [i for i in range(fr[0][2]) if len({f[6][i] for f in fr if i < f[2]}) > 1]
         print('entities whose hash changes over the run:', len(changed), 'of', fr[-1][2])
 elif cmd == 'diff':
-    _, a, sa, ca = read(sys.argv[2]); va = read.screens; _, b, sb, cb = read(sys.argv[3]); vb = read.screens
+    _, a, sa, ca = read(sys.argv[2]); va, oa = read.screens, read.sounds
+    _, b, sb, cb = read(sys.argv[3]); vb, ob = read.screens, read.sounds
+    if oa or ob:
+        if len(oa) != len(ob): print('sound record count differs', len(oa), len(ob))
+        for i, (x, y) in enumerate(zip(oa, ob)):
+            if x != y:
+                what = 'DMA buffer' if x[1:3] == y[1:3] and x[0] == y[0] else 'framecount, paintedtime or soundtime'
+                print('first difference: sound record %d (framecount %d vs %d): %s' % (i, x[0], y[0], what))
+                raise SystemExit(1)
+        print('identical: %d sound records' % len(oa))
     if va or vb:
         if len(va) != len(vb): print('screen present count differs', len(va), len(vb))
         for i, (x, y) in enumerate(zip(va, vb)):

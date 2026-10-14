@@ -67,8 +67,30 @@ public sealed class ScreenGateTests
     internal static string? FirstDivergence(string run, out int presents, out int clientFrames) =>
         FirstDivergence(Directory, true, run, out presents, out clientFrames);
 
+    /// <summary>
+    /// The sound build's record after a host frame ('A'): framecount, paintedtime, soundtime and the DMA buffer's
+    /// hash as the reference's next; null when alike, else the difference. No record while the sound has not started.
+    /// </summary>
+    internal static string? SoundDifference(Sound? sound, IReadOnlyList<EdhFile.SoundFrame> reference, ref int next, int frameCount)
+    {
+        if (sound is not { Started: true })
+            return null;
+        if (next >= reference.Count)
+            return $"framecount {frameCount}: the reference wrote no more sound records ({reference.Count})";
+        EdhFile.SoundFrame r = reference[next++];
+        if (r.FrameCount != (uint)frameCount)
+            return $"sound record {next - 1}: framecount {frameCount}, the reference's {r.FrameCount}";
+        if (r.PaintedTime != (uint)sound.PaintedTime || r.SoundTime != (uint)sound.SoundTime)
+            return $"framecount {frameCount}: paintedtime {sound.PaintedTime} soundtime {sound.SoundTime}, the reference's {r.PaintedTime} {r.SoundTime}";
+        if (Xxh64.Hash(sound.Buffer) != r.Buffer)
+            return $"framecount {frameCount}: the DMA buffer differs (paintedtime {r.PaintedTime})";
+        return null;
+    }
+
     /// <summary>A demo run of the corpus in <paramref name="dir"/>, its 3D view cleared (-edict2d) or drawn.</summary>
-    internal static string? FirstDivergence(string dir, bool only2D, string run, out int presents, out int clientFrames)
+    /// <param name="sound">The sound build's corpus: the host has the sound, and every sound record must be the reference's.</param>
+    internal static string? FirstDivergence(string dir, bool only2D, string run, out int presents, out int clientFrames,
+                                            bool sound = false)
     {
         presents = clientFrames = 0;
         var edh = new EdhFile(Path.Combine(dir, run + ".edh"));
@@ -78,14 +100,15 @@ public sealed class ScreenGateTests
         if (cmdline.Length >= 255)
             return $"cmdline \"{cmdline}\" may be cut: its arguments are not known";
         string[] args = cmdline.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1..];
-        using var host = new ClientHost(files, edh.ClientRandState, args, cmdline, withScreen: true);
+        ClientHost? h = null;
+        var sink = new Sink(edh.Screens, () => h?.FrameCount ?? 0);
+        using var host = new ClientHost(files, edh.ClientRandState, args, cmdline, withScreen: true, sound: sound, sink: sink);
+        h = host;
         host.Screen!.Only2D = only2D;
-        var sink = new Sink(edh.Screens, () => host.FrameCount);
-        host.Screen.Sink = sink;
         var hash = new ClientHash();
         float time = float.Parse(ClientHost.HarnessFrameRate, System.Globalization.CultureInfo.InvariantCulture);
         presents = clientFrames = 0;
-        int next = 0;
+        int next = 0, nextSound = 0;
         string? failure = null;
         for (int frame = 0; frame < 100_000 && failure is null; frame++)
         {
@@ -100,6 +123,8 @@ public sealed class ScreenGateTests
                 break;
             }
             if (sink.Failure is not null)
+                break;
+            if (sound && (failure = SoundDifference(host.Sound, edh.Sounds, ref nextSound, host.FrameCount)) is not null)
                 break;
             if (Environment.GetEnvironmentVariable("EDICT_SCREENTRACE") is { Length: > 0 } && frame < 8)
                 TestContext.Current.TestOutputHelper?.WriteLine(
@@ -148,6 +173,8 @@ public sealed class ScreenGateTests
             failure = $"the port presented {sink.Next} times, the reference {edh.Screens.Count}";
         if (failure is null && next != edh.ClientFrames.Count)
             failure = $"the demo ended after {next} client records, the reference wrote {edh.ClientFrames.Count}";
+        if (failure is null && sound && nextSound != edh.Sounds.Count)
+            failure = $"the port wrote {nextSound} sound records, the reference {edh.Sounds.Count}";
         return failure;
     }
 
@@ -201,7 +228,9 @@ public sealed class ScreenGateTests
         ListenDivergence(Directory, true, run, out presents, out frames);
 
     /// <summary>A listen run of the corpus in <paramref name="dir"/>, its 3D view cleared (-edict2d) or drawn.</summary>
-    internal static string? ListenDivergence(string dir, bool only2D, string run, out int presents, out int frames)
+    /// <param name="sound">The sound build's corpus: the host has the sound, and every sound record must be the reference's.</param>
+    internal static string? ListenDivergence(string dir, bool only2D, string run, out int presents, out int frames,
+                                             bool sound = false)
     {
         presents = frames = 0;
         string edhPath = Path.Combine(dir, "listen", run + ".edh");
@@ -215,11 +244,13 @@ public sealed class ScreenGateTests
         SpawnInputs inputs = VmReplay.FirstSpawn(Path.Combine(VmReplay.Directory, map + ".ecp"));
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         var loop = new Loopback(1 << 20);
-        using var host = new Host(files, edh.ClientRandState, loop, inputs.HeaderBytes, VmReplay.NumBuiltins, args, cmdline, withScreen: true);
+        Host? h = null;
+        var sink = new Sink(edh.Screens, () => h?.FrameCount ?? 0);
+        using var host = new Host(files, edh.ClientRandState, loop, inputs.HeaderBytes, VmReplay.NumBuiltins, args, cmdline,
+            withScreen: true, sound: sound, sink: sink);
+        h = host;
         host.Screen!.Only2D = only2D;
-        var sink = new Sink(edh.Screens, () => host.FrameCount);
-        host.Screen.Sink = sink;
-        int spawn = 0, nextClient = 0;
+        int spawn = 0, nextClient = 0, nextSound = 0;
         string? failure = null;
         StateHash? hash = null;
         var clientHash = new ClientHash();
@@ -255,6 +286,8 @@ public sealed class ScreenGateTests
                 break;
             }
             if (sink.Failure is not null || failure is not null)
+                break;
+            if (sound && (failure = SoundDifference(host.Sound, edh.Sounds, ref nextSound, host.FrameCount)) is not null)
                 break;
             if (frame == 0)
                 failure = CvarDifference(host.Cvars, edh.ClientCvars);
@@ -312,6 +345,8 @@ public sealed class ScreenGateTests
             failure = $"the port presented {sink.Next} times, the reference {edh.Screens.Count}";
         if (failure is null && nextClient != edh.ClientFrames.Count)
             failure = $"the port's client wrote {nextClient} records, the reference {edh.ClientFrames.Count}";
+        if (failure is null && sound && nextSound != edh.Sounds.Count)
+            failure = $"the port wrote {nextSound} sound records, the reference {edh.Sounds.Count}";
         return failure;
     }
 

@@ -53,8 +53,15 @@ public sealed unsafe class Cvars
 
     /// <summary>The reference's cvars at their defaults, and after them a platform's own (name, default).</summary>
     [NoAllocUnchecked("load path: builds the table once")]
-    public static Cvars FromRegistry(IReadOnlyList<(string Name, string Default)> extra) =>
-        new(Registry.Cvars.Select(c => (c.Name, c.Default)).Concat(extra)
+    public static Cvars FromRegistry(IReadOnlyList<(string Name, string Default)> extra) => FromRegistry(extra, false);
+
+    /// <summary>
+    /// The reference's cvars at their defaults, those of the sound build with <paramref name="sound"/> (S_Init's block,
+    /// <see cref="Sound.RegistryCvars"/>), and after them a platform's own (name, default).
+    /// </summary>
+    [NoAllocUnchecked("load path: builds the table once")]
+    public static Cvars FromRegistry(IReadOnlyList<(string Name, string Default)> extra, bool sound) =>
+        new((sound ? Sound.RegistryCvars() : Registry.Cvars).Select(c => (c.Name, c.Default)).Concat(extra)
             .Select(c => (System.Text.Encoding.Latin1.GetBytes(c.Name), System.Text.Encoding.Latin1.GetBytes(c.Default))).ToList());
 
     private static void Store(Cvar v, ReadOnlySpan<byte> value)

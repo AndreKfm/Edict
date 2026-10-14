@@ -69,8 +69,8 @@ public struct EntityRef
 /// <summary>
 /// The client (client.h, cl_main.c, cl_parse.c, cl_tent.c, cl_demo.c, and of view.c and r_part.c what the network
 /// state needs): <c>cls</c>, <c>cl</c> and the client's arrays, as the harness runs the client — demo playback,
-/// no screen (docs/PLAN.md, P5). Sounds, the CD player and the console are output only; the models are the
-/// <see cref="ModelCache"/>'s.
+/// no screen (docs/PLAN.md, P5). The sounds go to the <see cref="Sound"/> of a host with sound (P6 step 8), the CD
+/// player and the console are output only; the models are the <see cref="ModelCache"/>'s.
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public sealed unsafe partial class ClientState
@@ -93,6 +93,9 @@ public sealed unsafe partial class ClientState
 
     /// <summary>The console and screen Con_Printf and SCR_CenterPrint go to; null where the screen is skipped.</summary>
     public Screen? Con;
+
+    /// <summary>The sound of a host with sound (the sound build's), or null (snd_null's: every call does nothing).</summary>
+    public Sound? Sound;
 
     /// <summary>sv.active: in a listen server the client does not lerp and CL_ClearState leaves the signon alone.</summary>
     public bool ServerActive { get; set; }
@@ -121,7 +124,8 @@ public sealed unsafe partial class ClientState
     public int Intermission, CompletedTime;
     public double MTime0, MTime1, Time, OldTime;
     public float LastReceivedMessage;
-    public readonly nint[] ModelPrecache;              // Model*; sound_precache stays empty: snd_null's S_PrecacheSound gives no sfx
+    public readonly nint[] ModelPrecache;              // Model*
+    public readonly int[] SoundPrecache;               // sfx numbers (Sound); 0 without sound (snd_null's S_PrecacheSound gives no sfx)
     public readonly byte[] LevelName;
     public int ViewEntity, MaxClients, GameType;
     public Model* WorldModel;
@@ -170,6 +174,7 @@ public sealed unsafe partial class ClientState
         CShifts = new ColorShift[NumCShifts];
         PrevCShifts = new ColorShift[NumCShifts];
         ModelPrecache = new nint[MaxModels];
+        SoundPrecache = new int[MaxSounds];
         LevelName = new byte[LevelNameSize];
         Entities = new ClientEntity[MaxEdicts];
         StaticEntities = new ClientEntity[MaxStaticEntities];
@@ -187,6 +192,9 @@ public sealed unsafe partial class ClientState
         _modelNames = new byte[MaxModels][];
         for (int i = 0; i < MaxModels; i++)
             _modelNames[i] = GC.AllocateArray<byte>(64, pinned: true);
+        _soundNames = new byte[MaxSounds][];
+        for (int i = 0; i < MaxSounds; i++)
+            _soundNames[i] = new byte[64];
         InitParticles();
         _move = new SizeBuf(128);
         Buttons = new KButton[NumButtons];
@@ -195,6 +203,7 @@ public sealed unsafe partial class ClientState
 
     private readonly SizeBuf _move;                    // CL_SendMove's buf[128]
     private readonly byte[][] _modelNames;             // CL_ParseServerInfo's model_precache[MAX_MODELS][MAX_QPATH]
+    private readonly byte[][] _soundNames;             // CL_ParseServerInfo's sound_precache[MAX_SOUNDS][MAX_QPATH]
 
     /// <summary><c>v[i]</c> as a reference, for component loops on fields and array elements.</summary>
     private static ref float At(ref Vec3 v, int i) => ref System.Runtime.CompilerServices.Unsafe.Add(ref v.X, i);
@@ -262,6 +271,7 @@ public sealed unsafe partial class ClientState
         MTime0 = MTime1 = Time = OldTime = 0;
         LastReceivedMessage = 0;
         new Span<nint>(ModelPrecache).Clear();
+        new Span<int>(SoundPrecache).Clear();
         new Span<byte>(LevelName).Clear();
         ViewEntity = MaxClients = GameType = 0;
         WorldModel = null;
@@ -280,7 +290,8 @@ public sealed unsafe partial class ClientState
             return;
         if (State == CaConnected)
             throw DisconnectNotPorted;
-        Signon = 0;                                    // CL_Disconnect
+        Sound?.StopAllSounds(true);                    // CL_Disconnect: stop sounds (especially looping!)
+        Signon = 0;
         NetCon = connection;
         State = CaConnected;
         Signon = 0;                                    // need all the signon messages before playing; Host_Reconnect_f
@@ -300,7 +311,8 @@ public sealed unsafe partial class ClientState
     [NoAllocUnchecked("load path: the demo")]
     public void PlayDemo(byte[] demo)
     {
-        StopPlayback();                                // CL_Disconnect
+        Sound?.StopAllSounds(true);                    // CL_Disconnect: stop sounds (especially looping!)
+        StopPlayback();
         DemoPlayback = false;
         Signon = 0;
         _demo = demo;

@@ -155,6 +155,9 @@ sh tools/longruns.sh ~/edict-ref data/long      # the ten-minute runs of the cut
 sh tools/demos.sh ~/edict-ref data/client       # P5: demos of every run's messages and synthetic ones, the client's hashes
 sh tools/screens.sh ~/edict-ref data/screen     # P6: the demos and listen runs with the screen, a record per present
 sh tools/r9-screen.sh ~/r9-screen               # P6 R9: -O0 and ASan/UBSan against data/screen (a 2nd argument: one build)
+SOUND=1 sh ref/build.sh release ~/snd           # P6 step 8: the sound build (snd_dma.c, snd_mix.c, snd_mem.c, edict_snd.c)
+EXTRA="-edict2d +showram 0" sh tools/screens.sh ~/snd ~/os    # its corpus (copy ~/os to data/sound: short paths)
+CORPUS=sound SOUND=1 EXTRA="-edict2d +showram 0" sh tools/r9-screen.sh ~/r9s   # R9 of the sound build
 python3 -I tools/screen.py diff <a.dump> <b.dump> out.png   # -edictscreendump images: where two differ, side by side
 ```
 
@@ -208,6 +211,14 @@ P6, step 7: `GpuRendererTests` plays four demos of data/screen with both rendere
 on a hidden window's OpenGL 3.3 context into an offscreen framebuffer) and requires every world surface and alias
 model the exact renderer drew to be drawn by the GPU renderer, and no GL error; skipped without a context.
 `EDICT_GPUSHOTS=<dir>` saves every 250th frame of both (`EDICT_GPUFRAME=<n>` one more) for a look.
+
+P6, step 8: `SoundGateTests` on data/sound, the corpus of the reference's sound build (`EDICT_SOUND` for another
+directory): the screen gate's comparisons (with the 3D view cleared) and every sound record, the DMA buffer after
+each host frame with paintedtime and soundtime. `tools/edh.py diff` compares sound records too. The allocation gate
+plays the sound corpus (`Sound_frames_allocate_nothing`), and `Game_frames_allocate_nothing` runs with and without
+the sound. The platform's output has no reference: `edict -edictwav <file.wav> -edictframes 600 +map dev` writes
+what it would play (dev has sound where the player stands; start has none). `tools/demogen.py` seed 8 (in
+`tools/demos.sh`; recorded for data/sound with `ONLY=fuzz_8`) is the sound's profile. R7 group `sound`.
 
 ### Test tiers (2026-10-13)
 

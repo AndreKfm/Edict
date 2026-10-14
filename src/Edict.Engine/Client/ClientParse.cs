@@ -7,7 +7,8 @@ namespace Edict.Engine;
 
 /// <summary>
 /// cl_parse.c: CL_ParseServerMessage and what it calls, V_ParseDamage's state (the color shift and the face time;
-/// the view kick is the renderer's) and CL_SignonReply. Sounds, the CD player and the console print nothing here.
+/// the view kick is the renderer's) and CL_SignonReply. The sounds go to the host's Sound, if it has one; the CD
+/// player prints nothing here.
 /// Messages the corpus never sends and that C would act on outside the client (svc_disconnect, svc_sellscreen) stop
 /// with an error.
 /// </summary>
@@ -44,6 +45,7 @@ public sealed unsafe partial class ClientState
     private static readonly HostErrorException BadEntityNum = new("CL_EntityNum: an invalid number");
     private static readonly HostErrorException BadModNum = new("CL_ParseModel: bad modnum");
     private static readonly HostErrorException BadSoundEnt = new("CL_ParseStartSoundPacket: ent > MAX_EDICTS");
+    private static readonly SysErrorException SoundNameTooLong = new("Sound name too long (strcpy into sound_precache[MAX_QPATH])");
     private static readonly HostErrorException BadScoreboard = new("CL_ParseServerMessage: svc_update* > MAX_SCOREBOARD");
     private static readonly HostErrorException BadSignon = new("Received signon at or below the current one");
     private static readonly HostErrorException TooManyStatics = new("Too many static entities");
@@ -143,8 +145,11 @@ public sealed unsafe partial class ClientState
                     ParseStartSoundPacket();
                     break;
                 case SvcStopSound:
-                    r.ReadShort();          // S_StopSound
+                {
+                    int i = r.ReadShort();
+                    Sound?.StopSound(i >> 3, i & 7);
                     break;
+                }
                 case SvcUpdateName:
                 {
                     Con?.SbarChanged();
@@ -222,12 +227,17 @@ public sealed unsafe partial class ClientState
                     break;
                 }
                 case SvcSpawnStaticSound:
-                    for (int i = 0; i < 3; i++)
-                        r.ReadCoord();
-                    r.ReadByte();
-                    r.ReadByte();
-                    r.ReadByte();           // S_StaticSound
+                {   // CL_ParseStaticSound
+                    Vec3 org;
+                    org.X = r.ReadCoord();
+                    org.Y = r.ReadCoord();
+                    org.Z = r.ReadCoord();
+                    int soundNum = r.ReadByte();
+                    int vol = r.ReadByte();
+                    int atten = r.ReadByte();
+                    Sound?.StaticSound(SoundPrecache[soundNum], org, vol, atten);
                     break;
+                }
                 case SvcCdTrack:
                     CdTrack = r.ReadByte();
                     LoopTrack = r.ReadByte();   // CDAudio_Play
@@ -291,22 +301,24 @@ public sealed unsafe partial class ClientState
         return num;
     }
 
-    /// <summary>CL_ParseStartSoundPacket: S_StartSound is output; the packet is read and its entity checked.</summary>
+    /// <summary>CL_ParseStartSoundPacket: the packet, its entity checked, and S_StartSound.</summary>
     private void ParseStartSoundPacket()
     {
         MsgReader r = _reader;
         int fieldMask = r.ReadByte();
-        if ((fieldMask & 1) != 0)       // SND_VOLUME
-            r.ReadByte();
-        if ((fieldMask & 2) != 0)       // SND_ATTENUATION
-            r.ReadByte();
+        int volume = (fieldMask & 1) != 0 ? r.ReadByte() : 255;                         // SND_VOLUME, DEFAULT_SOUND_PACKET_VOLUME
+        float attenuation = (fieldMask & 2) != 0 ? (float)(r.ReadByte() / 64.0) : 1.0f;  // SND_ATTENUATION, DEFAULT_SOUND_PACKET_ATTENUATION
         int channel = r.ReadShort();
-        r.ReadByte();                   // sound_num
+        int soundNum = r.ReadByte();
         int ent = channel >> 3;
+        channel &= 7;
         if (ent > MaxEdicts)
             throw BadSoundEnt;
-        for (int i = 0; i < 3; i++)
-            r.ReadCoord();
+        Vec3 pos;
+        pos.X = r.ReadCoord();
+        pos.Y = r.ReadCoord();
+        pos.Z = r.ReadCoord();
+        Sound?.StartSound(ent, channel, SoundPrecache[soundNum], pos, (float)(volume / 255.0), attenuation);
     }
 
     /// <summary>
@@ -371,13 +383,27 @@ public sealed unsafe partial class ClientState
         }
 
         // precache sounds
-        for (int numsounds = 1; ; numsounds++)
+        int numsounds;
+        for (numsounds = 1; ; numsounds++)
         {
             str = r.ReadString();
             if (str[0] == 0)
                 break;
             if (numsounds == MaxSounds)
                 return;                 // Con_Printf ("Server sent too many sound precaches\n")
+            if (Sound is { } sound)
+            {
+                byte[] name = _soundNames[numsounds];
+                int n = 0;
+                for (; str[n] != 0; n++)
+                {
+                    if (n == name.Length - 1)
+                        throw SoundNameTooLong;
+                    name[n] = str[n];
+                }
+                name[n] = 0;            // strcpy into sound_precache[MAX_QPATH]
+                sound.TouchSound(name);
+            }
         }
 
         // now we try to load everything else until a cache allocation fails
@@ -393,7 +419,10 @@ public sealed unsafe partial class ClientState
             if (m->Type == ModelType.Brush && *(byte*)&m->Name != '*' && m->SkyTexture != null)
                 Con?.InitSky(m->SkyTexture);                 // Con_Printf ("Model %s not found\n")
         }
-        // S_PrecacheSound: snd_null's gives no sfx, so sound_precache stays empty
+        // S_PrecacheSound: snd_null's gives no sfx, so sound_precache stays empty without sound
+        if (Sound is { } snd)
+            for (int i = 1; i < numsounds; i++)
+                SoundPrecache[i] = snd.PrecacheSound(_soundNames[i]);
 
         // local state
         WorldModel = (Model*)ModelPrecache[1];

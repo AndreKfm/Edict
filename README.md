@@ -15,4 +15,5 @@ The view is drawn by the GPU renderer (OpenGL 3.3 core, GLQuake's look) by defau
 the console, shows the exact software renderer, the one the port is proven against. The arguments are Quake's
 (`+map <name>`, `+skill 2`, ...); without a `+map` the game starts `start`. The console
 (`` ` ``) takes the commands, the default bindings are the game directory's `default.cfg`. The menu is the one the
-reference build uses, a stub: Escape does nothing, `quit` at the console ends the game.
+reference build uses, a stub: Escape does nothing, `quit` at the console ends the game. The sound is Quake's mixer,
+ported as exactly as the renderer, played through waveOut on Windows and ALSA on Linux; `-nosound` turns it off.

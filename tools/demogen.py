@@ -20,6 +20,10 @@
 #     alias models clip at the near plane), and models LibreQuake's do not reach (write_render_models): every
 #     sprite type, a sprite frame group, an alias skin group, alias frame groups and a seam; seeds 1 to 6 stay as
 #     they were
+#   - seed 8, the sound's profile (P6, step 8), the renderer's with sounds of its own (a second rand stream, so the
+#     rest is drawn as for any seed): sounds on entity channels that an svc_stopsound stops while they play (C's
+#     S_StopSound only finds channels 0 to 7), the same sound twice in a frame, and looped static sounds near the
+#     view, several of one sample (S_Update combines them) and one at 44100 Hz (resampled, its loop start scaled)
 # Usage: python3 -I tools/demogen.py <data dir (libreq-v0.09-beta)> <seed> <frames> <out.dem>
 import os, random, struct, sys
 
@@ -168,6 +172,8 @@ def generate(datadir, seed, frames):
     extra = write_models(datadir)
     screen = seed >= 5
     render = seed >= 7
+    sound = seed == 8
+    srng = random.Random(seed * 7919)                  # the sound profile's own stream
     if render:
         extra += write_render_models(datadir)
     maxclients = rng.choice([1, 2, 4])
@@ -181,6 +187,8 @@ def generate(datadir, seed, frames):
     # the screen's profile draws the gun (R_DrawViewModel), which must be an alias model
     weapons = [1 + i for i, n in enumerate(models) if n.endswith('.mdl')] if screen else None
     sounds = ['weapons/r_exp3.wav', 'misc/h2ohit1.wav', 'player/death1.wav']
+    if sound:
+        sounds += ['ambience/fire1.wav', 'ambience/comp1.wav', 'ambience/drone6.wav']   # 4 to 6: looped
     out = []                                           # (view angles, message bytes)
     view = [0.0, 0.0, 0.0]
 
@@ -237,6 +245,12 @@ def generate(datadir, seed, frames):
         for i in range(3):
             m.coord(rng.uniform(-1000, 1000))
         m.byte(rng.randrange(1, 4)); m.byte(255); m.byte(64)
+    if sound:
+        for s in [4, 4, 4, 5, 6, 4, 6]:                 # looped statics around the view: S_Update combines a sample's
+            m.byte(29)
+            for i in range(3):
+                m.coord(max(-4000, min(4000, ents[1].origin[i] + srng.uniform(-300, 300))))
+            m.byte(s); m.byte(srng.choice([128, 255])); m.byte(srng.choice([32, 64, 128]))
     m.byte(25); m.byte(2)
     emit(m)
 
@@ -270,6 +284,7 @@ def generate(datadir, seed, frames):
     # the frames: the first at the edge's time (with the explosion of edge 0, parsed while cl.time is 0), then on
     # from 1.0
     last_light = None
+    playing = []                                       # seed 8: the (entity, channel) pairs of its sounds
     for frame in range(frames):
         r = rng.random()
         if frame == 0:
@@ -304,6 +319,8 @@ def generate(datadir, seed, frames):
                 m.coord(0)
         else:
             extras(m, rng, ents, maxclients, nmodels, screen, weapons)
+        if sound:
+            sound_extras(m, srng, ents, playing)
         if screen and frame == frames * 6 // 10:
             m.byte(30)                                   # svc_intermission, after frames with a view and a gun
         elif screen and frame == frames * 75 // 100:
@@ -312,6 +329,31 @@ def generate(datadir, seed, frames):
             m.byte(34); m.string('a cutscene\nof two lines')
         emit(m)
     return out
+
+
+def sound_extras(m, srng, ents, playing):
+    """Seed 8: sounds on entity channels near the view, stopped by svc_stopsound while they play, and one twice."""
+    def start(num, channel, snd):
+        e = ents[num]
+        mask = srng.randrange(4)
+        m.byte(6); m.byte(mask)
+        if mask & 1: m.byte(srng.choice([64, 128, 255]))
+        if mask & 2: m.byte(srng.choice([32, 64, 128]))
+        m.short((num << 3) | channel); m.byte(snd)
+        for i in range(3):
+            m.coord(max(-4000, min(4000, e.origin[i] + srng.uniform(-200, 200))))
+        playing.append((num, channel))
+    r = srng.random()
+    if r < 0.12:
+        start(srng.choice([1, 1] + list(range(2, 41))), srng.randrange(1, 8), srng.randrange(1, 4))
+    elif r < 0.16:
+        snd = srng.randrange(1, 4)                     # the same sound on two channels in one frame
+        start(srng.randrange(2, 41), srng.randrange(1, 8), snd)
+        start(srng.randrange(2, 41), srng.randrange(1, 8), snd)
+    if playing and srng.random() < 0.15:
+        num, channel = playing.pop(srng.randrange(len(playing)) if srng.random() < 0.3 else -1)
+        m.byte(16); m.short((num << 3) | channel)     # svc_stopsound
+    del playing[:-8]
 
 
 def clientdata(m, rng, weapons=None):

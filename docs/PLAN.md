@@ -892,6 +892,46 @@ before R_ViewChanged set the new one (screen.c; only GLQuake reads it, so the GP
 angle from fov_x and the view's aspect, as the software renderer's frustum does), and an alias model's box is its
 bounding radius. Golden images are compared by eye (`EDICT_GPUSHOTS=<dir>` saves both renderers' frames): a GPU's
 rasterization is not bit-pinned. Runs on Windows and under WSLg's GLX, at the 72 frames a second of the host.
+Step 8 (2026-10-14), the sound. The reference has a sound build (`ref/build.sh` with SOUND=1): snd_dma.c, snd_mix.c
+and snd_mem.c in place of snd_null.c, with a DMA driver of the harness's own (`ref/src/edict_snd.c`): a buffer of
+32768 16-bit samples, stereo, 11025 Hz (snd_dma.c's desired speed and bits), whose "DMA position" is the host's
+realtime in samples, so the mix is a function of the frame clock. After every host frame it writes a sound record
+`'A'` (`.edh` version 6: framecount, paintedtime, soundtime, the buffer's hash). Patch 0009 calls S_Init in
+Host_Init on every build (Win32's software build left it to vid_win.c, which the reference replaces), patch 0010
+puts snd_dma.c and snd_mix.c on their portable path on Windows too (the Win32 path drives DirectSound through
+winquake.h), patch 0011 keeps GetWavinfo's look for cooledit's "mark" inside the file (six of LibreQuake's
+sounds end in a LIST chunk of 4 bytes, and C compared bytes past the file; found by R9's AddressSanitizer, never
+"mark" in a run, and the port reads 0 there). It is a build and a corpus of its own: S_Init registers 11 cvars and 5 commands and prints two console
+lines (the first presents of the screen come from them), the client precaches sounds, and S_StartSound draws from
+rand when a sound starts on a second channel while the first is still at its start. The default build stays
+snd_null's, and the corpora before keep their records. Corpus (`tools/screens.sh` with the sound build and
+EXTRA="-edict2d +showram 0", data/sound): the 21 demos and 12 listen runs, 172,765 sound records; `tools/demogen.py`
+seed 8 is the sound's profile (sounds an svc_stopsound stops while they play, the same sound twice in a frame,
+looped statics of one sample around the view and one at 44100 Hz). The port,
+`src/Edict.Engine/Sound/Sound.cs`, keeps C's arithmetic (SND_Spatialize's doubles and its float stores, the mix
+ahead in float, the ambient fade in double) and its quirks: SND_PaintChannelFrom8/16 paint from paintbuffer[0], so
+a channel that loops within a chunk paints its restart over its start; S_StopSound looks at channels 0 to 7; S_Update's
+search for a static sound to combine with never ends at total_channels. The hooks are C's: the server info's
+S_TouchSound and S_PrecacheSound, svc_sound, svc_stopsound and svc_spawnstaticsound, cl_tent.c's sounds (CL_InitTEnts
+in CL_Init), Con_Print's talk.wav, S_StopAllSounds in CL_Disconnect and SCR_BeginLoadingPlaque, S_ExtraUpdate after
+R_MarkLeaves (the frame's first call is the only one that paints: realtime, and with it the DMA position, stays
+put through a frame), and S_Update after SCR_UpdateScreen with r_origin and the view's axes once the signon is
+complete. The rand stream is the host's (`ISoundHost`): a listen server's client reads its messages with the
+server's. The cache never evicts (with the reference's 32 MB C's never does): at S_Init the port finds every
+`sound/*.wav` on the search path and sizes the pool their resampled data needs, so a first load in a frame only
+looks up and resamples. Gate: `SoundGateTests`, every sound record, present, client and server record of the 32
+runs as the reference's; the client lane now hashes the precached sounds' names, as C does. Found by it: S_Init's
+console lines present the screen during Host_Init, before the gate had set the screen's sink (the hosts take it
+when they start now). The allocation gate plays the sound corpus, and the game's gate runs with the sound too. The
+platform feeds the device what each frame mixed, from soundtime to paintedtime (the mix ahead is the device's
+queue, as a DMA buffer's hardware would read it): waveOut on Windows, ALSA's "default" device on Linux (none when
+libasound is missing), `-nosound` for none and `-edictwav <file>` to write it to a file instead (LibreQuake's start
+map is silent where the player stands; dev is not). R7 group `sound`: 38 mutants, 35 detected; `client: stopsound
+ignored` and `update: statics not combined` were blind until seed 8; known: the spatialization's scale rounded in
+float, the ambient threshold at 4 (no view stands in a leaf of ambient level 14 to 26) and the loop start of a
+resampled sound (LibreQuake's one, comp1.wav, loops from 0). R9 of the sound build with patch 0011: Linux release and
+ASan/UBSan and Windows -O0 write data/sound record for record (no sanitizer report); the Linux release build is
+the Windows one's too. Not tested against a device: ALSA (WSL has no libasound; the game runs silent there).
 
 ## D. Effort at 7 h/week (calendar weeks)
 

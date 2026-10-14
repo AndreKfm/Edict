@@ -89,7 +89,7 @@ public sealed unsafe partial class Screen
         if (txt[0] == 1)
         {
             mask = 128;     // go to colored text
-            // S_LocalSound ("misc/talk.wav"): no sound
+            Sound?.LocalSound("misc/talk.wav"u8);    // play talk wav
             txt++;
         }
         else if (txt[0] == 2)

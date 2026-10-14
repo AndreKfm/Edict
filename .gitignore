@@ -38,6 +38,8 @@ bin/x86/
 obj/x86/
 
 [Ww][Ii][Nn]32/
+# the platform's Win32 sources are not a build output
+!src/Edict.Platform/Win32/
 [Aa][Rr][Mm]/
 [Aa][Rr][Mm]64/
 [Aa][Rr][Mm]64[Ee][Cc]/

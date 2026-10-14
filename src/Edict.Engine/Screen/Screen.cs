@@ -42,6 +42,18 @@ public sealed unsafe partial class Screen
     /// <summary>Where the frames go; null: nowhere.</summary>
     public IScreenSink? Sink { get; set; }
 
+    /// <summary>The sound of a host with sound (S_ExtraUpdate, the console's talk.wav, the loading plaque's stop), or null.</summary>
+    public Sound? Sound { get; set; }
+
+    /// <summary>The listener S_Update gets once the signon is complete: r_origin, vpn, vright, vup as the last R_RenderView left them.</summary>
+    public void SoundListener(out Vec3 origin, out Vec3 forward, out Vec3 right, out Vec3 up)
+    {
+        origin = _rOrigin;
+        forward = _vpn;
+        right = _vright;
+        up = _vup;
+    }
+
     /// <summary>The host's realtime and host_frametime, which the screen reads (set by the host every frame).</summary>
     public double RealTime, FrameTime;
 
@@ -452,7 +464,7 @@ public sealed unsafe partial class Screen
     /// <summary>SCR_BeginLoadingPlaque.</summary>
     public void BeginLoadingPlaque()
     {
-        // S_StopAllSounds (true): no sound
+        Sound?.StopAllSounds(true);
         if (_cl.State != ClientState.CaConnected)
             return;
         if (_cl.Signon != ClientState.Signons)

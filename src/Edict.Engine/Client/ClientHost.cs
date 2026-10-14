@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 using System.Text;
+using Edict.Exact;
 
 namespace Edict.Engine;
 
@@ -17,7 +18,7 @@ namespace Edict.Engine;
 /// </para>
 /// </summary>
 [NoAllocUnchecked("the host loop: commands and playdemo allocate; the client's frame is checked in ClientState")]
-public sealed unsafe class ClientHost : IDisposable
+public sealed unsafe class ClientHost : IDisposable, ISoundHost
 {
     /// <summary>EDICT_FRAMETIME (edict_sys.c): host_framerate as the harness sets it after Host_Init.</summary>
     public const string HarnessFrameRate = "0.013889";
@@ -70,18 +71,36 @@ public sealed unsafe class ClientHost : IDisposable
     /// <param name="randSeed">The rand state before frame 0.</param>
     /// <param name="commandLine">The arguments after the program's name (stuffcmds runs the "+" ones).</param>
     /// <param name="cmdline">The cmdline cvar's value (com_cmdline: the program's name too, at most 255 characters).</param>
-    public ClientHost(QFileSystem files, uint randSeed, IReadOnlyList<string> commandLine, string cmdline, bool withScreen)
+    /// <param name="sound">The sound build's sound (snd_dma.c, ref/build.sh SOUND=1) instead of snd_null's.</param>
+    /// <param name="sink">The screen's sink from Host_Init on.</param>
+    public ClientHost(QFileSystem files, uint randSeed, IReadOnlyList<string> commandLine, string cmdline, bool withScreen,
+                      bool sound = false, IScreenSink? sink = null)
     {
         _files = files;
-        Cvars = Cvars.FromRegistry();
+        bool soundCvars = Host.SoundCvars(sound, commandLine);
+        Cvars = Cvars.FromRegistry([], soundCvars);
         _models = new ModelCache(files);
         Cmd = new Cmd(Cvars, files) { CommandLine = commandLine };
+        if (soundCvars)
+            Cmd.UseSoundTable();
         Cl = new ClientState(Cvars, _models, randSeed, Cmd.Text);
         _console = new ClientConsole(Cmd, Cvars, Cl, () => false);
         Cmd.Add("playdemo", PlayDemo);
-        _console.Startup(files, _models, cmdline, withScreen);
+        _console.Startup(files, _models, cmdline, withScreen, sound: sound ? this : null, sink: sink);
         Host.InitializeTypes();
     }
+
+    /// <summary>The sound of a host with sound, or null.</summary>
+    public Sound? Sound => _console.Sound;
+
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    ref CRand ISoundHost.Rand() => ref Cl.Rand;
+
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    double ISoundHost.RealTime => _realtime;
+
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    double ISoundHost.FrameTime => FrameTime;
 
     /// <summary>Cbuf_AddText.</summary>
     public void AddText(ReadOnlySpan<byte> text) => Cmd.AddText(text);
@@ -128,7 +147,8 @@ public sealed unsafe class ClientHost : IDisposable
         // update video
         Screen?.UpdateScreen();
 
-        // S_Update and CDAudio_Update are output
+        // update audio; CDAudio_Update is output
+        Host.UpdateSound(_console, Cl);
         if (Cl.Signon == ClientState.Signons)
             Cl.DecayLights();
 
@@ -154,7 +174,7 @@ public sealed unsafe class ClientHost : IDisposable
             Cmd.Printf("play <demoname> : plays a demo\n"u8);
             return;
         }
-        // CL_Disconnect: nothing is connected or played yet in the runs the port has
+        // CL_Disconnect (its S_StopAllSounds is ClientState.PlayDemo's): nothing is connected or played yet in the runs the port has
         if (Cl.DemoPlayback || Cl.State == ClientState.CaConnected)
             throw new InvalidOperationException("playdemo while connected or playing (CL_Disconnect) is not ported");
         string name = Encoding.Latin1.GetString(Cmd.Argv(1));

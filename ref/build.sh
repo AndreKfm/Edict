@@ -5,7 +5,7 @@
 # Builds the headless reference executable and the oracle library from the same objects: copies ref/upstream/WinQuake, applies ref/patches/*.patch in order,
 # adds ref/src/*.c and compiles with the reference flags (docs/PLAN.md D2, E.6).
 # Usage: ref/build.sh <release|o0|asan|msan|cov> <out-dir>   (cov: -O0 with clang's source coverage, for a census)
-# Environment: CC (default clang), LIBS (default -lm), EXE (default empty; .exe on Windows),
+# Environment: CC (default clang), LIBS (default -lm), EXE (default empty; .exe on Windows), SOUND (1: the sound build),
 #              EXTRA_CFLAGS (Windows: -DWINDED, id's switch for its Windows dedicated server)
 set -eu
 MODE="$1"; OUT="$2"
@@ -23,6 +23,12 @@ FILES="edict_sys edict_hash edict_traces edict_capture edict_xxh64 edict_libc ed
  r_aclip r_alias r_bsp r_draw r_edge r_efrag r_light r_main r_misc r_part r_sky r_sprite r_surf r_vars
  d_edge d_fill d_init d_modech d_part d_polyse d_scan d_sky d_sprite d_surf d_vars d_zpoint
  sbar screen snd_null cd_null in_null edict_vid sv_main sv_move sv_phys sv_user view wad world zone"
+# SOUND=1: the sound build (docs/PLAN.md P6 step 8): snd_dma.c, snd_mix.c and snd_mem.c with the harness's DMA
+# driver (edict_snd.c) instead of snd_null.c; its rand draws (S_StartSound) make it a corpus of its own
+if [ -n "${SOUND:-}" ]; then
+  FILES="$(echo $FILES | sed 's/snd_null/snd_dma snd_mix snd_mem edict_snd/')"
+  EXTRA_CFLAGS="$EXTRA_CFLAGS -DEDICT_SOUND"
+fi
 # C89 code: gnu89 (implicit declarations), -fcommon (tentative definitions in headers).
 # edict_libc.h pins implementation-defined C library results that reach the state (docs/PLAN.md D3).
 # -fno-strict-float-cast-overflow: out-of-range float-to-int conversions saturate to the target range and NaN

@@ -9,7 +9,7 @@ on memory layout enters the gated lanes: strings are hashed by content, entity r
 padding and pointers (edict_t.area) are never read. The C# port produces the same streams.
 
 File layout (all integers little-endian):
-  header   "EDH1"  u32 version (4)  u32 flags
+  header   "EDH1"  u32 version (6)  u32 flags
   record   'M'  char map[64]  u32 progs_crc  u32 entityfields  u32 numglobals          on every new map, and before
                                                                                       every spawn record
   record   'S'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
@@ -41,7 +41,12 @@ File layout (all integers little-endian):
                                                                                       a frame can present more than
                                                                                       once (Con_Printf during the
                                                                                       signon redraws the screen)
-Version 1 had no spawn records, version 2 no messages lane, version 3 no client records, version 4 no screen records.
+  record   'A'  u32 host_framecount  u32 paintedtime  u32 soundtime  u64 DMA buffer hash
+                                                                                      after every host frame of the
+                                                                                      sound build (build.sh SOUND=1,
+                                                                                      edict_snd.c): the 32768 16-bit
+                                                                                      samples snd_mix.c painted into
+Version 1 had no spawn records, version 2 no messages lane, version 3 no client records, version 4 no screen records, version 5 no sound records.
 Lanes:
   edicts         sv.time, num_edicts, state, paused, serverflags, lightstyles, then (index, entity hash) pairs
   globals_typed  every globals word covered by a globaldef, typed like entity fields
@@ -331,7 +336,7 @@ void EdictHash_Open (char *path, int flags)
 	edh_flags = flags;
 	stream_len = 0;
 	put8 ('E'); put8 ('D'); put8 ('H'); put8 ('1');
-	put32 (5);
+	put32 (6);
 	put32 (flags);
 	FlushStream ();
 }
@@ -748,6 +753,22 @@ void EdictHash_ClientFrame (void)
 	if (edh_flags & EDH_FLAG_PER_ENTITY)
 		for (i = 0 ; i < n ; i++)
 			put64 (entity_hashes[i]);
+	FlushStream ();
+}
+
+void EdictHash_Sound (const unsigned char *buffer, int size, int painted, int sound)
+{
+	edict_u64	buffer_hash;
+
+	if (!edh)
+		return;
+	buffer_hash = EdictHash_XXH64 (buffer, size);
+	stream_len = 0;
+	put8 ('A');
+	put32 (host_framecount);
+	put32 (painted);
+	put32 (sound);
+	put64 (buffer_hash);
 	FlushStream ();
 }
 

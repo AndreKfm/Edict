@@ -78,7 +78,7 @@ public sealed unsafe partial class Screen
     }
 
     /// <summary>Mod_PointInLeaf: the index of the leaf p is in.</summary>
-    private static int PointInLeaf(in Vec3 p, Model* model)
+    internal static int PointInLeaf(in Vec3 p, Model* model)
     {
         int child = 0;
         while (child >= 0)

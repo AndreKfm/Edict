@@ -6,7 +6,8 @@
 # hashes get a screen record at every present of the frame buffer (VID_Update, ref/src/edict_vid.c) besides the
 # client records, which the screen changes too (R_DrawParticles moves and expires the particles).
 # EXTRA: more arguments for the reference, as "-edict2d" for the 2D layer alone (data/screen2d, step 3) or
-# "+r_drawentities 0 +r_drawviewmodel 0" for the world alone (step 4); the listen runs get them too.
+# "+r_drawentities 0 +r_drawviewmodel 0" for the world alone (step 4); the listen runs get them too. With the sound
+# build (ref/build.sh with SOUND=1) and EXTRA="-edict2d +showram 0" it writes the sound corpus (data/sound, step 8).
 # Usage: [EXTRA="..."] tools/screens.sh <dir with edict_ref or edict_ref.exe> <out-dir>
 set -eu
 REF="$(cd "$1" && pwd)"

@@ -27,9 +27,9 @@ internal interface IGameWindow : IScreenSink, IMouse, IDisposable
 
 /// <summary>
 /// edict: the game (sys_win.c's WinMain loop). The game directory is -basedir's (default: the current directory,
-/// else EDICT_DATA), the arguments are Quake's ("+map start" when none names a map); each turn of the loop pumps the
-/// window's events and runs Host_Frame with the time since the last turn, which Host_FilterTime holds to 72 frames
-/// a second.
+/// else EDICT_DATA), the arguments are Quake's ("+map start" when none names a map; -nosound for none); each turn of
+/// the loop pumps the window's events and runs Host_Frame with the time since the last turn, which Host_FilterTime
+/// holds to 72 frames a second, and feeds the sound device what the frame mixed.
 /// </summary>
 internal static class Program
 {
@@ -45,7 +45,8 @@ internal static class Program
             Console.Error.WriteLine($"edict: no id1 directory in \"{Path.GetFullPath(basedir)}\" (-basedir <dir> or EDICT_DATA)");
             return 1;
         }
-        // diagnostics: -edictframes <n> ends after n host frames, -edictshot <file.bmp> then saves the last frame
+        // diagnostics: -edictframes <n> ends after n host frames, -edictshot <file.bmp> then saves the last frame,
+        // -edictwav <file.wav> writes the sound to a file
         int maxFrames = int.MaxValue;
         int f = argv.IndexOf("-edictframes");
         if (f >= 0 && f + 1 < argv.Count)
@@ -60,6 +61,13 @@ internal static class Program
             shot = argv[sh + 1];
             argv.RemoveRange(sh, 2);
         }
+        string? wav = null;     // -edictwav <file.wav>: the sound into a file instead of the device
+        int wv = argv.IndexOf("-edictwav");
+        if (wv >= 0 && wv + 1 < argv.Count)
+        {
+            wav = argv[wv + 1];
+            argv.RemoveRange(wv, 2);
+        }
         if (!argv.Contains("+map") && !argv.Contains("+playdemo") && !argv.Contains("+connect"))
             argv.AddRange(["+map", "start"]);
 
@@ -68,10 +76,11 @@ internal static class Program
         IGameWindow window = OperatingSystem.IsWindows() ? new Win32.Win32Window("Edict", gpu)
             : OperatingSystem.IsLinux() ? new X11.X11Window("Edict", gpu)
             : throw new PlatformNotSupportedException("edict: this platform has no window yet");
+        AudioOutput audio = wav is not null ? new AudioOutput.WavFile(wav) : AudioOutput.Open();
         try
         {
             using var files = new QFileSystem(basedir);
-            using Host host = Host.CreateGame(files, argv, [("r_gpu", window.HasGl ? "1" : "0")]);
+            using Host host = Host.CreateGame(files, argv, [("r_gpu", window.HasGl ? "1" : "0")], sound: true);
             Screen screen = host.Screen!;
             screen.Sink = window;
             window.Attach(screen);
@@ -85,7 +94,10 @@ internal static class Program
                 bool ran = host.Frame((float)(newtime - oldtime));     // Host_FilterTime keeps the time it holds back
                 oldtime = newtime;
                 if (ran)
+                {
+                    audio.Feed(host.Sound);
                     window.Render();
+                }
                 else
                     Thread.Sleep(1);
             }
@@ -103,6 +115,7 @@ internal static class Program
         }
         finally
         {
+            audio.Dispose();
             window.Dispose();
         }
     }

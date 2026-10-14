@@ -5,7 +5,7 @@ using Edict.Exact;
 
 namespace Edict.Engine;
 
-/// <summary>cl_tent.c: temporary entities, the lightning beams and their segments (CL_UpdateTEnts). The sounds are output.</summary>
+/// <summary>cl_tent.c: temporary entities, the lightning beams and their segments (CL_UpdateTEnts), and their sounds.</summary>
 public sealed unsafe partial class ClientState
 {
     private const int TeSpike = 0, TeSuperSpike = 1, TeGunshot = 2, TeExplosion = 3, TeTarExplosion = 4,
@@ -69,7 +69,36 @@ public sealed unsafe partial class ClientState
 
     private static readonly SysErrorException BeamModelMissing = new("Mod_NumForName: a beam model not found");
 
-    /// <summary>CL_ParseTEnt: the effect's particles and light; its sound is output (TE_SPIKE and TE_SUPERSPIKE still draw for it).</summary>
+    // cl_sfx_*: CL_InitTEnts' sounds (0 without sound)
+    private int _sfxWizHit, _sfxKnightHit, _sfxTink1, _sfxRic1, _sfxRic2, _sfxRic3, _sfxRExp3;
+
+    /// <summary>CL_InitTEnts: the effects' sounds, precached once (CL_Init, after S_Init).</summary>
+    public void InitTEnts()
+    {
+        if (Sound is not { } s)
+            return;
+        _sfxWizHit = s.PrecacheSound("wizard/hit.wav"u8);
+        _sfxKnightHit = s.PrecacheSound("hknight/hit.wav"u8);
+        _sfxTink1 = s.PrecacheSound("weapons/tink1.wav"u8);
+        _sfxRic1 = s.PrecacheSound("weapons/ric1.wav"u8);
+        _sfxRic2 = s.PrecacheSound("weapons/ric2.wav"u8);
+        _sfxRic3 = s.PrecacheSound("weapons/ric3.wav"u8);
+        _sfxRExp3 = s.PrecacheSound("weapons/r_exp3.wav"u8);
+    }
+
+    /// <summary>A spike hitting a wall: tink1 four times in five, else a ricochet (rand () &amp; 3: 1, 2, or ric3).</summary>
+    private void SpikeSound(in Vec3 pos)
+    {
+        if (Rand.Next() % 5 != 0)
+            Sound?.StartSound(-1, 0, _sfxTink1, pos, 1, 1);
+        else
+        {
+            int rnd = Rand.Next() & 3;
+            Sound?.StartSound(-1, 0, rnd == 1 ? _sfxRic1 : rnd == 2 ? _sfxRic2 : _sfxRic3, pos, 1, 1);
+        }
+    }
+
+    /// <summary>CL_ParseTEnt: the effect's particles, light and sound.</summary>
     private void ParseTEnt()
     {
         MsgReader r = _reader;
@@ -77,21 +106,33 @@ public sealed unsafe partial class ClientState
         switch (type)
         {
             case TeWizSpike:            // spike hitting wall
-                RunParticleEffect(ReadPos(), default, 20, 30);
+            {
+                Vec3 pos = ReadPos();
+                RunParticleEffect(pos, default, 20, 30);
+                Sound?.StartSound(-1, 0, _sfxWizHit, pos, 1, 1);
                 break;
+            }
             case TeKnightSpike:         // spike hitting wall
-                RunParticleEffect(ReadPos(), default, 226, 20);
+            {
+                Vec3 pos = ReadPos();
+                RunParticleEffect(pos, default, 226, 20);
+                Sound?.StartSound(-1, 0, _sfxKnightHit, pos, 1, 1);
                 break;
+            }
             case TeSpike:               // spike hitting wall
-                RunParticleEffect(ReadPos(), default, 0, 10);
-                if (Rand.Next() % 5 == 0)
-                    Rand.Next();        // rnd = rand () & 3: which ricochet sound
+            {
+                Vec3 pos = ReadPos();
+                RunParticleEffect(pos, default, 0, 10);
+                SpikeSound(pos);
                 break;
+            }
             case TeSuperSpike:          // super spike hitting wall
-                RunParticleEffect(ReadPos(), default, 0, 20);
-                if (Rand.Next() % 5 == 0)
-                    Rand.Next();
+            {
+                Vec3 pos = ReadPos();
+                RunParticleEffect(pos, default, 0, 20);
+                SpikeSound(pos);
                 break;
+            }
             case TeGunshot:             // bullet hitting wall
                 RunParticleEffect(ReadPos(), default, 0, 20);
                 break;
@@ -104,11 +145,16 @@ public sealed unsafe partial class ClientState
                 dl.Radius = 350;
                 dl.Die = (float)(Time + 0.5);
                 dl.Decay = 300;
+                Sound?.StartSound(-1, 0, _sfxRExp3, pos, 1, 1);
                 break;
             }
             case TeTarExplosion:        // tarbaby explosion
-                BlobExplosion(ReadPos());
+            {
+                Vec3 pos = ReadPos();
+                BlobExplosion(pos);
+                Sound?.StartSound(-1, 0, _sfxRExp3, pos, 1, 1);
                 break;
+            }
             case TeLightning1:          // lightning bolts
                 ParseBeam(BeamModel("progs/bolt.mdl\0"u8));
                 break;
@@ -138,6 +184,7 @@ public sealed unsafe partial class ClientState
                 dl.Radius = 350;
                 dl.Die = (float)(Time + 0.5);
                 dl.Decay = 300;
+                Sound?.StartSound(-1, 0, _sfxRExp3, pos, 1, 1);
                 break;
             }
             default:

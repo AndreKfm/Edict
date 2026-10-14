@@ -38,6 +38,7 @@ The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the 
 #include "errno.h"
 #include <time.h>
 #include "edict_hash.h"
+void EdictSnd_Frame (void);
 #include "edict_traces.h"
 #include "edict_capture.h"
 
@@ -301,6 +302,9 @@ int main (int argc, char **argv)
 		if (client && frame == 0)
 			EdictHash_ClientStart (client_seed);	// frame 0 ran quake.rc (the configs) and +playdemo
 		EdictHash_ClientFrame ();
+#ifdef EDICT_SOUND
+		EdictSnd_Frame ();		// the sound build: the DMA buffer after the frame (edict_snd.c)
+#endif
 		if (cls.demoplayback)
 			played = 1;
 		else if (played)

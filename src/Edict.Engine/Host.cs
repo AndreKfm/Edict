@@ -15,7 +15,7 @@ namespace Edict.Engine;
 /// in the server.
 /// </summary>
 [NoAllocUnchecked("the host loop: spawning allocates; the server frame is checked in Server")]
-public sealed unsafe class Host : IDisposable
+public sealed unsafe class Host : IDisposable, ISoundHost
 {
     private readonly QFileSystem _files;
     private readonly Progs _progs;
@@ -70,11 +70,17 @@ public sealed unsafe class Host : IDisposable
     /// <param name="randSeed">The rand state before frame 0 (the reference's 'I' record).</param>
     /// <param name="commandLine">The arguments after the program's name.</param>
     /// <param name="cmdline">The cmdline cvar's value.</param>
+    /// <param name="sound">The sound build's sound (snd_dma.c, ref/build.sh SOUND=1) instead of snd_null's.</param>
+    /// <param name="sink">The screen's sink from Host_Init on.</param>
     public Host(QFileSystem files, uint randSeed, Loopback net, int headerBytes, int numBuiltins,
-                IReadOnlyList<string> commandLine, string cmdline, bool withScreen)
-        : this(files, Cvars.FromRegistry(), 1, randSeed, net, headerBytes, numBuiltins, commandLine, cmdline, withScreen)
+                IReadOnlyList<string> commandLine, string cmdline, bool withScreen, bool sound = false, IScreenSink? sink = null)
+        : this(files, Cvars.FromRegistry([], SoundCvars(sound, commandLine)), 1, randSeed, net, headerBytes, numBuiltins,
+               commandLine, cmdline, withScreen, sound: sound, sink: sink)
     {
     }
+
+    /// <summary>Whether S_Init registers its cvars: with sound, unless -nosound stops it first.</summary>
+    internal static bool SoundCvars(bool sound, IReadOnlyList<string> commandLine) => sound && !commandLine.Contains("-nosound");
 
     /// <summary>offsetof (edict_t, v) of the reference on x64 (the captures' map records hold it): 108 bytes.</summary>
     public const int ReferenceEdictHeaderBytes = 108;
@@ -87,20 +93,22 @@ public sealed unsafe class Host : IDisposable
     /// frame clock the platform's (host_framerate stays 0), the platform's cvars (in_win.c's m_filter) after the
     /// reference's, and a console command the port lacks printing that it is not ported instead of stopping.
     /// </summary>
+    /// <param name="sound">The game's sound (snd_dma.c, mixed into <see cref="Sound"/>'s DMA buffer for the platform to play).</param>
     [NoAllocUnchecked("load path")]
     public static Host CreateGame(QFileSystem files, IReadOnlyList<string> commandLine,
-                                  IReadOnlyList<(string Name, string Default)>? platformCvars = null)
+                                  IReadOnlyList<(string Name, string Default)>? platformCvars = null, bool sound = false)
     {
         string cmdline = string.Join(' ', ["edict", .. commandLine]);
         if (cmdline.Length > 255)
             cmdline = cmdline[..255];
-        var cvars = Cvars.FromRegistry([("m_filter", "0"), .. platformCvars ?? []]);
+        var cvars = Cvars.FromRegistry([("m_filter", "0"), .. platformCvars ?? []], SoundCvars(sound, commandLine));
         return new Host(files, cvars, 1, 0, new Loopback(1 << 20), ReferenceEdictHeaderBytes, ReferenceNumBuiltins,
-            commandLine, cmdline, withScreen: true, game: true);
+            commandLine, cmdline, withScreen: true, game: true, sound: sound);
     }
 
     private Host(QFileSystem files, Cvars cvars, int maxclients, uint randSeed, INetServer net, int headerBytes,
-                 int numBuiltins, IReadOnlyList<string>? commandLine, string? cmdline, bool withScreen, bool game = false)
+                 int numBuiltins, IReadOnlyList<string>? commandLine, string? cmdline, bool withScreen, bool game = false,
+                 bool sound = false, IScreenSink? sink = null)
     {
         _files = files;
         Cvars = cvars;
@@ -123,8 +131,10 @@ public sealed unsafe class Host : IDisposable
         {
             Cl = new ClientState(cvars, _models, randSeed, Cmd.Text);
             _console = new ClientConsole(Cmd, cvars, Cl, () => Sv is { Active: true });
+            if (SoundCvars(sound, Cmd.CommandLine))
+                Cmd.UseSoundTable();
             if (cmdline is not null)
-                _console.Startup(files, _models, cmdline, withScreen, harness: !game);
+                _console.Startup(files, _models, cmdline, withScreen, harness: !game, sound: sound ? this : null, sink: sink);
         }
         InitializeTypes();
     }
@@ -137,6 +147,20 @@ public sealed unsafe class Host : IDisposable
 
     /// <summary>A listen server's local client, null for a server alone.</summary>
     public ClientState? Cl { get; }
+
+    /// <summary>The sound of a host with sound, or null.</summary>
+    public Sound? Sound => _console?.Sound;
+
+    private bool _clientReading;    // CL_ReadFromServer runs: the client's copy of the rand stream is the one
+
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    ref CRand ISoundHost.Rand() => ref _clientReading ? ref Cl!.Rand : ref Rand();
+
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    double ISoundHost.RealTime => _realtime;
+
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    double ISoundHost.FrameTime => FrameTime;
 
     /// <summary>
     /// Runs the type initializer of every engine type now, on the load path. The static readonly fields are mostly
@@ -225,7 +249,9 @@ public sealed unsafe class Host : IDisposable
             {
                 ref CRand rand = ref Rand();
                 cl.Rand = rand;
+                _clientReading = true;
                 cl.ReadFromServer();
+                _clientReading = false;
                 rand = cl.Rand;
             }
             // update video (host_frametime as the frame left it: a spawn sets 0.1)
@@ -234,7 +260,8 @@ public sealed unsafe class Host : IDisposable
                 s.FrameTime = FrameTime;
                 s.UpdateScreen();
             }
-            // S_Update and CDAudio_Update are output
+            // update audio; CDAudio_Update is output
+            UpdateSound(_console!, cl);
             if (cl.Signon == ClientState.Signons)
                 cl.DecayLights();
         }
@@ -250,7 +277,22 @@ public sealed unsafe class Host : IDisposable
             return Cvars.Value(n);
     }
 
+    /// <summary>_Host_Frame's S_Update: the listener as the renderer left it once the signon is complete, else at the origin.</summary>
+    internal static void UpdateSound(ClientConsole console, ClientState cl)
+    {
+        if (console.Sound is not { } sound)
+            return;
+        if (cl.Signon == ClientState.Signons && console.Screen is { } s)
+        {
+            s.SoundListener(out Vec3 origin, out Vec3 forward, out Vec3 right, out Vec3 up);
+            sound.Update(origin, forward, right, up);
+        }
+        else
+            sound.Update(default, default, default, default);
+    }
+
     /// <summary>The rand stream: the server's while there is one (it draws from it), the host's before.</summary>
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
     private ref CRand Rand()
     {
         if (Sv is not null)
@@ -272,7 +314,7 @@ public sealed unsafe class Host : IDisposable
             if (Cl.State == ClientState.CaConnected)
                 throw new InvalidOperationException("map while connected (CL_Disconnect) is not ported");
             _console!.Keys.Dest = Keys.KeyGame;     // remove console or menu
-            Screen?.BeginLoadingPlaque();
+            _console.BeginLoadingPlaque();          // stops the sounds, as CL_Disconnect did before it
         }
         _serverflags = 0;   // haven't completed an episode yet
         SpawnServer(Cmd.Argc > 1 ? Cmd.Argv(1) : []);

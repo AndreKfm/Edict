@@ -27,7 +27,7 @@ for emg in "$DATA"/captures/*.emg "$DATA"/long/*.emg; do
 done
 
 # synthetic demos (tools/demogen.py): what the corpus rarely or never sends
-for seed in 1 2 3 4 5 6 7; do
+for seed in 1 2 3 4 5 6 7 8; do
   run="fuzz_$seed"
   $PY -I "$TOOLS/demogen.py" . "$seed" 3000 "id1/edict/$run.dem" > /dev/null
   "$REF/edict_ref$EXE" -edictclient -edictframes 20000 -edictperent -edicthash "$OUT/$run.edh" \

@@ -361,6 +361,10 @@ public sealed unsafe partial class Screen : ClientState.IParticleDrawer
         MarkLeaves();       // done here so we know if we're in water
         if (_cl.Entities[0].Model == null || _cl.WorldModel == null)
             throw NullWorldModel;
+        // S_ExtraUpdate (r_dspeeds 0, which RenderView3D's end requires): the frame's first call, the only one that
+        // paints; those after R_EdgeDrawing, after the brush entities and at the scan's span flushes find the DMA
+        // position where this one left it
+        Sound?.ExtraUpdate();
         EdgeDrawing();
         DrawEntitiesOnList();
         DrawViewModel();

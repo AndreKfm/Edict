@@ -28,6 +28,9 @@ public sealed unsafe class ClientConsole
     /// <summary>keys.c: the bindings, key_dest and the console's input lines.</summary>
     public Keys Keys { get; }
 
+    /// <summary>The sound (the sound build's snd_dma.c), or null for snd_null's.</summary>
+    public Sound? Sound { get; private set; }
+
     public ClientConsole(Cmd cmd, Cvars cvars, ClientState cl, Func<bool> serverActive)
     {
         _cmd = cmd;
@@ -48,11 +51,15 @@ public sealed unsafe class ClientConsole
     /// <summary>
     /// Host_Init's part that a client shows, with the cvars at their defaults (<see cref="Cvars.FromRegistry"/>):
     /// COM_CheckRegistered, Host_FindMaxClients, Con_Init and the console's first lines, VID_Init, Draw_Init, SCR_Init
-    /// and Sbar_Init (when <paramref name="withScreen"/>), R_Init's cvars, and "exec quake.rc" for the first frame.
+    /// (when <paramref name="withScreen"/>), R_Init's cvars, S_Init (with <paramref name="sound"/>), Sbar_Init (with the
+    /// screen), CL_Init's CL_InitTEnts, and "exec quake.rc" for the first frame.
     /// </summary>
     /// <param name="cmdline">The cmdline cvar's value (com_cmdline: the program's name too, at most 255 characters).</param>
     /// <param name="harness">host_framerate as the reference's harness sets it (edict_sys.c); a game keeps it 0.</param>
-    public void Startup(QFileSystem files, ModelCache models, string cmdline, bool withScreen, bool harness = true)
+    /// <param name="sound">The host for a sound of the sound build's; null: snd_null's.</param>
+    /// <param name="sink">Where the screen's frames go from Con_Init on (S_Init's console lines present the screen).</param>
+    public void Startup(QFileSystem files, ModelCache models, string cmdline, bool withScreen, bool harness = true,
+                        ISoundHost? sound = null, IScreenSink? sink = null)
     {
         // COM_CheckRegistered (in COM_Init, before Con_Init: its print reaches only stdout)
         if (files.Registered)
@@ -65,7 +72,7 @@ public sealed unsafe class ClientConsole
             _cvars.SetValue(n, 0);
         if (withScreen)
         {
-            Screen s = new(files, _cvars, _cl, Keys);       // Con_Init
+            Screen s = new(files, _cvars, _cl, Keys) { Sink = sink };     // Con_Init
             Screen = s;
             _cmd.Con = s;
             _cl.Con = s;
@@ -73,14 +80,27 @@ public sealed unsafe class ClientConsole
             s.Printf("32.0 megabyte heap\n"u8);           // "%4.1f megabyte heap": -mem, 32 by default
             s.InitVideo();
             s.InitScreen();
-            s.InitSbar();
-            s.AddConsoleCommands(_cmd);
         }
         // R_Init: the surface and edge counts of the stack-based renderer
         fixed (byte* n = "r_maxedges\0"u8)
             _cvars.SetValue(n, 2400);    // NUMSTACKEDGES
         fixed (byte* n = "r_maxsurfs\0"u8)
             _cvars.SetValue(n, 800);     // NUMSTACKSURFACES
+        if (sound is not null)
+        {
+            Sound snd = new(files, _cmd, _cvars, _cl, sound);
+            Sound = snd;
+            _cl.Sound = snd;
+            if (Screen is { } sc)
+                sc.Sound = snd;
+            snd.Init(_cmd.CommandLine);     // S_Init: its console lines are the screen's first presents
+        }
+        if (Screen is { } screen)
+        {
+            screen.InitSbar();
+            screen.AddConsoleCommands(_cmd);
+        }
+        _cl.InitTEnts();                    // CL_Init
         _cmd.InsertText("exec quake.rc\n"u8);
         if (harness)
             SetCvar("host_framerate", ClientHost.HarnessFrameRate);     // edict_sys.c, after Host_Init
@@ -96,8 +116,17 @@ public sealed unsafe class ClientConsole
     /// <summary>Host_Reconnect_f: the loading plaque, and new connection messages.</summary>
     public void Reconnect()
     {
-        Screen?.BeginLoadingPlaque();
+        BeginLoadingPlaque();
         _cl.Signon = 0;
+    }
+
+    /// <summary>SCR_BeginLoadingPlaque: the sounds stopped, and the plaque where there is a screen.</summary>
+    public void BeginLoadingPlaque()
+    {
+        if (Screen is { } s)
+            s.BeginLoadingPlaque();
+        else
+            Sound?.StopAllSounds(true);
     }
 
     /// <summary>Host_Startdemos_f: the demo loop's names; it starts only when nothing plays and no server runs.</summary>

@@ -68,6 +68,32 @@ public sealed class QFileSystem : IDisposable
 
     public QFile? Find(string name) => Find(Encoding.Latin1.GetBytes(name));
 
+    /// <summary>
+    /// The names on the search path that start with <paramref name="prefix"/> and end with <paramref name="suffix"/>,
+    /// each once: the paks' entries, and the files under the game directories (relative, with '/'), for a lookup
+    /// table built on the load path (<see cref="Find(ReadOnlySpan{byte})"/> decides which one a name means).
+    /// </summary>
+    public List<byte[]> Names(string prefix, string suffix)
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (SearchPath s in _path)
+        {
+            switch (s)
+            {
+                case PackPath p:
+                    for (int i = 0; i < p.Pack.NumFiles; i++)
+                        names.Add(Encoding.Latin1.GetString(p.Pack.Name(i)));
+                    break;
+                case DirectoryPath d when System.IO.Directory.Exists(d.Directory):
+                    foreach (string f in System.IO.Directory.EnumerateFiles(d.Directory, "*", SearchOption.AllDirectories))
+                        names.Add(System.IO.Path.GetRelativePath(d.Directory, f).Replace('\\', '/'));
+                    break;
+            }
+        }
+        return names.Where(n => n.StartsWith(prefix, StringComparison.Ordinal) && n.EndsWith(suffix, StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal).Select(n => Encoding.Latin1.GetBytes(n)).ToList();
+    }
+
     private unsafe QFile? FindLoose(string path)
     {
         if (!_loose.TryGetValue(path, out MappedFile? file))

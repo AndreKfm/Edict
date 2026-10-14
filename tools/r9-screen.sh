@@ -10,10 +10,13 @@
 # Sanitizer reports: an AddressSanitizer error fails; of UBSan's, the kinds docs/PLAN.md E.3 records for the
 # renderer and the client pass (misaligned surfcache_t, signed overflow and shifts, a float out of int's range,
 # the null-pointer offsetof idiom, the known sites), and any other fails. BUILDS="o0" (or "asan") runs one build.
-# Usage: [BUILDS="o0 asan"] tools/r9-screen.sh [work dir] [reference dir]
+# The sound corpus (step 8): CORPUS=sound SOUND=1 EXTRA="-edict2d +showram 0" builds the sound build and compares
+# with data/sound, its sound records included; keep the work dir's path short (the cmdline cvar keeps 255 characters).
+# Usage: [BUILDS="o0 asan"] [CORPUS=screen] tools/r9-screen.sh [work dir] [reference dir]
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 WORK="${1:-$HOME/r9-screen}"
+CORPUS="${CORPUS:-screen}"
 PY="python3"; command -v python3 > /dev/null || PY="python"
 if [ $# -ge 2 ]; then
   builds="given"; mkdir -p "$WORK"; ln -sfn "$(cd "$2" && pwd)" "$WORK/build-given" 2> /dev/null || cp -r "$2" "$WORK/build-given"
@@ -37,8 +40,8 @@ for m in $builds; do
     echo "$m: sanitizer reports (above)"
     fail=1
   fi
-  for edh in "$REPO"/data/screen/*.edh "$REPO"/data/screen/listen/*.edh; do
-    rel="${edh#"$REPO/data/screen/"}"
+  for edh in "$REPO"/data/$CORPUS/*.edh "$REPO"/data/$CORPUS/listen/*.edh; do
+    rel="${edh#"$REPO/data/$CORPUS/"}"
     out="$($PY -I "$REPO/tools/edh.py" diff "$edh" "$WORK/$m/$rel" 2>&1)" || { fail=1; echo "$rel $m: $out" | head -2; continue; }
     printf "%-28s release vs %-5s %s\n" "$rel" "$m" "$(echo "$out" | tr '\n' ';' | cut -c1-110)"
   done

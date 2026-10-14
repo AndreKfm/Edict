@@ -97,7 +97,12 @@ public sealed unsafe class ClientHash
         for (int i = 0; i < ClientState.MaxModels; i++)
             PutModel((Model*)cl.ModelPrecache[i]);
         for (int i = 0; i < ClientState.MaxSounds; i++)
-            Put8(0);                    // snd_null precaches no sfx: every name is ""
+        {   // the sfx's name; "" for none (snd_null precaches no sfx: every name is "")
+            if (cl.Sound is { } sound && cl.SoundPrecache[i] != 0)
+                foreach (byte b in sound.SfxName(cl.SoundPrecache[i]))
+                    Put8(b);
+            Put8(0);
+        }
         PutString(cl.LevelName);
         Put32((uint)cl.ViewEntity); Put32((uint)cl.MaxClients); Put32((uint)cl.GameType);
         PutModel(cl.WorldModel);

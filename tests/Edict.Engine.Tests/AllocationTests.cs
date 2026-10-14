@@ -112,13 +112,16 @@ public sealed class AllocationTests
 
     /// <summary>
     /// A player's game (<see cref="Host.CreateGame"/>, P6 step 6): after the spawn, frames with a key held (+forward,
-    /// +attack), the mouse moving under +mlook and a weapon impulse allocate nothing but those that ran a command.
+    /// +attack), the mouse moving under +mlook and a weapon impulse allocate nothing but those that ran a command;
+    /// with the sound (step 8) its mix, the sounds it starts and their first loads too.
     /// </summary>
-    [Fact]
-    public void Game_frames_allocate_nothing()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Game_frames_allocate_nothing(bool sound)
     {
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
-        using Host host = Host.CreateGame(files, ["+map", "start"]);
+        using Host host = Host.CreateGame(files, ["+map", "start"], sound: sound);
         host.Cl!.Mouse = new CirclingMouse();
         for (int i = 0; i < 200; i++)
             host.Frame(0.014f);
@@ -152,13 +155,22 @@ public sealed class AllocationTests
     /// </summary>
     [Theory]
     [MemberData(nameof(ScreenRuns))]
-    public void Screen_frames_allocate_nothing(string run)
+    public void Screen_frames_allocate_nothing(string run) => ScreenFramesAllocateNothing(FullFrameGateTests.FullDirectory, run, false);
+
+    public static IEnumerable<TheoryDataRow<string>> SoundRuns => SoundGateTests.Runs;
+
+    /// <summary>The sound corpus' runs with the sound (P6 step 8): the mix, the sounds started and their first loads allocate nothing either.</summary>
+    [Theory]
+    [MemberData(nameof(SoundRuns))]
+    public void Sound_frames_allocate_nothing(string run) => ScreenFramesAllocateNothing(SoundGateTests.SoundDirectory, run, true);
+
+    private static void ScreenFramesAllocateNothing(string dir, string run, bool sound)
     {
-        var edh = new EdhFile(Path.Combine(FullFrameGateTests.FullDirectory, run + ".edh"));
+        var edh = new EdhFile(Path.Combine(dir, run + ".edh"));
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         string cmdline = Encoding.Latin1.GetString(edh.ClientCvars.First(c => Encoding.Latin1.GetString(c.Name) == "cmdline").Value);
         string[] args = cmdline.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1..];
-        using var host = new ClientHost(files, edh.ClientRandState, args, cmdline, withScreen: true);
+        using var host = new ClientHost(files, edh.ClientRandState, args, cmdline, withScreen: true, sound: sound);
         float time = float.Parse(ClientHost.HarnessFrameRate, System.Globalization.CultureInfo.InvariantCulture);
         var allocating = new List<(int Frame, long Bytes)>();
         int commandFrames = 0;

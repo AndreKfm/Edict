@@ -71,10 +71,28 @@ public sealed unsafe class Cmd
         for (int i = Registry.Commands.Length - 1; i >= 0; i--)
             if (Registry.Commands[i].StartsWith(p, StringComparison.Ordinal))
                 return System.Text.Encoding.Latin1.GetBytes(Registry.Commands[i]);
-        foreach (Registry.CvarDef c in Registry.Cvars)
+        if (_sound)
+            for (int i = Sound.Commands.Length - 1; i >= 0; i--)
+                if (Sound.Commands[i].StartsWith(p, StringComparison.Ordinal))
+                    return System.Text.Encoding.Latin1.GetBytes(Sound.Commands[i]);
+        foreach (Registry.CvarDef c in _sound ? Sound.RegistryCvars() : Registry.Cvars)
             if (c.Name.StartsWith(p, StringComparison.Ordinal))
                 return System.Text.Encoding.Latin1.GetBytes(c.Name);
         return null;
+    }
+
+    private bool _sound;
+
+    /// <summary>
+    /// The sound build's table (S_Init's commands, <see cref="Sound.Commands"/>) for a host with sound: before
+    /// S_Init registers them. Completion finds them after the table's (C's newest first is approximated: S_Init's
+    /// come after most of Host_Init's), and S_Init's cvars in the cvar list.
+    /// </summary>
+    public void UseSoundTable()
+    {
+        _sound = true;
+        foreach (string c in Sound.Commands)
+            _registered.Add(c);
     }
 
     /// <summary>Cmd_AddCommand for a command of the reference's table.</summary>
