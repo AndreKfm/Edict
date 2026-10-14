@@ -9,7 +9,7 @@ namespace Edict.Engine;
 /// What the server sends its clients at the end of a frame (sv_main.c): SV_SendClientMessages with
 /// SV_UpdateToReliableMessages, SV_SendClientDatagram, SV_WriteEntitiesToClient with SV_FatPVS, SV_SendNop and
 /// SV_CleanupEnts; and SV_SendReconnect when a new map spawns. Every message goes to the client's connection, whose
-/// bytes the messages lane hashes. Dropping a client is not ported yet and stops with an error.
+/// bytes the messages lane hashes; a connection that fails or overflows drops its client.
 /// </summary>
 public sealed unsafe partial class Server
 {
@@ -229,7 +229,10 @@ public sealed unsafe partial class Server
 
         // send the datagram
         if (client.NetConnection!.SendUnreliableMessage(msg) == -1)
-            throw DropNotPorted;    // SV_DropClient (true): if the message couldn't send, kick off
+        {
+            DropClient(true);       // if the message couldn't send, kick off
+            return false;
+        }
         return true;
     }
 
@@ -274,7 +277,7 @@ public sealed unsafe partial class Server
         msg.Clear();
         msg.WriteChar(SvcNop);
         if (client.NetConnection!.SendUnreliableMessage(msg) == -1)
-            throw DropNotPorted;    // SV_DropClient (true): if the message couldn't send, kick off
+            DropClient(true);       // if the message couldn't send, kick off
         client.LastMessage = RealTime;
     }
 
@@ -312,21 +315,29 @@ public sealed unsafe partial class Server
                 }
             }
 
-            // check for an overflowed message
+            // check for an overflowed message. Should only happen on a very fucked up connection that backs up a lot,
+            // then changes level
             if (host.Message.Overflowed)
-                throw DropNotPorted;    // SV_DropClient (true)
+            {
+                DropClient(true);
+                host.Message.Overflowed = false;
+                continue;
+            }
 
             if (host.Message.CurSize != 0 || host.DropAsap)
             {
                 if (!host.NetConnection!.CanSendMessage())
                     continue;
                 if (host.DropAsap)
-                    throw DropNotPorted;    // SV_DropClient (false): went to another level
-                if (host.NetConnection.SendMessage(host.Message) == -1)
-                    throw DropNotPorted;    // SV_DropClient (true): if the message couldn't send, kick off
-                host.Message.Clear();
-                host.LastMessage = RealTime;
-                host.SendSignon = false;
+                    DropClient(false);  // went to another level (nothing in WinQuake sets dropasap)
+                else
+                {
+                    if (host.NetConnection.SendMessage(host.Message) == -1)
+                        DropClient(true);   // if the message couldn't send, kick off
+                    host.Message.Clear();
+                    host.LastMessage = RealTime;
+                    host.SendSignon = false;
+                }
             }
         }
 

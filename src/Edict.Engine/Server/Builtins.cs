@@ -22,7 +22,7 @@ public static unsafe class Builtins
     public const int MakeVectors = 1, Random = 7, Normalize = 9, Vlen = 12, VectoYaw = 13, PrecacheSound = 19,
         PrecacheModel = 20, Ftos = 26, Vtos = 27, Rint = 36, Floor = 37, Ceil = 38, Fabs = 43, Cvar = 45,
         ChangeYaw = 49, VectoAngles = 51, PrecacheFile = 68, CvarSet = 72, PrecacheModel2 = 75, PrecacheSound2 = 76,
-        PrecacheFile2 = 77, Spawn = 14, Remove = 15, Find = 18, FindRadius = 22, NextEnt = 47, MakeStatic = 69;
+        PrecacheFile2 = 77, SetSpawnParms = 78, Spawn = 14, Remove = 15, Find = 18, FindRadius = 22, NextEnt = 47, MakeStatic = 69;
 
     private const int OfsReturn = QcVm.OfsReturn, OfsParm0 = QcVm.OfsParm0, OfsParm1 = QcVm.OfsParm0 + 3;
 
@@ -35,7 +35,7 @@ public static unsafe class Builtins
             or SetOrigin or SetModel or SetSize or CheckClient or Aim or Lightstyle or AmbientSound
             or Sound or StuffCmd or Bprint or Sprint or Dprint or LocalCmd or Particle or WriteByte or WriteChar or WriteShort
             or WriteLong or WriteCoord or WriteAngle or WriteString or WriteEntity or ChangeLevel or CenterPrint
-            or TraceLine or WalkMove or DropToFloor or CheckBottom or PointContents or MoveToGoal => true,
+            or TraceLine or WalkMove or DropToFloor or CheckBottom or PointContents or MoveToGoal or SetSpawnParms => true,
         _ => false,
     };
 
@@ -77,6 +77,7 @@ public static unsafe class Builtins
             case CheckBottom: *sv.G(OfsReturn) = sv.CheckBottom(GEdict(sv, OfsParm0)) ? 1 : 0; break;
             case PointContents: *sv.G(OfsReturn) = sv.PointContents(*V(sv, OfsParm0)); break;
             case MoveToGoal: sv.MoveToGoal(); break;
+            case SetSpawnParms: PF_setspawnparms(sv); break;
             case CheckClient: ReturnEdict(sv, sv.CheckClient()); break;
             case Aim: PF_aim(sv); break;
             case Lightstyle: PF_lightstyle(sv); break;
@@ -103,6 +104,19 @@ public static unsafe class Builtins
     }
 
     private static readonly HostErrorException NotPorted = new("builtin not ported");
+    private static readonly HostErrorException SpawnParmsNotAClient = new("Entity is not a client");
+
+    /// <summary>setspawnparms (entity): the client's spawn parms into parm1..16 (a coop player's respawn).</summary>
+    private static void PF_setspawnparms(Server sv)
+    {
+        int i = GEdictNum(sv, OfsParm0);
+        if (i < 1 || i > sv.MaxClients)
+            throw sv.Vm.RunError(SpawnParmsNotAClient);
+        // copy spawn parms out of the client_t
+        Client client = sv.Clients[i - 1];
+        for (int j = 0; j < Client.NumSpawnParms; j++)
+            *sv.G(GlobalVars.Parm1 + j) = client.SpawnParms[j];
+    }
 
     private static Vec3* V(Server sv, int ofs) => (Vec3*)sv.G(ofs);
 

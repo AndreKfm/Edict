@@ -33,24 +33,23 @@ public sealed class EmgFile
             byte kind = d[p];
             uint fc = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(p + 1));
             int n = BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(p + 5));
-            switch (kind)
-            {
-                case 1:
-                case 2:
-                    current.WriteByte(kind);            // kind and length, as the lane has them
-                    current.Write(d, p + 5, 4 + n);
-                    break;
-                case (byte)'S':
-                    spawns.Add(current.ToArray());
-                    current.SetLength(0);
-                    break;
-                case (byte)'F':
-                    frames[fc] = current.ToArray();
-                    current.SetLength(0);
-                    break;
-                default:
-                    throw new InvalidDataException($"{path}: bad record {kind} at {p}");
+            if ((kind & 15) is 1 or 2)
+            {   // a message: its type, plus 16 times its client (tape version 2)
+                current.WriteByte(kind);                // kind and length, as the lane has them
+                current.Write(d, p + 5, 4 + n);
             }
+            else if (kind == 'S')
+            {
+                spawns.Add(current.ToArray());
+                current.SetLength(0);
+            }
+            else if (kind == 'F')
+            {
+                frames[fc] = current.ToArray();
+                current.SetLength(0);
+            }
+            else
+                throw new InvalidDataException($"{path}: bad record {kind} at {p}");
             p += 9 + n;
         }
         Spawns = spawns;

@@ -251,6 +251,7 @@ public sealed class ScreenGateTests
         h = host;
         host.Screen!.Only2D = only2D;
         int spawn = 0, nextClient = 0, nextSound = 0;
+        bool played = false;
         string? failure = null;
         StateHash? hash = null;
         var clientHash = new ClientHash();
@@ -273,7 +274,10 @@ public sealed class ScreenGateTests
             loop.TakeSent();
         };
         float time = float.Parse(ClientHost.HarnessFrameRate, System.Globalization.CultureInfo.InvariantCulture);
-        for (int frame = 0; frame < edh.Frames && failure is null; frame++)
+        // the run's host frames: its last record's framecount (frames without a server write no frame record)
+        int total = (int)Math.Max(edh.FrameRecords.Keys.DefaultIfEmpty(0u).Max(),
+                                  edh.ClientFrames.Select(c => c.FrameCount).DefaultIfEmpty(0u).Max());
+        for (int frame = 0; frame < total && failure is null; frame++)
         {
             try
             {
@@ -293,7 +297,15 @@ public sealed class ScreenGateTests
                 failure = CvarDifference(host.Cvars, edh.ClientCvars);
             if (failure is not null)
                 break;
-            if (host.Sv is { Active: true } sv)
+            // the reference's run ends with a demo the client played: after that frame's client record, no frame record
+            bool demoEnded = played && !host.Cl!.DemoPlayback;
+            played |= host.Cl!.DemoPlayback;
+            if (!demoEnded && host.Sv is not { Active: true } && edh.FrameRecords.ContainsKey((uint)host.FrameCount))
+            {
+                failure = $"frame {frame}: the reference's server ran frame {host.FrameCount}, the port's is not active";
+                break;
+            }
+            if (!demoEnded && host.Sv is { Active: true } sv)
             {
                 if (!edh.FrameRecords.TryGetValue((uint)host.FrameCount, out EdhFile.Frame r))
                 {
@@ -314,7 +326,11 @@ public sealed class ScreenGateTests
             }
             ClientState cl = host.Cl!;
             if (cl.State != ClientState.CaConnected)
+            {
+                if (demoEnded)
+                    break;
                 continue;
+            }
             if (nextClient >= edh.ClientFrames.Count)
             {
                 failure = $"frame {frame}: the reference wrote no more client records";
@@ -336,6 +352,8 @@ public sealed class ScreenGateTests
                 failure = $"frame {frame}: client effects lane differs";
             else
                 frames++;
+            if (demoEnded)
+                break;
         }
         presents = sink.Next - (sink.Failure is null ? 0 : 1);
         failure ??= sink.Failure;

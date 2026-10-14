@@ -10,6 +10,8 @@
 set -eu
 MODE="$1"; OUT="$2"
 CC="${CC:-clang}"; LIBS="${LIBS--lm}"; EXE="${EXE:-}"; EXTRA_CFLAGS="${EXTRA_CFLAGS:-}"
+# net_dgrm.c's ban (inet_ntoa, inet_addr) is Winsock's on Windows
+if [ "$EXE" = ".exe" ]; then LIBS="$LIBS -lws2_32"; fi
 REF="$(cd "$(dirname "$0")" && pwd)"
 rm -rf "$OUT" && mkdir -p "$OUT/src" "$OUT/obj"
 cp -r "$REF/upstream/WinQuake/." "$OUT/src/"
@@ -19,7 +21,7 @@ for p in "$REF"/patches/*.patch; do
 done
 cp "$REF"/src/*.c "$REF"/src/*.h "$OUT/src/"
 FILES="edict_sys edict_hash edict_traces edict_capture edict_xxh64 edict_libc edict_libm edict_oracle cl_demo cl_input cl_main cl_parse cl_tent chase cmd common console crc cvar draw host host_cmd keys
- mathlib edict_menu model nonintel net_loop net_main edict_tape net_vcr pr_cmds pr_edict pr_exec
+ mathlib edict_menu model nonintel net_loop net_main net_dgrm edict_memnet edict_tape net_vcr pr_cmds pr_edict pr_exec
  r_aclip r_alias r_bsp r_draw r_edge r_efrag r_light r_main r_misc r_part r_sky r_sprite r_surf r_vars
  d_edge d_fill d_init d_modech d_part d_polyse d_scan d_sky d_sprite d_surf d_vars d_zpoint
  sbar screen snd_null cd_null in_null edict_vid sv_main sv_move sv_phys sv_user view wad world zone"

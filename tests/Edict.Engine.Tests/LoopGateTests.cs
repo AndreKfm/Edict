@@ -26,9 +26,13 @@ public sealed unsafe class LoopGateTests
     /// The first difference, or null; <paramref name="frames"/> gets the number of frames that hashed alike. The
     /// inputs at the first spawn come from the corpus capture of <paramref name="map"/>.
     /// </summary>
-    internal static string? FirstDivergence(string map, string edhPath, string tapePath, out int frames, out int spawns)
+    internal static string? FirstDivergence(string map, string edhPath, string tapePath, out int frames, out int spawns) =>
+        FirstDivergence(map, edhPath, tapePath, Path.Combine(VmReplay.Directory, map + ".ecp"), out frames, out spawns);
+
+    /// <summary>As above, the inputs at the first spawn from <paramref name="capture"/>.</summary>
+    internal static string? FirstDivergence(string map, string edhPath, string tapePath, string capture, out int frames,
+                                            out int spawns)
     {
-        string capture = Path.Combine(VmReplay.Directory, map + ".ecp");
         SpawnInputs inputs = VmReplay.FirstSpawn(capture);
         var edh = new EdhFile(edhPath);
         string emgPath = Path.ChangeExtension(edhPath, ".emg");

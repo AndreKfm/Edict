@@ -28,3 +28,9 @@ symbol = "cs:*/M:System.Globalization.NumberFormatInfo.get_InvariantInfo"
 constraints = ["All"]
 runtime = "*"
 reason = "returns the cached invariant NumberFormatInfo; the first access initializes the invariant culture once (map load, not the frame loop)"
+
+[[member]]
+symbol = "cs:*/M:System.Runtime.InteropServices.Marshal.GetLastPInvokeError"
+constraints = ["All"]
+runtime = "*"
+reason = "reads the error the marshaller saved after a SetLastError import (the UDP driver's EAGAIN); a thread-static field, no allocation"

@@ -59,15 +59,15 @@ public sealed unsafe class Loopback : INetServer
             return ret;
         }
 
-        /// <summary>Loop_SendMessage.</summary>
+        /// <summary>Loop_SendMessage; the harness logs the server's message before (edict_tape.c), a failing one too.</summary>
         public int SendMessage(SizeBuf data)
         {
+            if (IsServer)
+                Owner.Log(1, data);
             if (Peer is not { } peer)
                 return -1;
             if (peer.ReceiveLength + data.CurSize + 4 > NetMaxMessage)
                 throw SendOverflow;
-            if (IsServer)
-                Owner.Log(1, data);
             Write(peer, 1, data);
             CanSend = false;
             return 1;
@@ -76,10 +76,10 @@ public sealed unsafe class Loopback : INetServer
         /// <summary>Loop_SendUnreliableMessage: a message that does not fit is dropped (0).</summary>
         public int SendUnreliableMessage(SizeBuf data)
         {
-            if (Peer is not { } peer)
-                return -1;
             if (IsServer)
                 Owner.Log(2, data);
+            if (Peer is not { } peer)
+                return -1;
             if (peer.ReceiveLength + data.CurSize + 1 + 2 > NetMaxMessage)    // sizeof(byte) + sizeof(short)
                 return 0;
             if (peer.ReceiveLength + data.CurSize + 4 > NetMaxMessage)
@@ -90,6 +90,19 @@ public sealed unsafe class Loopback : INetServer
 
         /// <summary>Loop_CanSendMessage.</summary>
         public bool CanSendMessage() => Peer != null && CanSend;
+
+        /// <summary>The address Loop_Connect gives: "localhost" the client's end, "LOCAL" the server's.</summary>
+        public ReadOnlySpan<byte> Address => IsServer ? "LOCAL"u8 : "localhost"u8;
+
+        /// <summary>Loop_Close: the peer unlinked, both buffers emptied.</summary>
+        public void Close()
+        {
+            if (Peer is { } peer)
+                peer.Peer = null;
+            Peer = null;
+            ReceiveLength = 0;
+            CanSend = true;
+        }
 
         private static void Write(Socket peer, int type, SizeBuf data)
         {

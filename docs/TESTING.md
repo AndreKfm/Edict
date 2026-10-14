@@ -220,6 +220,14 @@ the sound. The platform's output has no reference: `edict -edictwav <file.wav> -
 what it would play (dev has sound where the player stands; start has none). `tools/demogen.py` seed 8 (in
 `tools/demos.sh`; recorded for data/sound with `ONLY=fuzz_8`) is the sound's profile. R7 group `sound`.
 
+P6, step 9: `MultiGateTests` on data/multi (`sh tools/multis.sh ~/edict-ref data/multi`; `EDICT_MULTI` for another
+directory), the dedicated server with four slots and the clients of a version 2 tape, every frame and spawn record
+and the messages to each client. The listen gates cover the local client's side (data/listen and data/screen/listen:
+start-client-cmds, start-playdemo, lq_e0m1-disconnect, start-argv). `DatagramFuzzTests` is net_dgrm.c's level 1: it needs the
+oracle of version 9 (built with `ref/build.sh`: net_dgrm.c and `ref/src/edict_memnet.c` are in it).
+`tools/r9-net.sh` is R9 for the multiplayer corpus and the new listen runs (release and ASan by default). R7 groups
+`multi`, `listennet`, `datagram`.
+
 ### Test tiers (2026-10-13)
 
 Not every change needs every test. Three tiers, chosen by what a run has to answer:

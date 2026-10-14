@@ -17,6 +17,12 @@ void M_Menu_Main_f (void) {}
 void M_Menu_Quit_f (void) {}
 void M_DrawPic (int x, int y, qpic_t *pic) {}
 
+// menu.c's state that net_dgrm.c's _Datagram_Connect reads and sets on a failed connect (m_return_onerror stays false)
+int			m_state;
+int			m_return_state;
+qboolean	m_return_onerror;
+char		m_return_reason[32];
+
 #ifdef _WIN32
 // cl_parse.c calls this under _WIN32 (vid_win.c); the null video driver has no window to pause.
 void VID_HandlePause (qboolean pause) {}

@@ -932,6 +932,48 @@ float, the ambient threshold at 4 (no view stands in a leaf of ambient level 14 
 resampled sound (LibreQuake's one, comp1.wav, loops from 0). R9 of the sound build with patch 0011: Linux release and
 ASan/UBSan and Windows -O0 write data/sound record for record (no sanitizer report); the Linux release build is
 the Windows one's too. Not tested against a device: ALSA (WSL has no libasound; the game runs silent there).
+Step 9 (2026-10-14), the network: by the owner's decision in full, the exact parts gated as the rest and only the
+sockets outside the proof. (9.1) The server with several clients: version 2 of the tape (`ref/src/edict_tape.c`,
+`tools/tapegen.py --clients`): up to 16 clients, each record tagged with its client, records for a read error, failing
+sends and a connection that cannot send (busy, as a datagram connection waiting for its ack); in the messages lane a
+message's kind is its type plus 16 times its client (version 1 tapes and their lanes are unchanged). The port:
+SV_DropClient (the svc_disconnect, ClientDisconnect, the slot's notices), the drops on a failed read, send or
+overflow, the host commands a client sends (status, god, notarget, fly, noclip, ping, say, say_team, tell, kill,
+pause, kick, give; a name the prefixes let through that is no command prints "Unknown command" on the server's
+console), the builtin setspawnparms (a coop respawn). Corpus `data/multi` (`tools/multis.sh`): six runs of 6,000
+frames, deathmatch and coop with four slots: clients that join and leave, reconnect, lose the connection, overflow a
+connection that cannot send while the others flood it, connect for over a minute (status), share a name (tell), and
+send the commands, the cheats refused in deathmatch. Gate `MultiGateTests` (the cut-3 comparisons). (9.2) The local
+client: CL_Disconnect, Host_ShutdownServer (the last messages, svc_disconnect to all, the drops), map while playing,
+disconnect, Cmd_ForwardToServer (say, tell, the cheats, ping, pause, give, cmd, name and color while connected),
+status and kick run by a listen server itself (host_client stands past the clients at the frame's start, so a kick
+from the console can kick its own client), the console's "not valid from the console" lines, and a listen
+server's Con_Printf of the clients' commands on its own console (renamed, Unknown command, prespawn not valid).
+Found by the gates: COM_InitArgv keeps 50 arguments (MAX_NUM_ARGVS), a "+" command ends with the space before the
+next "+", the rest of quake.rc (startdemos, a wait) runs after the command line's commands, and the harness logs a
+server's message to a closed loopback socket before the send fails. Listen runs `start-client-cmds`,
+`lq_e0m1-disconnect`, `start-argv` in data/listen and data/screen/listen; the listen gates run quake.rc as the
+reference's frame 0 and every host frame of the run. (9.3) net_dgrm.c at level 1: the oracle (version 9) links
+net_dgrm.c with a LAN driver in memory (`ref/src/edict_memnet.c`: net_udp.c's answers, the written packets in an
+outbox, the read ones from inboxes the test fills, a clock that each read advances); the port's `Datagram`
+(`src/Edict.Engine/Net/Datagram.cs`, with net_main.c's qsocket pool) on its twin. `DatagramFuzzTests` give both the
+same calls and packets: control requests (connect, repeated, refused, a full server, server info, wrong lengths),
+the client's handshake (accept, reject, a bad reply, no reply until the three tries end), and on the connections
+reliable messages over several packets and their acks, unreliable ones, lost, repeated, reordered, forged, short and
+control packets, stale sequences, resends; the returns, net_message, the packets and every socket's state and the
+counters are compared. Kept as in C: one static packet buffer (a header claiming more than came keeps an older
+packet's bytes), a stale unreliable datagram ends a read. R7 groups `multi`, `listennet`, `datagram`: multi 34
+detected and 1 known (a name over 16 characters); datagram 30 and 3 known (an ack before the last, CanSendMessage's
+next packet, the order of the active sockets); listennet all but 3 known, which need a remote client or server (the
+clc_disconnect a listen server never reads, the drops at its shutdown, a console kick of the last slot). Found by R7:
+the listen gates checked only that a frame the port's server ran was one the reference's ran, not the reverse (both
+ways now); `prespawn silent` hid behind the forwarded says, whose answers pushed its line out of the notify lines
+before a present (a wait now stands between them); a demo played while a listen server runs, then a map
+(`start-playdemo`: CL_Disconnect alone shuts the server down; the loading plaque over the demo), which brought
+CL_PlayDemo_f to the listen host. The gates end a run as the reference's harness does, with the frame a played demo
+ends in. R9 (`tools/r9-net.sh`): Linux release and ASan/UBSan write data/multi and the step's listen runs record for
+record; the sanitizer's reports are the original's known ones (draw.c, model.c) and the offsetof idiom of
+EDICT_FROM_AREA in `edict_capture.c`, filtered as in `tools/r9-screen.sh`.
 
 ## D. Effort at 7 h/week (calendar weeks)
 

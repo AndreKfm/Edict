@@ -62,6 +62,16 @@ public sealed unsafe class SizeBuf
         return d;
     }
 
+    /// <summary>SZ_Print: the text and its zero, over the zero a previous print left at the end.</summary>
+    public void Print(ReadOnlySpan<byte> text)
+    {
+        int len = text.Length + 1;
+        byte* d = Data[CurSize - 1] != 0 ? GetSpace(len) : GetSpace(len - 1) - 1;    // write over trailing 0
+        for (int i = 0; i < text.Length; i++)
+            d[i] = text[i];
+        d[text.Length] = 0;
+    }
+
     /// <summary>SZ_Write.</summary>
     public void Write(byte* data, int length)
     {
@@ -99,6 +109,18 @@ public sealed unsafe class SizeBuf
     }
 
     /// <summary>MSG_WriteString: the string and its terminator; "" for null.</summary>
+    /// <summary>MSG_WriteString of a text in a span: up to its first zero (or its end), and the zero.</summary>
+    public void WriteString(ReadOnlySpan<byte> s)
+    {
+        int n = 0;
+        while (n < s.Length && s[n] != 0)
+            n++;
+        byte* d = GetSpace(n + 1);
+        for (int i = 0; i < n; i++)
+            d[i] = s[i];
+        d[n] = 0;
+    }
+
     public void WriteString(byte* s)
     {
         if (s == null)

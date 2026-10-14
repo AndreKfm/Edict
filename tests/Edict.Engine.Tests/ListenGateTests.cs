@@ -15,6 +15,8 @@ namespace Edict.Engine.Tests;
 /// </summary>
 public sealed class ListenGateTests
 {
+    [ThreadStatic] private static string? _lastTrace;
+
     /// <summary>The listen corpus (tools/listen.sh: data/listen, or EDICT_LISTEN).</summary>
     public static string Directory
     {
@@ -45,6 +47,7 @@ public sealed class ListenGateTests
         using var host = new Host(files, new Cvars(edh.ClientCvars), 1, edh.ClientRandState, loop, inputs.HeaderBytes,
                                   VmReplay.NumBuiltins);
         int spawn = 0, hashed = 0, clientHashed = 0, nextClient = 0;
+        bool played = false;
         string? failure = null;
         StateHash? hash = null;
         var clientHash = new ClientHash();
@@ -68,16 +71,42 @@ public sealed class ListenGateTests
                 failure = $"spawn of {r.Map}: messages lane differs" + (emg is null ? "" : ": " + EmgFile.Difference(loop.Sent, emg.Spawns[spawn - 1]));
             loop.TakeSent();
         };
+        // the reference's arguments (<run>.args): quake.rc in frame 0, as Host_Init inserted it, whose stuffcmds makes
+        // each "+" one a command, up to the next '+' or '-' with the space before it, and the rest of quake.rc
+        // (startdemos, a wait) comes after them in the buffer
+        string argsPath = Path.ChangeExtension(edhPath, ".args");
+        if (File.Exists(argsPath))
+        {
+            host.Cmd.CommandLine = File.ReadAllLines(argsPath);
+            commands = "exec quake.rc\n";
+        }
         host.AddText(Encoding.Latin1.GetBytes(commands));
         float time = host.HostFramerate();
-        int total = edh.Frames;
+        // the run's host frames: its last record's framecount (frames without a server write no frame record)
+        int total = (int)Math.Max(edh.FrameRecords.Keys.DefaultIfEmpty(0u).Max(),
+                                  edh.ClientFrames.Select(c => c.FrameCount).DefaultIfEmpty(0u).Max());
         for (int frame = 0; frame < total && failure is null; frame++)
         {
             host.Frame(time);
             if (failure is not null)
                 break;
+            if (Environment.GetEnvironmentVariable("EDICT_LISTENTRACE") is { Length: > 0 })
+            {
+                string st = $"sv {(host.Sv is { Active: true } ? 1 : 0)} cl {host.Cl!.State} signon {host.Cl.Signon}";
+                if (st != _lastTrace)
+                    TestContext.Current.TestOutputHelper?.WriteLine($"frame {frame} fc {host.FrameCount}: {st}");
+                _lastTrace = st;
+            }
 
-            Server? sv = host.Sv;
+            // the reference's run ends with a demo the client played: after that frame's client record, no frame record
+            bool demoEnded = played && !host.Cl!.DemoPlayback;
+            played |= host.Cl!.DemoPlayback;
+            Server? sv = demoEnded ? null : host.Sv;
+            if (!demoEnded && sv is not { Active: true } && edh.FrameRecords.ContainsKey((uint)host.FrameCount))
+            {
+                failure = $"frame {frame}: the reference's server ran frame {host.FrameCount}, the port's is not active";
+                break;
+            }
             if (sv is { Active: true })
             {
             if (!edh.FrameRecords.TryGetValue((uint)host.FrameCount, out EdhFile.Frame r))
@@ -141,7 +170,8 @@ public sealed class ListenGateTests
                     break;
                 clientHashed++;
             }
-
+            if (demoEnded)
+                break;
         }
         if (failure is null && nextClient != edh.ClientFrames.Count)
             failure = $"the port's client wrote {nextClient} records, the reference {edh.ClientFrames.Count}";

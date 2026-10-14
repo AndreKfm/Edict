@@ -67,6 +67,12 @@ public sealed unsafe class MessageFuzzTests
         }
 
         public bool CanSendMessage() => true;
+
+        public void Close()
+        {
+        }
+
+        public ReadOnlySpan<byte> Address => "fuzz"u8;
     }
 
     /// <summary>What the fuzz reached (so that a green run can be judged).</summary>

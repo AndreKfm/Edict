@@ -15,7 +15,7 @@ namespace Edict.Engine;
 /// in the server.
 /// </summary>
 [NoAllocUnchecked("the host loop: spawning allocates; the server frame is checked in Server")]
-public sealed unsafe class Host : IDisposable, ISoundHost
+public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
 {
     private readonly QFileSystem _files;
     private readonly Progs _progs;
@@ -80,7 +80,8 @@ public sealed unsafe class Host : IDisposable, ISoundHost
     }
 
     /// <summary>Whether S_Init registers its cvars: with sound, unless -nosound stops it first.</summary>
-    internal static bool SoundCvars(bool sound, IReadOnlyList<string> commandLine) => sound && !commandLine.Contains("-nosound");
+    internal static bool SoundCvars(bool sound, IReadOnlyList<string> commandLine) =>
+        sound && !commandLine.Take(Cmd.MaxNumArgvs - 1).Contains("-nosound");     // COM_CheckParm on com_argv
 
     /// <summary>offsetof (edict_t, v) of the reference on x64 (the captures' map records hold it): 108 bytes.</summary>
     public const int ReferenceEdictHeaderBytes = 108;
@@ -129,10 +130,14 @@ public sealed unsafe class Host : IDisposable, ISoundHost
         Cmd.Add("changelevel", Changelevel);
         if (net is Loopback)
         {
-            Cl = new ClientState(cvars, _models, randSeed, Cmd.Text);
+            Cl = new ClientState(cvars, _models, randSeed, Cmd.Text) { ListenServer = this };
             _console = new ClientConsole(Cmd, cvars, Cl, () => Sv is { Active: true });
+            Cmd.Add("playdemo", PlayDemo);
             if (SoundCvars(sound, Cmd.CommandLine))
                 Cmd.UseSoundTable();
+            _console.LocalStatus = () => Sv!.ConsoleStatus();
+            _console.LocalKick = () => Sv!.ConsoleKick(Cmd.Argc > 1 ? [.. Cmd.Argv(0), (byte)' ', .. Cmd.Args] : Cmd.Argv(0),
+                                                       CvarBytes("_cl_name"));
             if (cmdline is not null)
                 _console.Startup(files, _models, cmdline, withScreen, harness: !game, sound: sound ? this : null, sink: sink);
         }
@@ -150,6 +155,29 @@ public sealed unsafe class Host : IDisposable, ISoundHost
 
     /// <summary>The sound of a host with sound, or null.</summary>
     public Sound? Sound => _console?.Sound;
+
+    bool IListenServer.Active => Sv is { Active: true };
+
+    void IListenServer.Shutdown(bool crash) => ShutdownServer(crash);
+
+    /// <summary>
+    /// Host_ShutdownServer: sv.active off, the local client disconnected (its sounds stop at once), the clients'
+    /// last messages, svc_disconnect and their drops (<see cref="Server.ShutdownClients"/>), and the server gone
+    /// (memset (&amp;sv)); the rand stream stays the host's.
+    /// </summary>
+    [NoAllocUnchecked("console command: the server shut down")]
+    private void ShutdownServer(bool crash)
+    {
+        if (Sv is not { Active: true } sv)
+            return;
+        sv.Active = false;
+        // stop all client sounds immediately
+        if (Cl is { State: ClientState.CaConnected } cl)
+            cl.Disconnect();
+        sv.ShutdownClients(crash);
+        _rand = sv.Rand;
+        FreeServer();
+    }
 
     private bool _clientReading;    // CL_ReadFromServer runs: the client's copy of the rand stream is the one
 
@@ -270,6 +298,20 @@ public sealed unsafe class Host : IDisposable, ISoundHost
         return true;
     }
 
+    /// <summary>A cvar's string (load path and console commands).</summary>
+    [NoAllocUnchecked("console command")]
+    private byte[] CvarBytes(string name)
+    {
+        fixed (byte* n = System.Text.Encoding.Latin1.GetBytes(name + "\0"))
+        {
+            byte* s = Cvars.VariableString(n);
+            int len = 0;
+            while (s[len] != 0)
+                len++;
+            return new ReadOnlySpan<byte>(s, len).ToArray();
+        }
+    }
+
     /// <summary>host_framerate's value.</summary>
     public float HostFramerate()
     {
@@ -306,13 +348,10 @@ public sealed unsafe class Host : IDisposable, ISoundHost
         if (Cmd.Source != Cmd.SrcCommand)
             return;
         _console?.StopDemoLoop();       // cls.demonum = -1: stop demo loop in case this fails
-        // CL_Disconnect, Host_ShutdownServer (false)
-        if (Sv is { Active: true })
-            throw new InvalidOperationException("map while a server runs (Host_ShutdownServer) is not ported");
+        Cl?.Disconnect();
+        ShutdownServer(false);
         if (Cl is not null)
         {
-            if (Cl.State == ClientState.CaConnected)
-                throw new InvalidOperationException("map while connected (CL_Disconnect) is not ported");
             _console!.Keys.Dest = Keys.KeyGame;     // remove console or menu
             _console.BeginLoadingPlaque();          // stops the sounds, as CL_Disconnect did before it
         }
@@ -326,6 +365,37 @@ public sealed unsafe class Host : IDisposable, ISoundHost
                 throw new InvalidOperationException("map with spawn parms (cls.spawnparms) is not ported");
             Cl.EstablishConnection(((Loopback)_net).Connect());     // connect local
         }
+    }
+
+    /// <summary>
+    /// CL_PlayDemo_f on a listen server: the disconnect first (CL_Disconnect, which shuts the server down), then the
+    /// demo by name (".dem" added if there is no extension) from the search path.
+    /// </summary>
+    private void PlayDemo()
+    {
+        if (Cmd.Source != Cmd.SrcCommand)
+            return;
+        if (Cmd.Argc != 2)
+        {
+            Cmd.Printf("play <demoname> : plays a demo\n"u8);
+            return;
+        }
+        // disconnect from server
+        Cl!.Disconnect();
+        string name = System.Text.Encoding.Latin1.GetString(Cmd.Argv(1));
+        int slash = name.LastIndexOf('/');
+        if (name.IndexOf('.', slash + 1) < 0)
+            name += ".dem";     // COM_DefaultExtension
+        Cmd.Msg("Playing demo from "u8).Msg(System.Text.Encoding.Latin1.GetBytes(name)).Msg(".\n"u8).End();
+        if (_files.Find(name) is not { } file)
+        {
+            Cmd.Printf("ERROR: couldn't open.\n"u8);
+            _console!.StopDemoLoop();
+            return;
+        }
+        byte[] demo = file.Span.ToArray();
+        _models.PreloadClient(demo);
+        Cl.PlayDemo(demo);
     }
 
     /// <summary>Host_Restart_f: the same map spawned again.</summary>

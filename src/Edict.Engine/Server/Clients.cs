@@ -23,6 +23,17 @@ public interface IClientConnection
     /// <summary>NET_CanSendMessage.</summary>
     [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
     bool CanSendMessage();
+
+    /// <summary>NET_Close: the driver's close; the connection is gone (NET_FreeQSocket).</summary>
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    void Close();
+
+    /// <summary>qsocket_t.address, as Host_Status_f prints it.</summary>
+    ReadOnlySpan<byte> Address
+    {
+        [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+        get;
+    }
 }
 
 /// <summary>The network as the server sees it: NET_CheckNewConnections.</summary>
@@ -50,6 +61,7 @@ public sealed unsafe class Client
 
     public bool Active, Spawned, DropAsap, Privileged, SendSignon;
     public double LastMessage;
+    public double ConnectTime;                   // the connection's qsocket_t.connecttime (net_time when it was made)
     public IClientConnection? NetConnection;
     public UserCmd Cmd;
     public Vec3 WishDir;
@@ -108,8 +120,9 @@ public sealed unsafe class Client
 /// The server's clients (sv_main.c, sv_user.c, host_cmd.c): SV_CheckForNewClients, SV_ConnectClient,
 /// SV_SendServerinfo, SV_RunClients, SV_ReadClientMessage, SV_ReadClientMove, the console command parser as client
 /// commands use it (Cmd_TokenizeString, Cmd_ExecuteString with src_client), and the host commands a client sends
-/// on connecting: prespawn, name, color, spawn, begin. Any other command, a dropped client and loading a saved game
-/// are not ported yet and stop with an error. Messages to clients are written in full (their sizes decide overflows).
+/// on connecting: prespawn, name, color, spawn, begin (the others: HostCommands.cs). A privileged client's other
+/// commands and loading a saved game are not ported yet and stop with an error. Messages to clients are written in
+/// full (their sizes decide overflows).
 /// </summary>
 public sealed unsafe partial class Server
 {
@@ -123,7 +136,6 @@ public sealed unsafe partial class Server
     private const int MaxDatagram = 1024, NetMaxMessage = 8192;
 
     private static readonly SysErrorException NoFreeClients = new("Host_CheckForNewClients: no free clients");
-    private static readonly HostErrorException DropNotPorted = new("SV_DropClient: dropping a client is not ported yet");
     private static readonly HostErrorException CommandNotPorted = new("Cmd_ExecuteString: a client command the port does not have yet");
 
     /// <summary>svs.clients; shared by the servers of one session (they outlive a map).</summary>
@@ -211,6 +223,8 @@ public sealed unsafe partial class Server
                 throw NoFreeClients;
             Clients[i].NetConnection = ret;
             ConnectClient(i);
+            Clients[i].ConnectTime = RealTime;  // NET_NewQSocket: net_time, this frame's realtime
+            // net_activeconnections++
         }
     }
 
@@ -309,7 +323,10 @@ public sealed unsafe partial class Server
             _svPlayer = host.Edict;
 
             if (!ReadClientMessage())
-                throw DropNotPorted;    // SV_DropClient (false): client misbehaved
+            {
+                DropClient(false);      // client misbehaved...
+                continue;
+            }
 
             if (!host.Spawned)
             {   // clear client movement until a new packet is received
@@ -533,21 +550,61 @@ public sealed unsafe partial class Server
             HostSpawn();
         else if (CaseEquals(name, "begin"u8))
             Clients[_hostClient].Spawned = true;    // Host_Begin_f
-        else
-            throw CommandNotPorted;
+        else if (CaseEquals(name, "status"u8))
+            HostStatus();
+        else if (CaseEquals(name, "god"u8))
+            HostToggleFlag(FlGodMode, "godmode ON\n"u8, "godmode OFF\n"u8);
+        else if (CaseEquals(name, "notarget"u8))
+            HostToggleFlag(FlNoTarget, "notarget ON\n"u8, "notarget OFF\n"u8);
+        else if (CaseEquals(name, "fly"u8))
+            HostToggleMovetype(MovetypeFly, "flymode ON\n"u8, "flymode OFF\n"u8);
+        else if (CaseEquals(name, "noclip"u8))
+            HostToggleMovetype(MovetypeNoclip, "noclip ON\n"u8, "noclip OFF\n"u8);
+        else if (CaseEquals(name, "ping"u8))
+            HostPing();
+        else if (CaseEquals(name, "say"u8))
+            HostSay(false);
+        else if (CaseEquals(name, "say_team"u8))
+            HostSay(true);
+        else if (CaseEquals(name, "tell"u8))
+            HostTell();
+        else if (CaseEquals(name, "kill"u8))
+            HostKill();
+        else if (CaseEquals(name, "pause"u8))
+            HostPause();
+        else if (CaseEquals(name, "kick"u8))
+            HostKick();
+        else if (CaseEquals(name, "give"u8))
+            HostGive();
+        else    // no command, alias or cvar of that name: the server's console says so (a listen server's shows it)
+            Con?.Msg("Unknown command \""u8).Msg(name).Msg("\"\n"u8).EndMsg();
+    }
+
+    /// <summary>The text of a cvar (cl_name, which a listen server's console shows for the client's commands).</summary>
+    private byte* CvarString(ReadOnlySpan<byte> nameZ)
+    {
+        fixed (byte* n = nameZ)
+            return Cvars.VariableString(n);
     }
 
     /// <summary>Host_Name_f from a client: the name (at most 15 characters), netname pointing at it, and the notice.</summary>
     private void HostName()
     {
         if (_argc == 1)
-            return;     // Con_Printf ("\"name\" is \"%s\"\n", cl_name.string)
+        {
+            Con?.Msg("\"name\" is \""u8).Msg(CvarString("_cl_name\0"u8)).Msg("\"\n"u8).EndMsg();
+            return;
+        }
         byte* newName = _argc == 2 ? Argv(1) : _args;
         int n = 0;
         while (newName[n] != 0 && n < 15)
             n++;        // newName[15] = 0 (C writes it whether or not the name is that long)
         Client host = Clients[_hostClient];
-        // Con_Printf ("%s renamed to %s\n", ...) if the client had a name
+        byte* nm = host.NamePtr;
+        if (nm[0] != 0 && !SameZ(nm, "unconnected\0"u8) && !SameName(nm, newName, n))
+        {
+            Con?.Msg(nm).Msg(" renamed to "u8).Msg(new ReadOnlySpan<byte>(newName, n)).Msg("\n"u8).EndMsg();
+        }
         new ReadOnlySpan<byte>(newName, n).CopyTo(host.Name);
         host.Name[n] = 0;
         ((int*)Fields(host.Edict))[EntVars.Netname] = ClientNameOffset(_hostClient);
@@ -557,11 +614,39 @@ public sealed unsafe partial class Server
         ReliableDatagram.WriteString(host.NamePtr);
     }
 
+    /// <summary>strcmp (a, b) == 0, b zero-terminated.</summary>
+    private static bool SameZ(byte* a, ReadOnlySpan<byte> b)
+    {
+        int i = 0;
+        for (; b[i] != 0; i++)
+            if (a[i] != b[i])
+                return false;
+        return a[i] == 0;
+    }
+
+    /// <summary>Q_strcmp (name, newName) == 0, newName cut to its first n characters.</summary>
+    private static bool SameName(byte* name, byte* newName, int n)
+    {
+        int i = 0;
+        for (; i < n; i++)
+            if (name[i] != newName[i])
+                return false;
+        return name[i] == 0;
+    }
+
     /// <summary>Host_Color_f from a client: top and bottom color (0..13), team = bottom + 1.</summary>
     private void HostColor()
     {
         if (_argc == 1)
-            return;     // Con_Printf the current color
+        {   // the console's own color (cl_color) on the server's console
+            fixed (byte* n = "_cl_color\0"u8)
+            {
+                int c = CCast.I32(Cvars.Value(n));
+                Con?.Msg("\"color\" is \""u8).MsgInt(c >> 4).Msg(" "u8).MsgInt(c & 0x0f).Msg("\"\n"u8).EndMsg();
+            }
+            Con?.Printf("color <0-13> [0-13]\n"u8);
+            return;
+        }
         int top, bottom;
         if (_argc == 2)
             top = bottom = Atoi(Argv(1));
@@ -603,7 +688,10 @@ public sealed unsafe partial class Server
     {
         Client host = Clients[_hostClient];
         if (host.Spawned)
-            return;     // Con_Printf ("prespawn not valid -- allready spawned\n")
+        {
+            Con?.Printf("prespawn not valid -- allready spawned\n"u8);
+            return;
+        }
         host.Message.Write(Signon.Data, Signon.CurSize);
         host.Message.WriteByte(SvcSignonNum);
         host.Message.WriteByte(2);
@@ -619,7 +707,10 @@ public sealed unsafe partial class Server
     {
         Client host = Clients[_hostClient];
         if (host.Spawned)
-            return;     // Con_Printf ("Spawn not valid -- allready spawned\n")
+        {
+            Con?.Printf("Spawn not valid -- allready spawned\n"u8);
+            return;
+        }
 
         // set up the edict
         int ent = host.Edict;

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The network's LAN driver (docs/PLAN.md, P6 step 9): UDP through the operating system's sockets (ws2_32 on
+       Windows, libc on Linux), as net_wins.c and net_udp.c drive them; no package. Outside the proof. -->
+  <PropertyGroup>
+    <RootNamespace>Edict.Net</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Edict.Engine/Edict.Engine.csproj" />
+  </ItemGroup>
+</Project>

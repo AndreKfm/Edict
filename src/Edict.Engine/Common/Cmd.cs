@@ -35,8 +35,17 @@ public sealed unsafe class Cmd
     /// <summary>The console Con_Printf writes to; null for a dedicated server (ca_dedicated: no output).</summary>
     public Screen? Con { get; set; }
 
-    /// <summary>com_argv after the program name, for stuffcmds.</summary>
-    public IReadOnlyList<string> CommandLine { get; set; } = [];
+    /// <summary>MAX_NUM_ARGVS: COM_InitArgv keeps this many arguments, the program's name among them.</summary>
+    public const int MaxNumArgvs = 50;
+
+    /// <summary>com_argv after the program name, for stuffcmds: at most <see cref="MaxNumArgvs"/> - 1 of them.</summary>
+    public IReadOnlyList<string> CommandLine
+    {
+        get => _commandLine;
+        set => _commandLine = value.Count < MaxNumArgvs ? value : value.Take(MaxNumArgvs - 1).ToArray();
+    }
+
+    private IReadOnlyList<string> _commandLine = [];
 
     /// <summary>cmd_source.</summary>
     public int Source { get; private set; }

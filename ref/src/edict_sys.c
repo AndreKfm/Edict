@@ -49,7 +49,7 @@ void EdictTape_UseLoopback (void);	// edict_tape.c
 qboolean	isDedicated;
 extern cvar_t	host_framerate;	// host.c; not declared in a header
 
-static double	edict_clock;	// virtual time, advanced by the harness once per host frame
+double			edict_clock;	// virtual time, advanced by the harness once per host frame (the oracle's MemNet too)
 
 /*
 ===============================================================================

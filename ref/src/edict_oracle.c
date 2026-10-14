@@ -16,7 +16,7 @@ All arguments are blittable; strings are NUL-terminated byte buffers owned by th
 #define EDICT_EXPORT	__attribute__((visibility("default")))
 #endif
 
-#define ORACLE_VERSION	8
+#define ORACLE_VERSION	9
 
 void PF_ftos (void);	// pr_cmds.c, not declared in a header
 void PF_vtos (void);

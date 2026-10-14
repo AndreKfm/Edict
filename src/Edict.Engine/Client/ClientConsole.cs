@@ -8,7 +8,8 @@ namespace Edict.Engine;
 /// <summary>
 /// What both hosts of a client share: Host_Init's part that a client shows (the cvars its init code sets, the console's
 /// first lines, the screen) and the client's console commands (cl_input.c's buttons, V_BonusFlash_f, Host_Reconnect_f,
-/// Host_Startdemos_f, the console side of Host_Name_f and Host_Color_f, +showscores).
+/// Host_Startdemos_f, the console side of Host_Name_f and Host_Color_f, +showscores, disconnect, and the host
+/// commands a console sends to the server: Cmd_ForwardToServer).
 /// </summary>
 [NoAllocUnchecked("console commands and the load path")]
 public sealed unsafe class ClientConsole
@@ -46,6 +47,57 @@ public sealed unsafe class ClientConsole
         cmd.Add("color", Color);
         cmd.Add("+showscores", () => Screen?.ShowScores(true));
         cmd.Add("-showscores", () => Screen?.ShowScores(false));
+        foreach (string c in (string[])["say", "say_team", "tell", "god", "notarget", "fly", "noclip", "kill", "pause",
+                                         "ping", "give", "cmd"])
+            cmd.Add(c, ForwardToServer);
+        // a listen server runs status and kick from its console itself (LocalStatus, LocalKick)
+        cmd.Add("status", () => { if (_serverActive() && LocalStatus is { } f) f(); else ForwardToServer(); });
+        cmd.Add("kick", () => { if (_serverActive() && LocalKick is { } f) f(); else ForwardToServer(); });
+        cmd.Add("prespawn", () => _cmd.Printf("prespawn is not valid from the console\n"u8));
+        cmd.Add("spawn", () => _cmd.Printf("spawn is not valid from the console\n"u8));
+        cmd.Add("begin", () => _cmd.Printf("begin is not valid from the console\n"u8));
+        cmd.Add("disconnect", Disconnect);
+    }
+
+    /// <summary>Host_Status_f and Host_Kick_f from the console of a listen server whose server runs (print = Con_Printf).</summary>
+    public Action? LocalStatus { get; set; }
+
+    public Action? LocalKick { get; set; }
+
+    private const int ClcStringCmd = 4;
+
+    /// <summary>
+    /// Cmd_ForwardToServer: the command line as a clc_stringcmd in cls.message ("cmd" sends only its arguments);
+    /// nothing in a playback, a console line without a connection.
+    /// </summary>
+    public void ForwardToServer()
+    {
+        if (_cl.State != ClientState.CaConnected)
+        {
+            _cmd.Msg("Can't \""u8).Msg(_cmd.Argv(0)).Msg("\", not connected\n"u8).End();
+            return;
+        }
+        if (_cl.DemoPlayback)
+            return;     // not really connected
+        SizeBuf m = _cl.Message;
+        m.WriteByte(ClcStringCmd);
+        if (!Encoding.Latin1.GetString(_cmd.Argv(0)).Equals("cmd", StringComparison.OrdinalIgnoreCase))
+        {
+            m.Print(_cmd.Argv(0));
+            m.Print(" "u8);
+        }
+        if (_cmd.Argc > 1)
+            m.Print(_cmd.Args);
+        else
+            m.Print("\n"u8);
+    }
+
+    /// <summary>CL_Disconnect_f: the disconnect, and a listen server shut down.</summary>
+    private void Disconnect()
+    {
+        _cl.Disconnect();
+        if (_cl.ListenServer is { Active: true } sv)
+            sv.Shutdown(false);
     }
 
     /// <summary>
@@ -166,7 +218,7 @@ public sealed unsafe class ClientConsole
             return;
         SetCvar("_cl_name", Encoding.Latin1.GetString(newName));
         if (_cl.State == ClientState.CaConnected)
-            throw new InvalidOperationException("name while connected: Cmd_ForwardToServer is not ported");
+            ForwardToServer();
     }
 
     /// <summary>Host_Color_f from the console: the colors for the next connection (_cl_color).</summary>
@@ -194,7 +246,7 @@ public sealed unsafe class ClientConsole
         fixed (byte* n = "_cl_color\0"u8)
             _cvars.SetValue(n, playercolor);
         if (_cl.State == ClientState.CaConnected)
-            throw new InvalidOperationException("color while connected: Cmd_ForwardToServer is not ported");
+            ForwardToServer();
     }
 
     private static int AtoiOf(byte[] s) =>

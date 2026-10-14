@@ -59,6 +59,14 @@ public sealed class Score
     public int Colors;                                // two 4 bit fields
 }
 
+/// <summary>A listen server as its local client sees it: sv.active, and Host_ShutdownServer, which CL_Disconnect calls.</summary>
+public interface IListenServer
+{
+    bool Active { get; }
+
+    void Shutdown(bool crash);
+}
+
 /// <summary>A visible entity (<c>cl_visedicts</c>) as an array and index: 0 cl_entities, 1 statics, 2 temp entities, 3 the gun model.</summary>
 public struct EntityRef
 {
@@ -96,6 +104,9 @@ public sealed unsafe partial class ClientState
 
     /// <summary>The sound of a host with sound (the sound build's), or null (snd_null's: every call does nothing).</summary>
     public Sound? Sound;
+
+    /// <summary>The server of a listen host, which a disconnect shuts down; null for a client alone.</summary>
+    public IListenServer? ListenServer;
 
     /// <summary>sv.active: in a listen server the client does not lerp and CL_ClearState leaves the signon alone.</summary>
     public bool ServerActive { get; set; }
@@ -284,20 +295,47 @@ public sealed unsafe partial class ClientState
     /// CL_EstablishConnection with Host_Reconnect_f (connect local, from Host_Map_f): the connection, the signon
     /// from 0. CL_Disconnect before it finds nothing connected in a listen server's first map.
     /// </summary>
+    [NoAllocUnchecked("load path: a new connection")]
     public void EstablishConnection(IClientConnection connection)
     {
         if (DemoPlayback)
             return;
-        if (State == CaConnected)
-            throw DisconnectNotPorted;
-        Sound?.StopAllSounds(true);                    // CL_Disconnect: stop sounds (especially looping!)
-        Signon = 0;
+        Disconnect();
         NetCon = connection;
         State = CaConnected;
         Signon = 0;                                    // need all the signon messages before playing; Host_Reconnect_f
     }
 
-    private static readonly HostErrorException DisconnectNotPorted = new("CL_Disconnect: a connected client disconnecting is not ported yet");
+    private const int ClcDisconnect = 2;
+
+    /// <summary>
+    /// CL_Disconnect: the sounds stopped; a playback stops, a connection sends clc_disconnect, closes, and shuts down
+    /// a listen server; the signon starts again.
+    /// </summary>
+    [NoAllocUnchecked("console command: a disconnect")]
+    public void Disconnect()
+    {
+        // stop sounds (especially looping!)
+        Sound?.StopAllSounds(true);
+        // if running a local server, shut it down
+        if (DemoPlayback)
+            StopPlayback();
+        else if (State == CaConnected)
+        {
+            // Con_DPrintf ("Sending clc_disconnect\n")
+            Message.Clear();
+            Message.WriteByte(ClcDisconnect);
+            NetCon!.SendUnreliableMessage(Message);
+            Message.Clear();
+            NetCon.Close();
+            NetCon = null;
+            State = CaDisconnected;
+            if (ListenServer is { Active: true } sv)
+                sv.Shutdown(false);
+        }
+        DemoPlayback = false;                          // cls.demoplayback = cls.timedemo = false
+        Signon = 0;
+    }
 
     // ---- demo playback (cl_demo.c)
 
@@ -311,8 +349,7 @@ public sealed unsafe partial class ClientState
     [NoAllocUnchecked("load path: the demo")]
     public void PlayDemo(byte[] demo)
     {
-        Sound?.StopAllSounds(true);                    // CL_Disconnect: stop sounds (especially looping!)
-        StopPlayback();
+        Disconnect();
         DemoPlayback = false;
         Signon = 0;
         _demo = demo;
