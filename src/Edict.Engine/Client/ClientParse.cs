@@ -580,11 +580,11 @@ public sealed unsafe partial class ClientState
                 byte* text = stackalloc byte[128];
                 var t = new Span<byte>(text, 128);
                 m.WriteByte(ClcStringCmd);
-                int n = Concat(t, "name \""u8, Cvar("cl_name\0"u8), "\"\n"u8);
+                int n = Concat(t, "name \""u8, Cvar("_cl_name\0"u8), "\"\n"u8);     // cl_name is "_cl_name"
                 text[n] = 0;
                 m.WriteString(text);
 
-                int color = CCast.I32(CvarValue("cl_color\0"u8));
+                int color = CCast.I32(CvarValue("_cl_color\0"u8));          // cl_color is "_cl_color"
                 m.WriteByte(ClcStringCmd);
                 n = Concat(t, "color "u8, default, default);
                 n += CFormat.Int(color >> 4, t[n..]);

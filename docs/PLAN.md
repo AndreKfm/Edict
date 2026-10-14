@@ -633,6 +633,25 @@ its allocation context, and a GC that a test running in parallel starts can reti
 the count by its unused rest. The gate now runs in a collection of its own that runs alone (four runs green in a
 row where two of four had failed). The client's host runs the engine's type initializers at its start, as the
 server's does.
+Step 5 (2026-10-14), the listen server. (5a) The reference without -dedicated: the harness's driver table holds
+net_loop.c at index 0, as Quake's tables do (NET_SendToAll sends at once on driver 0), the server's sends through
+it go to the messages lane, and client records are written while the client is connected. `tools/listen.sh`: the
+10 corpus maps × 4,000 frames, no key held, and two runs that spawn a second time with the client connected — a
+changelevel (start to lq_e0m1) and a restart (lq_e0m2), each after the 1,000 waits of `id1/edict/wait1000.cfg`
+(Cmd_Wait_f holds the rest of the buffer for one frame; the command line takes at most 50 arguments, a script
+8,192 bytes). (5b) The port: `Net/Loopback` (net_loop.c: two sockets with their receive buffers, 4-byte aligned
+messages, canSend cleared by a reliable send and set when the peer reads it), and the host with a local client
+(`Host.Cl` when the network is a Loopback): _Host_Frame's client part (CL_SendCmd before the server frame,
+CL_ReadFromServer after it, on the server's rand stream), "map" connecting the client, SV_SpawnServer's
+reconnect and Host_ClearMemory for the client, and the console commands a listen run issues: wait, exec (inserted
+ahead of the buffer, Cbuf_InsertText), reconnect. The client sends what CL_SendCmd sends with no key held (clc_move
+from the third move on, the signon replies). Found on the way: the signon reply's name and color come from
+`_cl_name` and `_cl_color`, the archived cvars behind "name" and "color". Gate (`ListenGateTests`): every server and
+client record of the 12 runs (4,000 frames each), identical. R7 (`listen`): of 14 mutants 10 detected, the
+reliable send keeping the sender free and a spawn keeping cl only by the two respawning runs; the other four are
+equivalent in a listen run (listed in `tools/mutate.py`: the alignment matters only within 3 bytes of a full
+buffer, where C stops with Sys_Error; cls.signon is 0 whenever a listen client gets the serverinfo or the
+"reconnect"; no listen client waits 5 s for a signon stage, so no keepalive nop is sent).
 
 ## D. Effort at 7 h/week (calendar weeks)
 

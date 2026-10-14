@@ -52,8 +52,12 @@ public sealed unsafe class Host : IDisposable
 
     /// <param name="cvars">The cvars as the reference had them at the first spawn.</param>
     /// <param name="maxclients">svs.maxclients.</param>
-    /// <param name="randSeed">The rand state at the first spawn (after Host_Init's and the first frame's draws).</param>
+    /// <param name="randSeed">
+    /// The rand state at the first spawn (after Host_Init's and the first frame's draws); for a listen server, before
+    /// frame 0 (the reference's 'I' record).
+    /// </param>
     /// <param name="headerBytes">The reference's edict header size (docs/adr/D7).</param>
+    /// <param name="net">The tape; or a <see cref="Loopback"/>, which makes this a listen server with a local client.</param>
     public Host(QFileSystem files, Cvars cvars, int maxclients, uint randSeed, INetServer net, int headerBytes, int numBuiltins)
     {
         _files = files;
@@ -68,9 +72,14 @@ public sealed unsafe class Host : IDisposable
             _clients[i] = new Client();
         _net = net;
         _rand.Srand(randSeed);
-        _firstFrame = true;
+        _firstFrame = net is not Loopback;
+        if (net is Loopback)
+            Cl = new ClientState(cvars, _models, randSeed, _cmdText);
         InitializeTypes();
     }
+
+    /// <summary>A listen server's local client, null for a server alone.</summary>
+    public ClientState? Cl { get; }
 
     /// <summary>
     /// Runs the type initializer of every engine type now, on the load path. The static readonly fields are mostly
@@ -91,6 +100,7 @@ public sealed unsafe class Host : IDisposable
     }
 
     private bool _firstFrame;
+    private bool _cmdWait;                             // cmd_wait
 
     /// <summary>Cbuf_AddText.</summary>
     public void AddText(ReadOnlySpan<byte> text)
@@ -99,6 +109,18 @@ public sealed unsafe class Host : IDisposable
             return;     // Con_Printf ("Cbuf_AddText: overflow\n")
         fixed (byte* t = text)
             _cmdText.Write(t, text.Length);
+    }
+
+    /// <summary>Cbuf_InsertText: the text ahead of what the buffer holds (a script's lines run before the rest).</summary>
+    private void InsertText(ReadOnlySpan<byte> text)
+    {
+        byte[] rest = new ReadOnlySpan<byte>(_cmdText.Data, _cmdText.CurSize).ToArray();
+        _cmdText.Clear();
+        AddText(text);
+        if (_cmdText.CurSize + rest.Length > _cmdText.MaxSize)
+            throw new InvalidOperationException("SZ_GetSpace: overflow without allowoverflow set (cmd_text)");
+        fixed (byte* r = rest)
+            _cmdText.Write(r, rest.Length);
     }
 
     /// <summary>
@@ -131,6 +153,17 @@ public sealed unsafe class Host : IDisposable
         // process console commands
         ExecuteCommands();
 
+        ClientState? cl = Cl;
+        if (cl is not null)
+        {
+            cl.FrameTime = FrameTime;
+            cl.RealTime = _realtime;
+            cl.ServerActive = Sv is { Active: true };
+            // if running the server locally, make intentions now
+            if (cl.ServerActive)
+                cl.SendCmd();
+        }
+
         if (Sv is { Active: true } sv)
         {
             sv.FrameTime = FrameTime;
@@ -138,6 +171,24 @@ public sealed unsafe class Host : IDisposable
             if (_net is { } net && net is IFrameCounted counted)
                 counted.FrameCount = FrameCount;
             sv.ServerFrame();
+        }
+
+        if (cl is not null)
+        {
+            // if running the server remotely, send intentions now after the incoming messages have been read
+            if (!cl.ServerActive)
+                cl.SendCmd();
+            // fetch results from server; client and server draw from one rand stream
+            if (cl.State == ClientState.CaConnected)
+            {
+                ref CRand rand = ref Rand();
+                cl.Rand = rand;
+                cl.ReadFromServer();
+                rand = cl.Rand;
+            }
+            // SCR_UpdateScreen: no screen; S_Update and CDAudio_Update are output
+            if (cl.Signon == ClientState.Signons)
+                cl.DecayLights();
         }
 
         FrameCount++;
@@ -195,6 +246,13 @@ public sealed unsafe class Host : IDisposable
 
             // execute the command line
             Execute(line);
+
+            if (_cmdWait)
+            {
+                // skip out while text still remains in buffer, leaving it for next frame
+                _cmdWait = false;
+                break;
+            }
         }
     }
 
@@ -227,12 +285,33 @@ public sealed unsafe class Host : IDisposable
                     throw new InvalidOperationException("map while a server runs (Host_ShutdownServer) is not ported");
                 _serverflags = 0;   // haven't completed an episode yet
                 SpawnServer(argv.Count > 1 ? argv[1] : []);
+                if (Cl is not null && Sv is { Active: true })
+                    Cl.EstablishConnection(((Loopback)_net).Connect());     // connect local (cls.spawnparms "")
                 break;
             case "restart":
                 // Host_Restart_f
                 if (Sv is not { Active: true })
                     return;
                 SpawnServer(Sv.MapName);
+                break;
+            case "wait":
+                // Cmd_Wait_f: the rest of the buffer waits for the next frame
+                _cmdWait = true;
+                break;
+            case "exec":
+                // Cmd_Exec_f: the script's text (to its first NUL, as COM_LoadHunkFile's terminator ends it) inserted
+                if (argv.Count != 2)
+                    return;     // Con_Printf ("exec <filename> : execute a script file\n")
+                if (_files.Find(argv[1]) is not { } script)
+                    return;     // Con_Printf ("couldn't exec %s\n")
+                ReadOnlySpan<byte> f = script.Span;
+                int nul = f.IndexOf((byte)0);
+                InsertText(nul < 0 ? f : f[..nul]);
+                break;
+            case "reconnect":
+                // Host_Reconnect_f: SCR_BeginLoadingPlaque (the screen and sound: none), and new connection messages
+                if (Cl is not null)
+                    Cl.Signon = 0;
                 break;
             case "changelevel":
                 // Host_Changelevel_f
@@ -274,9 +353,14 @@ public sealed unsafe class Host : IDisposable
         byte[] name = map.ToArray();
         // tell all connected clients that we are going to a new level
         if (Sv is { Active: true } old)
+        {
             old.SendReconnect();
+            if (Cl is not null)
+                Cl.Signon = 0;      // a listen server executes "reconnect" itself: Host_Reconnect_f
+        }
         CRand rand = Rand();
         FreeServer();
+        Cl?.ClearMemory();          // Host_ClearMemory: cls.signon 0, cl wiped
 
         int numGlobals = _progs.NumGlobals;
         int stride = _headerBytes + _progs.EntityFields * 4;
@@ -306,6 +390,8 @@ public sealed unsafe class Host : IDisposable
 
         if (!sv.SpawnServer(name, _models))
             throw new InvalidOperationException("Couldn't spawn server");
+        if (Cl is not null)
+            _models.PrepareClientLookups();     // the local client's server info finds the server's models
         Spawned?.Invoke(sv);
         sv.SettleAndFinish();
         FrameTime = sv.FrameTime;   // 0.1: the rest of this host frame runs with it

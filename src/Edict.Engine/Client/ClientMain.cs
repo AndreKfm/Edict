@@ -45,10 +45,53 @@ public sealed unsafe partial class ClientState
             CmdForwardMove = forwardmove;
             CmdSideMove = sidemove;
             CmdUpMove = upmove;
+            if (!DemoPlayback)
+                SendMove();
         }
 
         if (DemoPlayback)
+        {
             Message.Clear();
+            return;
+        }
+
+        // send the reliable message
+        if (Message.CurSize == 0)
+            return;                 // no message at all
+        if (!NetCon!.CanSendMessage())
+            return;                 // Con_DPrintf ("CL_WriteToServer: can't send\n")
+        if (NetCon.SendMessage(Message) == -1)
+            throw LostConnectionWrite;
+        Message.Clear();
+    }
+
+    private static readonly HostErrorException LostConnectionWrite = new("CL_WriteToServer: lost server connection");
+    private static readonly HostErrorException LostConnectionMove = new("CL_SendMove: lost server connection (CL_Disconnect is not ported)");
+    private const int ClcMove = 3;
+
+    /// <summary>
+    /// CL_SendMove's message: clc_move, the last message's time, the view angles, the moves (of no held key: 0),
+    /// no buttons, no impulse; the first two after a connect are dropped.
+    /// </summary>
+    private void SendMove()
+    {
+        SizeBuf buf = _move;
+        buf.Clear();
+        buf.WriteByte(ClcMove);
+        buf.WriteFloat((float)MTime0);     // so server can get ping times
+        for (int i = 0; i < 3; i++)
+            buf.WriteAngle(At(ref ViewAngles, i));
+        buf.WriteShort(CCast.I32(CmdForwardMove));
+        buf.WriteShort(CCast.I32(CmdSideMove));
+        buf.WriteShort(CCast.I32(CmdUpMove));
+        buf.WriteByte(0);                  // in_attack and in_jump are up
+        buf.WriteByte(0);                  // in_impulse
+
+        // allways dump the first two message, because it may contain leftover inputs from the last level
+        if (++MoveMessages <= 2)
+            return;
+        if (NetCon!.SendUnreliableMessage(buf) == -1)
+            throw LostConnectionMove;      // Con_Printf ("CL_SendMove: lost server connection\n"), CL_Disconnect
     }
 
     /// <summary>CL_AdjustAngles with no key held (in_speed, in_strafe, in_klook up; every key state 0).</summary>
@@ -100,7 +143,7 @@ public sealed unsafe partial class ClientState
     private float LerpPoint()
     {
         float f = (float)(MTime0 - MTime1);
-        if (f == 0 || CvarValue("cl_nolerp\0"u8) != 0)  // cls.timedemo and sv.active are false in a playback
+        if (f == 0 || CvarValue("cl_nolerp\0"u8) != 0 || ServerActive)    // cls.timedemo is false
         {
             Time = MTime0;
             return 1;

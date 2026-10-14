@@ -32,6 +32,21 @@ import os, shutil, subprocess, sys
 # - SV_FatPVS over the (numleafs + 7) >> 3 bytes of a PVS row instead of (numleafs + 31) >> 3: the bits tested are
 #   leafnums of world leafs 1..numleafs (leaf - 1 < numleafs), all within the row; the three bytes more only OR in what
 #   Mod_DecompressVis left past the row.
+# - Loop_SendMessage and Loop_GetMessage without the 4-byte alignment: the reader steps over a message as the writer
+#   placed it, either way; only how full the receive buffer gets differs, by at most 3 bytes a queued message, which
+#   matters only within 3 bytes of NET_MAXMESSAGE (8192), where a reliable send is a Sys_Error. A listen side reads its
+#   whole buffer every frame; the largest frame's sends of the listen corpus are 4941 + 66 bytes.
+# - CL_ClearState resetting cls.signon with a local server too (Host_ClearMemory runs only without one): the state is
+#   cleared only by CL_ParseServerInfo, and a listen client reaches the serverinfo with signon 0 always:
+#   CL_EstablishConnection set it for the first map, Host_ClearMemory in SV_SpawnServer (and "reconnect") for every
+#   later one.
+# - CL_GetMessage keeping keepalive nops: SV_SendNop goes to a connected client that is neither spawned nor due a
+#   signon message once realtime - last_message > 5, and a listen client answers each signon stage in the next frame,
+#   so its last message is never 5 s old meanwhile (no listen run has a nop). The client's own nops (CL_KeepaliveMessage)
+#   return at once with a local server.
+# - Host_Reconnect_f keeping cls.signon (SV_SendReconnect's own call and the client's "reconnect" stufftext): with a
+#   local server, Host_ClearMemory in the same SV_SpawnServer sets it 0, and the stufftext, read after that spawn,
+#   runs in the next frame's Cbuf_Execute, before that frame's server sends the serverinfo; signon is 0 either way.
 # - CL_ClearState clearing cl_static_entities too: of a static, CL_ParseStatic writes every field the state reads
 #   but msgtime, the lerp origins and angles, forcelink, update_type, syncbase and baseline.effects, and nothing else
 #   ever writes those, so they are 0 from the start and clearing them changes nothing.
@@ -327,6 +342,23 @@ MUTANTS = {
         ('tent: spike draws no sound choice', 'src/Edict.Engine/Client/ClientTEnt.cs',
          '                RunParticleEffect(10);\n                if (Rand.Next() % 5 == 0)\n                    Rand.Next();        // rnd = rand () & 3: which ricochet sound',
          '                RunParticleEffect(10);'),
+    ]),
+    # P5: the listen server, server and local client in one process
+    'listen': (['Edict.Engine.Tests.ListenGateTests'], [
+        ('loop: reading a reliable message does not free the sender', 'src/Edict.Engine/Net/Loopback.cs',
+         '            if (Peer != null && ret == 1)\n                Peer.CanSend = true;\n', ''),
+        ('loop: a reliable send keeps the sender free', 'src/Edict.Engine/Net/Loopback.cs', '            CanSend = false;\n            return 1;', '            return 1;'),
+        ('host: the client does not send with a server', 'src/Edict.Engine/Host.cs',
+         '            if (cl.ServerActive)\n                cl.SendCmd();', '            if (cl.ServerActive && FrameCount < 0)\n                cl.SendCmd();'),
+        ('host: the client has a rand stream of its own', 'src/Edict.Engine/Host.cs',
+         '                cl.Rand = rand;\n                cl.ReadFromServer();\n                rand = cl.Rand;', '                cl.ReadFromServer();'),
+        ('host: spawn keeps cl', 'src/Edict.Engine/Host.cs', '        Cl?.ClearMemory();          // Host_ClearMemory: cls.signon 0, cl wiped', ''),
+        ('client: lerps with a server', 'src/Edict.Engine/Client/ClientMain.cs', ' || ServerActive)    // cls.timedemo is false', ')    // cls.timedemo is false'),
+        ('client: the first move is sent', 'src/Edict.Engine/Client/ClientMain.cs', 'if (++MoveMessages <= 2)', 'if (++MoveMessages <= 1)'),
+        ('client: name from cl_name', 'src/Edict.Engine/Client/ClientParse.cs', 'Cvar("_cl_name\\0"u8)', 'Cvar("cl_name\\0"u8)'),
+        ('cmd: wait does not wait', 'src/Edict.Engine/Host.cs', '                _cmdWait = true;\n', ''),
+        ('cmd: exec appends the script', 'src/Edict.Engine/Host.cs', 'InsertText(nul < 0 ? f : f[..nul]);',
+         'AddText(nul < 0 ? f : f[..nul]);'),
     ]),
     'spawn': (['Edict.Engine.Tests.SpawnGateTests', 'Edict.Engine.Tests.SpawnParseTests'], [
         ('COM_Parse: unsigned char', 'src/Edict.Engine/Common/ComParse.cs',

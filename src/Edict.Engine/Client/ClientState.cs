@@ -89,6 +89,10 @@ public sealed unsafe partial class ClientState
     public int State = CaDisconnected;
     public int Signon;
     public bool DemoPlayback;
+    public IClientConnection? NetCon;                 // cls.netcon: a listen server's loopback socket
+
+    /// <summary>sv.active: in a listen server the client does not lerp and CL_ClearState leaves the signon alone.</summary>
+    public bool ServerActive { get; set; }
     public int ForceTrack;
     public readonly SizeBuf Message;                  // cls.message: writing buffer to send to server
 
@@ -181,8 +185,10 @@ public sealed unsafe partial class ClientState
         for (int i = 0; i < MaxModels; i++)
             _modelNames[i] = GC.AllocateArray<byte>(64, pinned: true);
         InitParticles();
+        _move = new SizeBuf(128);
     }
 
+    private readonly SizeBuf _move;                    // CL_SendMove's buf[128]
     private readonly byte[][] _modelNames;             // CL_ParseServerInfo's model_precache[MAX_MODELS][MAX_QPATH]
 
     /// <summary><c>v[i]</c> as a reference, for component loops on fields and array elements.</summary>
@@ -194,7 +200,34 @@ public sealed unsafe partial class ClientState
     /// </summary>
     public void ClearState()
     {
-        Signon = 0;                                    // Host_ClearMemory
+        if (!ServerActive)
+            Signon = 0;                                // Host_ClearMemory (no server runs)
+        ClearCl();
+
+        Message.Clear();
+
+        new Span<ClientEntity>(Entities).Clear();
+        new Span<DLight>(DLights).Clear();
+        for (int i = 0; i < MaxLightstyles; i++)
+        {
+            LightstyleLength[i] = 0;
+            new Span<byte>(LightstyleMap[i]).Clear();
+        }
+        new Span<ClientEntity>(TempEntities).Clear();
+        new Span<Beam>(Beams).Clear();
+        // cl_static_entities is not cleared: a slot keeps what a statics of an earlier map left in it
+    }
+
+    /// <summary>Host_ClearMemory's part of the client, from SV_SpawnServer: cls.signon 0 and cl wiped (not the client's arrays).</summary>
+    public void ClearMemory()
+    {
+        Signon = 0;
+        ClearCl();
+    }
+
+    /// <summary>memset (&amp;cl, 0, sizeof(cl)).</summary>
+    private void ClearCl()
+    {
         MoveMessages = 0;
         CmdViewAngles = default;
         CmdForwardMove = CmdSideMove = CmdUpMove = 0;
@@ -223,20 +256,25 @@ public sealed unsafe partial class ClientState
         NumEntities = NumStatics = 0;
         ViewEnt = default;
         CdTrack = LoopTrack = 0;
-
-        Message.Clear();
-
-        new Span<ClientEntity>(Entities).Clear();
-        new Span<DLight>(DLights).Clear();
-        for (int i = 0; i < MaxLightstyles; i++)
-        {
-            LightstyleLength[i] = 0;
-            new Span<byte>(LightstyleMap[i]).Clear();
-        }
-        new Span<ClientEntity>(TempEntities).Clear();
-        new Span<Beam>(Beams).Clear();
-        // cl_static_entities is not cleared: a slot keeps what a statics of an earlier map left in it
     }
+
+    /// <summary>
+    /// CL_EstablishConnection with Host_Reconnect_f (connect local, from Host_Map_f): the connection, the signon
+    /// from 0. CL_Disconnect before it finds nothing connected in a listen server's first map.
+    /// </summary>
+    public void EstablishConnection(IClientConnection connection)
+    {
+        if (DemoPlayback)
+            return;
+        if (State == CaConnected)
+            throw DisconnectNotPorted;
+        Signon = 0;                                    // CL_Disconnect
+        NetCon = connection;
+        State = CaConnected;
+        Signon = 0;                                    // need all the signon messages before playing; Host_Reconnect_f
+    }
+
+    private static readonly HostErrorException DisconnectNotPorted = new("CL_Disconnect: a connected client disconnecting is not ported yet");
 
     // ---- demo playback (cl_demo.c)
 
@@ -290,7 +328,19 @@ public sealed unsafe partial class ClientState
     private int GetMessage()
     {
         if (!DemoPlayback)
-            return 0;      // no connection in the harness without a demo
+        {
+            if (NetCon is null)
+                return -1;                              // NET_GetMessage (NULL)
+            while (true)
+            {
+                int r = NetCon.GetMessage(NetMessage);
+                if (r != 1 && r != 2)
+                    return r;
+                // discard nop keepalive message
+                if (!(NetMessage.CurSize == 1 && NetMessage.Data[0] == SvcNop))
+                    return r;                           // Con_Printf ("<-- server to client keepalive\n") for a nop
+            }
+        }
         // decide if it is time to grab the next message
         if (Signon == Signons)  // allways grab until fully connected
         {

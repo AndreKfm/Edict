@@ -136,6 +136,13 @@ public sealed unsafe class ModelCache : IModelSource, IDisposable
             }
             start = i + 1;
         }
+        PrepareClientLookups();
+    }
+
+    /// <summary>The loaded maps for <see cref="LoadedClientModel"/> (a listen server's client uses the server's models).</summary>
+    [NoAllocUnchecked("load path")]
+    public void PrepareClientLookups()
+    {
         _worlds = new nint[_brushSets.Count];
         _worldModels = new nint[_brushSets.Count];
         _worldCounts = new int[_brushSets.Count];

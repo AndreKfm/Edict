@@ -170,6 +170,9 @@ another). `tools/mutate.py move check physics messages` (87 mutants, stopping at
 P5 (the client): the gate is `ClientGateTests`, the port's client on every demo of `data/client` against the
 reference's records. The corpus's demos are what a server sends; `tools/demogen.py` adds synthetic ones for what it
 does not (R7 group `client` showed which), among them the edges of CL_LerpPoint that only the signon frame can reach.
+The listen server's gate is `ListenGateTests`: the port's host with its local client on every run of `data/listen`
+(`sh tools/listen.sh ~/edict-ref data/listen`; `ONLY="<run> ..."` for some), the server's spawn and frame records
+and the client's records after every frame; a run's console commands are in `<run>.cmd`. R7 group `listen`.
 
 ### Test tiers (2026-10-13)
 
