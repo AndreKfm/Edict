@@ -30,7 +30,8 @@ File layout (all integers little-endian):
   record   'C'  u32 host_framecount  u64 cl.time bits  u32 cl.num_entities  u32 rand state
                 u64 lane_client  u64 lane_entities  u64 lane_effects
                 [u64 entity_hash x cl.num_entities, if EDH_FLAG_PER_ENTITY]           after every host frame of a
-                                                                                      demo playback (-edictclient)
+                                                                                      connected client (a demo, a
+                                                                                      listen server: -edictclient)
 Version 1 had no spawn records, version 2 no messages lane, version 3 no client records.
 Lanes:
   edicts         sv.time, num_edicts, state, paused, serverflags, lightstyles, then (index, entity hash) pairs
@@ -695,8 +696,8 @@ void EdictHash_ClientFrame (void)
 	edict_u64	lane_client, lane_entities, lane_effects;
 	int			i, n;
 
-	if (!edh || !cls.demoplayback)
-		return;
+	if (!edh || cls.state != ca_connected)
+		return;		// a demo playback or a listen server's local client
 	n = cl.num_entities;
 	if (n > entity_hashes_size)
 	{

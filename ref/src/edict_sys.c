@@ -38,6 +38,8 @@ The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the 
 #include "edict_traces.h"
 #include "edict_capture.h"
 
+void EdictTape_UseLoopback (void);	// edict_tape.c
+
 #define EDICT_FRAMETIME	"0.013889"	// 72 Hz, the rate Host_FilterTime is built around
 
 qboolean	isDedicated;
@@ -250,6 +252,8 @@ int main (int argc, char **argv)
 	parms.argv = com_argv;
 
 	isDedicated = COM_CheckParm ("-dedicated") != 0;
+	if (!isDedicated)
+		EdictTape_UseLoopback ();	// a listen server's local client connects through net_loop.c
 	frames = ArgValue ("-edictframes", 0);
 	if (frames <= 0)
 		Sys_Error ("-edictframes <n> is required");

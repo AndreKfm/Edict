@@ -178,5 +178,52 @@ net_driver_t net_drivers[MAX_NET_DRIVERS] =
 };
 int net_numdrivers = 1;
 
+/*
+A listen server (P5, docs/PLAN.md): without -dedicated the table's one driver is net_loop.c's loopback instead, at
+index 0 as in Quake's own tables (NET_SendToAll sends at once on driver 0; on another it would wait in a loop on a
+clock that does not advance within a frame). Its sends from the server's socket go to the messages lane, as the
+tape's do.
+*/
+#include "net_loop.h"
+
+extern qsocket_t	*loop_server;	// net_loop.c
+
+static int Edict_LoopSendMessage (qsocket_t *sock, sizebuf_t *data)
+{
+	if (sock == loop_server)
+		EdictHash_Sent (1, data->data, data->cursize);
+	return Loop_SendMessage (sock, data);
+}
+
+static int Edict_LoopSendUnreliableMessage (qsocket_t *sock, sizebuf_t *data)
+{
+	if (sock == loop_server)
+		EdictHash_Sent (2, data->data, data->cursize);
+	return Loop_SendUnreliableMessage (sock, data);
+}
+
+void EdictTape_UseLoopback (void)
+{
+	static net_driver_t	loop =
+	{
+	"Loopback",
+	false,
+	Loop_Init,
+	Loop_Listen,
+	Loop_SearchForHosts,
+	Loop_Connect,
+	Loop_CheckNewConnections,
+	Loop_GetMessage,
+	Edict_LoopSendMessage,
+	Edict_LoopSendUnreliableMessage,
+	Loop_CanSendMessage,
+	Loop_CanSendUnreliableMessage,
+	Loop_Close,
+	Loop_Shutdown
+	};
+
+	net_drivers[0] = loop;
+}
+
 net_landriver_t	net_landrivers[MAX_NET_DRIVERS];
 int net_numlandrivers = 0;
