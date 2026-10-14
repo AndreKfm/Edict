@@ -64,10 +64,15 @@ public sealed class ScreenGateTests
 
     internal static string? FirstDivergence(string run, out int presents, out int clientFrames)
     {
+        presents = clientFrames = 0;
         var edh = new EdhFile(Path.Combine(Directory, run + ".edh"));
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         string cmdline = Encoding.Latin1.GetString(edh.ClientCvars.First(c => Encoding.Latin1.GetString(c.Name) == "cmdline").Value);
-        using var host = new ClientHost(files, edh.ClientRandState, ["+playdemo", $"edict/{run}"], cmdline, withScreen: true);
+        // the reference's arguments are its cmdline (com_cmdline: argv joined by spaces, cut at 255 characters)
+        if (cmdline.Length >= 255)
+            return $"cmdline \"{cmdline}\" may be cut: its arguments are not known";
+        string[] args = cmdline.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1..];
+        using var host = new ClientHost(files, edh.ClientRandState, args, cmdline, withScreen: true);
         host.Screen!.Only2D = true;
         var sink = new Sink(edh.Screens, host);
         host.Screen.Sink = sink;

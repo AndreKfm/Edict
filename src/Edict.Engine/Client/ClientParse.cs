@@ -114,6 +114,7 @@ public sealed unsafe partial class ClientState
                     break;
                 case SvcServerInfo:
                     ParseServerInfo();
+                    Con?.RecalcRefdef();    // leave intermission full screen
                     break;
                 case SvcSetAngle:
                     ViewAngles.X = r.ReadAngle();
@@ -233,10 +234,12 @@ public sealed unsafe partial class ClientState
                 case SvcIntermission:
                     Intermission = 1;
                     CompletedTime = CCast.I32(Time);
+                    Con?.RecalcRefdef();    // go to full screen
                     break;
                 case SvcFinale:
                     Intermission = 2;
                     CompletedTime = CCast.I32(Time);
+                    Con?.RecalcRefdef();    // go to full screen
                     {
                         byte* s = r.ReadString();
                         Con?.CenterPrint(s);
@@ -245,6 +248,7 @@ public sealed unsafe partial class ClientState
                 case SvcCutScene:
                     Intermission = 3;
                     CompletedTime = CCast.I32(Time);
+                    Con?.RecalcRefdef();    // go to full screen
                     {
                         byte* s = r.ReadString();
                         Con?.CenterPrint(s);

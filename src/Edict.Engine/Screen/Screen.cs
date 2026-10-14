@@ -154,6 +154,9 @@ public sealed unsafe partial class Screen
             _cvars.Set(n, v);
     }
 
+    /// <summary>vid.recalc_refdef = true: the next update recalculates the view's rectangle (SCR_CalcRefdef).</summary>
+    public void RecalcRefdef() => _recalcRefdef = true;
+
     /// <summary>VID_Update: the present of the frame.</summary>
     private void Present() => Sink?.Present(_frame, _palette);
 
