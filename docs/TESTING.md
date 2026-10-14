@@ -204,6 +204,11 @@ reference: `GameInputTests` (keys through `Screen.KeyEvent`, a fake `IMouse`, th
 `AllocationTests.Game_frames_allocate_nothing`. An unattended run of the program itself:
 `edict -basedir <dir> -edictframes 300 -edictshot shot.bmp` (Windows; on Linux with an X server, WSLg included).
 
+P6, step 7: `GpuRendererTests` plays four demos of data/screen with both renderers (the exact one, then the GPU one
+on a hidden window's OpenGL 3.3 context into an offscreen framebuffer) and requires every world surface and alias
+model the exact renderer drew to be drawn by the GPU renderer, and no GL error; skipped without a context.
+`EDICT_GPUSHOTS=<dir>` saves every 250th frame of both (`EDICT_GPUFRAME=<n>` one more) for a look.
+
 ### Test tiers (2026-10-13)
 
 Not every change needs every test. Three tiers, chosen by what a run has to answer:

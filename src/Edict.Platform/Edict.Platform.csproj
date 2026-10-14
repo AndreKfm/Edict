@@ -8,5 +8,6 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Edict.Engine/Edict.Engine.csproj" />
+    <ProjectReference Include="../Edict.Gl/Edict.Gl.csproj" />
   </ItemGroup>
 </Project>

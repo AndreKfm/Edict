@@ -865,6 +865,33 @@ allocates but those that ran a command). Not in this step: the menu (the referen
 too: Escape does nothing), the demo loop (startdemos with nothing running stops with "not ported"; the game starts
 "+map start" when no map is named), the host commands a client forwards to the server (god, noclip, kill, give,
 say: "not ported yet" at the console), sound (step 8).
+Step 7 (2026-10-14), the GPU renderer (`src/Edict.Gl`, outside the proof). OpenGL 3.3 core through the platform's
+own entry points (`Gl.cs`: function pointers that WGL's wglGetProcAddress, opengl32's exports or GLX's
+glXGetProcAddressARB resolve; no package), contexts by wglCreateContextAttribsARB and glXCreateContextAttribsARB.
+The exact part stays the engine's: with `Screen.GpuView` the screen runs R_RenderView's state (the refdef,
+R_SetupFrame, R_MarkLeaves, the world's walk and the statics' efrags, the particles' motion, the contents' color
+shift) without drawing, and clears the view's rectangle before the crosshair, the center print and the console;
+the client records of every corpus are the same with either renderer, as the software renderer's drawing never
+wrote the game's state. The GPU renderer reads `Screen`'s render state (`RenderState.cs`: the axes, the PVS's
+visframes, the light styles' values, R_LightPoint) and the client's entities, dynamic lights and particles: the
+world's faces of the PVS in the frustum (GLQuake's BuildSurfaceDisplayList into one vertex buffer per brush model
+set, batched by texture and lightmap page), lightmaps in atlas pages rebuilt when a style's value or a dynamic
+light changes (the software renderer's range: 128 the texture, up to twice it), the sky's two layers and the
+water's turbulence per fragment, brush entities in their frame, alias models (skin and frame groups, the players'
+colors as R_TranslatePlayerSkin, lit by R_LightPoint and the dynamic lights, shaded by the yaw's light direction),
+sprites, particles, the gun in the near third of the depth. The 2D layer is the exact software layer put over the
+view (its zero pixels in the view's rectangle show the 3D view through), and the palette's color shifts tint the
+view as they tint the 2D layer (a per-channel linear map fitted between the base and the current palette). The
+window shows the last present after the host's frame (`IGameWindow.Render`), outside the frame the allocation gate
+measures. The default renderer is the GPU's; `-software` or `r_gpu 0` (a platform cvar after the reference's) shows
+the exact one. Test (`GpuRendererTests`, a hidden window's context, an offscreen framebuffer): on four demos of
+data/screen both renderers draw every frame from the same state, and every world surface the software renderer
+drew a span of and every alias model it drew, the GPU renderer drew too; no GL error. Found by it: GLQuake's far
+plane of 4096 cuts what a view from outside a map sees (16384 now), r_refdef.fov_y is CalcFov of the rectangle
+before R_ViewChanged set the new one (screen.c; only GLQuake reads it, so the GPU renderer derives the vertical
+angle from fov_x and the view's aspect, as the software renderer's frustum does), and an alias model's box is its
+bounding radius. Golden images are compared by eye (`EDICT_GPUSHOTS=<dir>` saves both renderers' frames): a GPU's
+rasterization is not bit-pinned. Runs on Windows and under WSLg's GLX, at the 72 frames a second of the host.
 
 ## D. Effort at 7 h/week (calendar weeks)
 

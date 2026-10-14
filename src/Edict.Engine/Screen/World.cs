@@ -343,6 +343,7 @@ public sealed unsafe partial class Screen
     /// </summary>
     private void DrawEntitiesOnList()
     {
+        _numDrawnAlias = 0;
         if (CvarValue("r_drawentities\0"u8) == 0)
             return;
         for (int i = 0; i < _cl.NumVisEdicts; i++)

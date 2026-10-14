@@ -159,12 +159,15 @@ public sealed unsafe partial class Screen
         else if (_cl.Paused == 0)
             ViewCalcRefdef();
 
-        _draw = !Only2D;
+        _draw = !Only2D && !GpuView;
         if (_draw)
             PushDlights();
         if (CvarValue("lcd_x\0"u8) != 0)
             throw NotPortedYet;             // two interleaved views
         RenderView3D();
+        ViewDrawn = true;
+        if (GpuView)
+            ClearViewRect();    // the GPU renderer draws the view from this state; the 2D layer comes over it
 
         if (CvarValue("crosshair\0"u8) != 0)
             Character((int)(_scrVrect.X + _scrVrect.Width / 2 + CvarValue("cl_crossx\0"u8)),

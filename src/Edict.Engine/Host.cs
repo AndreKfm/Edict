@@ -88,12 +88,13 @@ public sealed unsafe class Host : IDisposable
     /// reference's, and a console command the port lacks printing that it is not ported instead of stopping.
     /// </summary>
     [NoAllocUnchecked("load path")]
-    public static Host CreateGame(QFileSystem files, IReadOnlyList<string> commandLine)
+    public static Host CreateGame(QFileSystem files, IReadOnlyList<string> commandLine,
+                                  IReadOnlyList<(string Name, string Default)>? platformCvars = null)
     {
         string cmdline = string.Join(' ', ["edict", .. commandLine]);
         if (cmdline.Length > 255)
             cmdline = cmdline[..255];
-        var cvars = Cvars.FromRegistry([("m_filter", "0")]);
+        var cvars = Cvars.FromRegistry([("m_filter", "0"), .. platformCvars ?? []]);
         return new Host(files, cvars, 1, 0, new Loopback(1 << 20), ReferenceEdictHeaderBytes, ReferenceNumBuiltins,
             commandLine, cmdline, withScreen: true, game: true);
     }

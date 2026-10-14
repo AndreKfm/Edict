@@ -12,6 +12,7 @@
     <Project Path="src/Edict.Engine/Edict.Engine.csproj" />
     <Project Path="src/Edict.Exact/Edict.Exact.csproj" />
     <Project Path="src/Edict.Harness/Edict.Harness.csproj" />
+    <Project Path="src/Edict.Gl/Edict.Gl.csproj" />
     <Project Path="src/Edict.Platform/Edict.Platform.csproj" />
   </Folder>
   <Folder Name="/tests/">

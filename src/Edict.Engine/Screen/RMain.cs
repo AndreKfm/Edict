@@ -83,6 +83,8 @@ public sealed unsafe partial class Screen : ClientState.IParticleDrawer
         InitFaces();
         InitSurfaceCache();
         InitSkyBuffers();
+        _drawnSurface = new int[65536];
+        _drawnAlias = new EntityRef[256];
         InitBModels();
         InitSprites();
         InitAlias();

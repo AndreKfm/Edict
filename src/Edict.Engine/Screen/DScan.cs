@@ -91,6 +91,8 @@ public sealed unsafe partial class Screen
             if (s.Spans < 0)
                 continue;
             _drawnPolyCount++;
+            if (!s.InSubmodel && s.Data != null)
+                _drawnSurface[(int)(s.Data - _cl.WorldModel->Surfaces)] = _frameCount;
             _dZiStepU = s.DZiStepU;
             _dZiStepV = s.DZiStepV;
             _dZiOrigin = s.DZiOrigin;

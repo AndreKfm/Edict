@@ -451,6 +451,8 @@ public sealed unsafe partial class Screen
     private void AliasDrawModel(ref ClientEntity e, bool viewEnt, int ambientlight, int shadelight, in Vec3 plightvec)
     {
         _amodelsDrawn++;
+        if (!viewEnt && _numDrawnAlias < _drawnAlias.Length)
+            _drawnAlias[_numDrawnAlias++] = _currentEntity;
         _pmdl = (AliasModel*)e.Model->Extra;
         AliasSetupSkin(ref e);
         AliasSetUpTransform(ref e, _trivialAccept);

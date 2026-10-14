@@ -485,6 +485,7 @@ public sealed unsafe partial class Screen
     /// </summary>
     public void UpdateScreen()
     {
+        ViewDrawn = false;
         // scr_skipupdate (-edictclient) and block_drawing: the hosts that show no screen have no Screen
         _copyTop = false;
         _copyEverything = false;
@@ -576,8 +577,13 @@ public sealed unsafe partial class Screen
     private void RenderView()
     {
         ViewRender();
-        if (!Only2D)
-            return;
+        if (Only2D)
+            ClearViewRect();
+    }
+
+    /// <summary>r_refdef.vrect cleared to index 0.</summary>
+    private void ClearViewRect()
+    {
         for (int y = RefdefVrect.Y; y < RefdefVrect.Y + RefdefVrect.Height; y++)
             new Span<byte>(_buffer + y * Width + RefdefVrect.X, RefdefVrect.Width).Clear();
     }

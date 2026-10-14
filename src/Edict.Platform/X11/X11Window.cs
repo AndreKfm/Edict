@@ -3,12 +3,14 @@
 
 using System.Runtime.InteropServices;
 using Edict.Engine;
+using Edict.Gl;
 
 namespace Edict.Platform.X11;
 
 /// <summary>
-/// The game's window on Linux through Xlib (vid_x.c's way): a 32-bit XImage the palette's colors are scaled into,
-/// XPutImage at every present; the keys by keysym (XLateKey), autorepeat made detectable (no release between the
+/// The game's window on Linux through Xlib (vid_x.c's way): with OpenGL (GLX, a 3.3 core context on the window of
+/// the config's visual) the GPU renderer draws, else a 32-bit XImage the palette's colors are scaled into, XPutImage
+/// at every present; the keys by keysym (XLateKey), autorepeat made detectable (no release between the
 /// repeats), the mouse buttons and wheel as keys, the motion from the window's centre with the pointer warped back
 /// and grabbed, the cursor hidden, while the game has the mouse.
 /// </summary>
@@ -53,6 +55,19 @@ internal sealed unsafe partial class X11Window : IGameWindow
     [LibraryImport(Lib)] private static partial int XDestroyWindow(nint d, nint w);
     [LibraryImport(Lib)] private static partial int XCloseDisplay(nint d);
     [LibraryImport(Lib)] private static partial int XkbSetDetectableAutoRepeat(nint d, int detectable, int* supported);
+    [LibraryImport(Lib)] private static partial nint XCreateColormap(nint d, nint w, nint visual, int alloc);
+    [LibraryImport(Lib)] private static partial nint XCreateWindow(nint d, nint parent, int x, int y, uint w, uint h, uint border, int depth, uint cls, nint visual, nuint mask, void* attributes);
+    [LibraryImport(Lib)] private static partial int XGetWindowAttributes(nint d, nint w, byte* attributes);
+    [LibraryImport(Lib)] private static partial int XFree(void* data);
+
+    private const string LibGl = "libGL.so.1";
+    [LibraryImport(LibGl)] private static partial nint* glXChooseFBConfig(nint d, int screen, int* attribs, int* count);
+    [LibraryImport(LibGl)] private static partial nint glXGetVisualFromFBConfig(nint d, nint config);
+    [LibraryImport(LibGl, StringMarshalling = StringMarshalling.Utf8)] private static partial nint glXGetProcAddressARB(string name);
+    [LibraryImport(LibGl)] private static partial int glXMakeCurrent(nint d, nint drawable, nint context);
+    [LibraryImport(LibGl)] private static partial void glXDestroyContext(nint d, nint context);
+    [NoAlloc(Constraints.All, Reason = "a GLX call with blittable arguments: nothing managed is allocated")]
+    [LibraryImport(LibGl)] private static partial void glXSwapBuffers(nint d, nint drawable);
 
     private readonly nint _display, _window, _gc, _image, _wmDelete, _blank;
     private readonly uint* _pixels;                   // W x H, 0x00RRGGBB
@@ -60,10 +75,12 @@ internal sealed unsafe partial class X11Window : IGameWindow
     private readonly byte* _event;                    // XEvent: 24 longs
     private readonly byte[] _frame = new byte[Screen.Width * Screen.Height];
     private Screen? _screen;
+    private readonly nint _glContext;
+    private GlRenderer? _renderer;
     private bool _focused, _closed, _mouseHeld;
     private int _mx, _my;                             // the motion since the last move
 
-    public X11Window(string title)
+    public X11Window(string title, bool gl)
     {
         _display = XOpenDisplay(0);
         if (_display == 0)
@@ -71,9 +88,29 @@ internal sealed unsafe partial class X11Window : IGameWindow
         int screen = XDefaultScreen(_display);
         if (XDefaultDepth(_display, screen) < 24)
             throw new InvalidOperationException("the display is not 24 or 32 bits deep");
-        _window = XCreateSimpleWindow(_display, XRootWindow(_display, screen), 0, 0, W, H, 0, 0, 0);
-        XSelectInput(_display, _window, KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask
-            | PointerMotionMask | ExposureMask | StructureNotifyMask | FocusChangeMask);
+        long events = KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask
+                      | ExposureMask | StructureNotifyMask | FocusChangeMask;
+        nint config = gl ? ChooseConfig(screen) : 0;
+        nint vi = config != 0 ? glXGetVisualFromFBConfig(_display, config) : 0;
+        if (vi != 0)
+        {
+            // a window of the config's visual (XVisualInfo: visual at 0, depth at 20)
+            nint visual = *(nint*)vi;
+            int depth = *(int*)((byte*)vi + 20);
+            nint root = XRootWindow(_display, screen);
+            byte* attr = stackalloc byte[112];     // XSetWindowAttributes
+            new Span<byte>(attr, 112).Clear();
+            *(nint*)(attr + 96) = XCreateColormap(_display, root, visual, 0);
+            *(long*)(attr + 72) = events;
+            _window = XCreateWindow(_display, root, 0, 0, W, H, 0, depth, 1, visual, (1 << 13) | (1 << 11) | (1 << 3), attr);
+            XFree((void*)vi);
+            _glContext = CreateGlContext(config);
+        }
+        else
+        {
+            _window = XCreateSimpleWindow(_display, XRootWindow(_display, screen), 0, 0, W, H, 0, 0, 0);
+            XSelectInput(_display, _window, events);
+        }
         XStoreName(_display, _window, title);
         nint del = XInternAtom(_display, "WM_DELETE_WINDOW", 0);
         _wmDelete = del;
@@ -92,9 +129,51 @@ internal sealed unsafe partial class X11Window : IGameWindow
         _blank = XCreatePixmapCursor(_display, bitmap, bitmap, black, black, 0, 0);
         XMapWindow(_display, _window);
         XFlush(_display);
+        if (_glContext != 0)
+        {
+            glXMakeCurrent(_display, _window, _glContext);
+            Gl.Gl.Load(name => glXGetProcAddressARB(name));
+        }
     }
 
-    public void Attach(Screen screen) => _screen = screen;
+    /// <summary>A double-buffered RGB config with a depth buffer, or 0.</summary>
+    private nint ChooseConfig(int screen)
+    {
+        try
+        {
+            int* attribs = stackalloc int[] { 0x8012, 1, 0x8010, 1, 0x8011, 1, 5, 1, 12, 24, 8, 8, 9, 8, 10, 8, 0 };
+            int n;
+            nint* configs = glXChooseFBConfig(_display, screen, attribs, &n);
+            if (configs == null || n == 0)
+                return 0;
+            nint c = configs[0];
+            XFree(configs);
+            return c;
+        }
+        catch (DllNotFoundException)
+        {
+            return 0;       // no libGL: the software presentation
+        }
+    }
+
+    /// <summary>glXCreateContextAttribsARB: 3.3 core, direct; 0 if it fails.</summary>
+    private nint CreateGlContext(nint config)
+    {
+        nint create = glXGetProcAddressARB("glXCreateContextAttribsARB");
+        if (create == 0)
+            return 0;
+        int* attribs = stackalloc int[] { 0x2091, 3, 0x2092, 3, 0x9126, 1, 0 };
+        return ((delegate* unmanaged<nint, nint, nint, int, int*, nint>)create)(_display, config, 0, 1, attribs);
+    }
+
+    public bool HasGl => _glContext != 0;
+
+    public void Attach(Screen screen)
+    {
+        _screen = screen;
+        if (HasGl)
+            _renderer = new GlRenderer(screen);
+    }
 
     public bool Active => _focused && _screen is { } s && s.KeyDest == Keys.KeyGame && !s.ForcedUp;
 
@@ -150,7 +229,8 @@ internal sealed unsafe partial class X11Window : IGameWindow
                     _screen?.ClearKeyStates();
                     break;
                 case Expose:
-                    Put();
+                    if (_renderer == null)
+                        Put();
                     break;
                 case ClientMessage:
                     if (Field<nint>(56) == _wmDelete)
@@ -191,12 +271,41 @@ internal sealed unsafe partial class X11Window : IGameWindow
         _mx = _my = 0;
     }
 
-    [NoAlloc(Constraints.All, Reason = "Xlib calls with blittable arguments: nothing managed is allocated")]
+    private readonly byte[] _palette = new byte[768];
+    private bool _pending;
+
+    /// <summary>VID_Update: the frame and its palette kept for <see cref="Render"/>, after the host's frame.</summary>
     public void Present(ReadOnlySpan<byte> frameBuffer, ReadOnlySpan<byte> palette)
     {
         frameBuffer.CopyTo(_frame);
+        palette.CopyTo(_palette);
+        _pending = true;
+    }
+
+    /// <summary>The last present drawn again and saved, with the GPU renderer.</summary>
+    public bool Capture(string path)
+    {
+        if (_renderer == null)
+            return false;
+        _renderer.DrawFrame(_frame, _palette, W, H);
+        GlRenderer.WriteBmp(path, GlRenderer.ReadBack(W, H), W, H);
+        return true;
+    }
+
+    /// <summary>The last present shown: the GPU renderer's, or the frame scaled into the XImage.</summary>
+    public void Render()
+    {
+        if (!_pending)
+            return;
+        _pending = false;
+        if (_renderer != null)
+        {
+            _renderer.DrawFrame(_frame, _palette, W, H);
+            glXSwapBuffers(_display, _window);
+            return;
+        }
         for (int i = 0; i < 256; i++)
-            _colors[i] = (uint)(palette[i * 3] << 16 | palette[i * 3 + 1] << 8 | palette[i * 3 + 2]);
+            _colors[i] = (uint)(_palette[i * 3] << 16 | _palette[i * 3 + 1] << 8 | _palette[i * 3 + 2]);
         Put();
     }
 
@@ -256,6 +365,12 @@ internal sealed unsafe partial class X11Window : IGameWindow
     public void Dispose()
     {
         HoldMouse(false);
+        _renderer?.Dispose();
+        if (_glContext != 0)
+        {
+            glXMakeCurrent(_display, 0, 0);
+            glXDestroyContext(_display, _glContext);
+        }
         XDestroyWindow(_display, _window);
         XCloseDisplay(_display);
         NativeMemory.Free(_colors);

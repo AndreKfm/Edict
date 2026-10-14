@@ -14,6 +14,15 @@ internal interface IGameWindow : IScreenSink, IMouse, IDisposable
 
     /// <summary>The window system's events; false once the window was closed.</summary>
     bool Pump();
+
+    /// <summary>The window has an OpenGL context and the GPU renderer.</summary>
+    bool HasGl { get; }
+
+    /// <summary>The last present onto the window (outside the host's frame: the GPU renderer is outside the proof).</summary>
+    void Render();
+
+    /// <summary>The GPU renderer's last present saved as a BMP; false without the GPU renderer.</summary>
+    bool Capture(string path);
 }
 
 /// <summary>
@@ -54,13 +63,15 @@ internal static class Program
         if (!argv.Contains("+map") && !argv.Contains("+playdemo") && !argv.Contains("+connect"))
             argv.AddRange(["+map", "start"]);
 
-        IGameWindow window = OperatingSystem.IsWindows() ? new Win32.Win32Window("Edict")
-            : OperatingSystem.IsLinux() ? new X11.X11Window("Edict")
+        // the renderer: the GPU's by default, -software (or r_gpu 0 at the console) the exact software renderer's
+        bool gpu = !argv.Remove("-software");
+        IGameWindow window = OperatingSystem.IsWindows() ? new Win32.Win32Window("Edict", gpu)
+            : OperatingSystem.IsLinux() ? new X11.X11Window("Edict", gpu)
             : throw new PlatformNotSupportedException("edict: this platform has no window yet");
         try
         {
             using var files = new QFileSystem(basedir);
-            using Host host = Host.CreateGame(files, argv);
+            using Host host = Host.CreateGame(files, argv, [("r_gpu", window.HasGl ? "1" : "0")]);
             Screen screen = host.Screen!;
             screen.Sink = window;
             window.Attach(screen);
@@ -69,13 +80,16 @@ internal static class Program
             double oldtime = clock.Elapsed.TotalSeconds;
             while (window.Pump() && !screen.QuitRequested && host.FrameCount < maxFrames)
             {
+                screen.GpuView = window.HasGl && screen.Cvar("r_gpu\0"u8) != 0;
                 double newtime = clock.Elapsed.TotalSeconds;
                 bool ran = host.Frame((float)(newtime - oldtime));     // Host_FilterTime keeps the time it holds back
                 oldtime = newtime;
-                if (!ran)
+                if (ran)
+                    window.Render();
+                else
                     Thread.Sleep(1);
             }
-            if (shot != null)
+            if (shot != null && !(screen.GpuView && window.Capture(shot)))
                 WriteBmp(shot, screen.FrameBuffer, screen.Palette);
             return 0;
         }

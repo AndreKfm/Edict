@@ -2,5 +2,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/Edict.Engine/Edict.Engine.csproj" />
     <ProjectReference Include="../../src/Edict.Harness/Edict.Harness.csproj" />
+    <ProjectReference Include="../../src/Edict.Gl/Edict.Gl.csproj" />
+    <ProjectReference Include="../../src/Edict.Platform/Edict.Platform.csproj" />
   </ItemGroup>
 </Project>
