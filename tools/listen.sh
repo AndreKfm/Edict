@@ -15,7 +15,7 @@ REF="$(cd "$1" && pwd)"
 mkdir -p "$2"
 OUT="$(cd "$2" && pwd)"
 FRAMES="${FRAMES:-4000}"
-CLIENT="-edictclient"; [ -n "${SCREEN:-}" ] && CLIENT="-edictscreen"
+CLIENT="-edictclient"; [ -n "${SCREEN:-}" ] && CLIENT="-edictscreen ${EXTRA:-}"     # EXTRA: as in tools/screens.sh
 EXE=""; [ -x "$REF/edict_ref.exe" ] && EXE=".exe"
 PY="python3"; command -v python3 > /dev/null || PY="python"
 TOOLS="$(cd "$(dirname "$0")" && pwd)"

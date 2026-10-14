@@ -45,7 +45,9 @@ CFLAGS="$CFLAGS $EXTRA_CFLAGS"
 export SOURCE_DATE_EPOCH=945734400
 cd "$OUT/src"
 for f in $FILES; do
-  "$CC" $CFLAGS -c "$f.c" -o "../obj/$f.o" 2>> ../build.log || { echo "compile failed: $f (see $OUT/build.log)"; exit 1; }
+  # screen.c's one call of V_RenderView reaches the harness's wrapper (edict_vid.c: -edict2d), without a patch line
+  FILEFLAGS=""; [ "$f" = screen ] && FILEFLAGS="-DV_RenderView=EdictV_RenderView"
+  "$CC" $CFLAGS $FILEFLAGS -c "$f.c" -o "../obj/$f.o" 2>> ../build.log || { echo "compile failed: $f (see $OUT/build.log)"; exit 1; }
 done
 "$CC" $LDFLAGS -o "../edict_ref$EXE" ../obj/*.o $LIBS
 if [ -z "$EXE" ]; then ORACLE="libedict_oracle.so"; else ORACLE="edict_oracle.dll"; fi

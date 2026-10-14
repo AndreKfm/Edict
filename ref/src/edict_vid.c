@@ -11,6 +11,10 @@ point where a driver presents the frame, hands the frame buffer and the palette 
 host_framecount first to last:
   record   u32 host_framecount  u8 kind ('V' frame buffer, 'P' palette)  u32 length  byte data[length]
            once per VID_Update, the frame buffer (width x height, row by row) and then the palette (256 x RGB)
+-edict2d: the 2D layer alone. SCR_UpdateScreen's call of V_RenderView reaches EdictV_RenderView (build.sh compiles
+screen.c with -DV_RenderView=EdictV_RenderView, no line of screen.c changes), which runs V_RenderView with all it
+does to the client's state (the view, the particles, the contents color, the dynamic lights) and then clears the
+3D view's rectangle (r_refdef.vrect) to color 0, so the frame holds only what the 2D layer draws over it.
 */
 
 #include "quakedef.h"
@@ -32,6 +36,7 @@ unsigned	d_8to24table[256];
 static byte	vid_palette[768];		// what the display shows the frame buffer through
 
 static FILE	*screen_dump;
+static int	only_2d;			// -edict2d
 static int	screen_dump_first, screen_dump_last;
 
 void	VID_SetPalette (unsigned char *palette)
@@ -61,6 +66,7 @@ void	VID_Init (unsigned char *palette)
 	D_InitCaches (surfcache, sizeof(surfcache));
 
 	VID_SetPalette (palette);
+	only_2d = COM_CheckParm ("-edict2d") != 0;
 	i = COM_CheckParm ("-edictscreendump");
 	if (i && i < com_argc - 3)
 	{
@@ -100,6 +106,17 @@ void	VID_Update (vrect_t *rects)
 		ScreenDump ('P', vid_palette, sizeof (vid_palette));
 		fflush (screen_dump);
 	}
+}
+
+void EdictV_RenderView (void)
+{
+	int		y;
+
+	V_RenderView ();
+	if (!only_2d)
+		return;
+	for (y = r_refdef.vrect.y ; y < r_refdef.vrect.y + r_refdef.vrect.height ; y++)
+		memset (vid.buffer + y * vid.rowbytes + r_refdef.vrect.x, 0, r_refdef.vrect.width);
 }
 
 /*
