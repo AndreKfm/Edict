@@ -235,7 +235,8 @@ static int ArgValue (char *name, int fallback)
 int main (int argc, char **argv)
 {
 	static quakeparms_t	parms;
-	int		frames, frame, before, i, traces, bench, timed, played;
+	int		frames, frame, before, i, traces, bench, timed, played, client;
+	unsigned int	client_seed;
 	clock_t	start = 0;
 
 	COM_InitArgv (argc, argv);
@@ -278,8 +279,8 @@ int main (int argc, char **argv)
 		scr_skipupdate = true;
 	Host_Init (&parms);
 	Cvar_Set ("host_framerate", EDICT_FRAMETIME);
-	if (COM_CheckParm ("-edictclient"))
-		EdictHash_ClientStart ();
+	client = COM_CheckParm ("-edictclient") != 0;
+	client_seed = edict_rand_state ();
 
 	for (frame = 0 ; frame < frames ; frame++)
 	{
@@ -290,6 +291,8 @@ int main (int argc, char **argv)
 		Host_Frame (host_framerate.value);
 		if (host_framecount != before + 1)
 			Sys_Error ("host frame %i did not run (filtered or aborted)", frame);
+		if (client && frame == 0)
+			EdictHash_ClientStart (client_seed);	// frame 0 ran quake.rc (the configs) and +playdemo
 		EdictHash_ClientFrame ();
 		if (cls.demoplayback)
 			played = 1;

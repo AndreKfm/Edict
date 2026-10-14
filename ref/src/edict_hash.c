@@ -21,9 +21,12 @@ File layout (all integers little-endian):
                 u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw  u64 lane_messages
                 [u64 entity_hash x num_edicts, if EDH_FLAG_PER_ENTITY]                on every server frame
   record   'I'  u32 rand state  u32 numcvars  numcvars x { char name[] NUL  char string[] NUL }
-                                                                                      once before the first host
-                                                                                      frame (-edictclient): the
-                                                                                      client's inputs from Host_Init
+                                                                                      once (-edictclient), after
+                                                                                      host frame 0 and before its
+                                                                                      'C' record: the rand state
+                                                                                      before frame 0, the cvars
+                                                                                      after it (frame 0 runs
+                                                                                      quake.rc's configs)
   record   'C'  u32 host_framecount  u64 cl.time bits  u32 cl.num_entities  u32 rand state
                 u64 lane_client  u64 lane_entities  u64 lane_effects
                 [u64 entity_hash x cl.num_entities, if EDH_FLAG_PER_ENTITY]           after every host frame of a
@@ -666,7 +669,7 @@ static edict_u64 HashClientEffects (void)
 	return EdictHash_XXH64 (stream, stream_len);
 }
 
-void EdictHash_ClientStart (void)
+void EdictHash_ClientStart (unsigned int rand_before)
 {
 	cvar_t	*var;
 	int		n;
@@ -675,7 +678,7 @@ void EdictHash_ClientStart (void)
 		return;
 	stream_len = 0;
 	put8 ('I');
-	put32 (edict_rand_state ());
+	put32 (rand_before);
 	for (n = 0, var = cvar_vars ; var ; var = var->next)
 		n++;
 	put32 (n);

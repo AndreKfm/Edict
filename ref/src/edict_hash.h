@@ -21,8 +21,8 @@ void EdictHash_OpenMessages (char *path);
 void EdictHash_Sent (int kind, const void *data, int length);
 // Called after every host frame that ran while sv.active; writes one frame record.
 void EdictHash_Frame (void);
-// Called once before the first host frame with -edictclient: the client's inputs (rand state, cvars).
-void EdictHash_ClientStart (void);
+// Called once after host frame 0 with -edictclient: the client's inputs (the rand state before frame 0, the cvars).
+void EdictHash_ClientStart (unsigned int rand_before);
 // Diagnostic: -edictclientdump <first> <last> <file>, the client records' canonical streams for those frames.
 void EdictHash_OpenClientDump (char *path, int first, int last);
 // Called after every host frame; writes one client record while a demo plays back.
