@@ -206,7 +206,10 @@ public sealed unsafe partial class ClientState
     public void ClearState()
     {
         if (!ServerActive)
+        {
             Signon = 0;                                // Host_ClearMemory (no server runs)
+            Con?.FlushCaches();
+        }
         ClearCl();
 
         Message.Clear();
@@ -228,6 +231,7 @@ public sealed unsafe partial class ClientState
     /// <summary>Host_ClearMemory's part of the client, from SV_SpawnServer: cls.signon 0 and cl wiped (not the client's arrays).</summary>
     public void ClearMemory()
     {
+        Con?.FlushCaches();                            // D_FlushCaches
         Signon = 0;
         ClearCl();
     }

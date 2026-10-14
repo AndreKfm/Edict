@@ -160,6 +160,25 @@ public unsafe struct Model
     public int VisDataLength;
     public byte* VisData;
 
+    // the renderer's lumps (Mod_LoadVertexes .. Mod_LoadMarksurfaces), shared by the world and its submodels
+    public int NumVertexes;
+    public Vec3* Vertexes;
+    public int NumEdges;
+    public MEdge* Edges;
+    public int NumSurfedges;
+    public int* Surfedges;
+    public int NumTextures;
+    public Texture** Textures;
+    public int NumTexInfo;
+    public MTexInfo* TexInfo;
+    public int NumSurfaces;
+    public MSurface* Surfaces;
+    public int NumMarkSurfaces;
+    public MSurface** MarkSurfaces;
+    public byte* LightData;
+    /// <summary>The last texture whose name begins with "sky" (Mod_LoadTextures calls R_InitSky for each), or null.</summary>
+    public Texture* SkyTexture;
+
     /// <summary>
     /// The entity lump (Mod_LoadEntities), zero-terminated; null if the lump is empty. C copies the lump into the
     /// hunk without adding a terminator and relies on the one the map compiler writes (and on the hunk's zeroed

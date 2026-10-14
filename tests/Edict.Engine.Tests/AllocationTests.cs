@@ -98,23 +98,22 @@ public sealed class AllocationTests
                                            + $"{(allocating.Count > 0 ? allocating[0].Frame : -1)} ({(allocating.Count > 0 ? allocating[0].Bytes : 0)} bytes)");
     }
 
-    public static IEnumerable<TheoryDataRow<string>> ScreenRuns => ScreenGateTests.Runs;
+    public static IEnumerable<TheoryDataRow<string>> ScreenRuns => WorldGateTests.Runs;
 
     /// <summary>
-    /// The client's host started in full, with the screen (the 2D corpus' runs): nothing allocated in a frame but
-    /// frame 0 (quake.rc, playdemo) and frames that ran a command; the screen's update, the console, the view, the
-    /// particles and the world's walk allocate nothing.
+    /// The client's host started in full, with the screen (the world corpus' runs, the 3D view drawn): nothing
+    /// allocated in a frame but frame 0 (quake.rc, playdemo) and frames that ran a command; the screen's update, the
+    /// console, the view, the particles and the world's renderer allocate nothing.
     /// </summary>
     [Theory]
     [MemberData(nameof(ScreenRuns))]
     public void Screen_frames_allocate_nothing(string run)
     {
-        var edh = new EdhFile(Path.Combine(ScreenGateTests.Directory, run + ".edh"));
+        var edh = new EdhFile(Path.Combine(WorldGateTests.WorldDirectory, run + ".edh"));
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         string cmdline = Encoding.Latin1.GetString(edh.ClientCvars.First(c => Encoding.Latin1.GetString(c.Name) == "cmdline").Value);
         string[] args = cmdline.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1..];
         using var host = new ClientHost(files, edh.ClientRandState, args, cmdline, withScreen: true);
-        host.Screen!.Only2D = true;
         float time = float.Parse(ClientHost.HarnessFrameRate, System.Globalization.CultureInfo.InvariantCulture);
         var allocating = new List<(int Frame, long Bytes)>();
         int commandFrames = 0;

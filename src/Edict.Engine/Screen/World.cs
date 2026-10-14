@@ -4,11 +4,10 @@
 namespace Edict.Engine;
 
 /// <summary>
-/// The world renderer's walk as far as the client's state sees it (r_main.c, r_misc.c, r_bsp.c): R_ViewChanged's
-/// view frustum, R_SetupFrame, R_MarkLeaves and R_RecursiveWorldNode, which puts the statics of the leafs it reaches
-/// into cl_visedicts (R_StoreEfrags), and R_DrawEntitiesOnList's console message for a sprite's missing frame. What
-/// they draw (R_RenderFace and the rest) is step 4. Node and leaf indices as in the model: a child is a node, or
-/// -1 - leaf.
+/// The world's walk (r_main.c, r_misc.c, r_bsp.c): the frustum, R_MarkLeaves and R_RecursiveWorldNode, which marks
+/// the visible leafs' surfaces, hands the faces that face the view to R_RenderFace front to back, and puts the
+/// statics of the leafs it reaches into cl_visedicts (R_StoreEfrags); R_DrawEntitiesOnList's console message for a
+/// sprite's missing frame. Node and leaf indices as in the model: a child is a node, or -1 - leaf.
 /// </summary>
 public sealed unsafe partial class Screen
 {
@@ -21,6 +20,7 @@ public sealed unsafe partial class Screen
     private Model* _world;                            // the world the arrays below are for
     private int[] _nodeVisFrame = null!, _leafVisFrame = null!;
     private int[] _nodeParent = null!, _leafParent = null!;
+    private int[] _leafKey = null!;                   // mleaf_t.key: all bmodels in a leaf share the same key
     private byte[] _decompressed = null!;             // Mod_DecompressVis's static buffer, and room for C's overrun
 
     private Vec3 _vpn, _vright, _vup;
@@ -40,6 +40,7 @@ public sealed unsafe partial class Screen
         _leafVisFrame = new int[MaxMapLeafs];
         _nodeParent = new int[MaxMapNodes];
         _leafParent = new int[MaxMapLeafs];
+        _leafKey = new int[MaxMapLeafs];
         _decompressed = new byte[MaxMapLeafs / 8 + 256];
         _screenEdge = new Vec3[4];
         _clipNormal = new Vec3[4];
@@ -49,10 +50,12 @@ public sealed unsafe partial class Screen
 
     private static readonly SysErrorException BadSpriteFrameCount = new("R_GetSpriteframe: a sprite without frames");
 
-    /// <summary>R_NewMap's part: r_viewleaf NULL; the world is loaded anew in C, so its visframes are 0 again.</summary>
+    /// <summary>R_NewMap's part: r_viewleaf NULL, no warp yet; the world is loaded anew in C, so its visframes are 0 again.</summary>
     public void NewMap()
     {
         _viewLeaf = -1;
+        _doWarpOld = false;
+        _viewChanged = false;
         Model* world = _cl.WorldModel;
         if (world->NumNodes > MaxMapNodes || world->LeafCount > MaxMapLeafs)
             throw WorldTooLarge;
@@ -74,27 +77,6 @@ public sealed unsafe partial class Screen
             }
     }
 
-    /// <summary>R_ViewChanged: the view's rectangle and its frustum's screen edges.</summary>
-    private void ViewChanged(VRect pvrect, int lineadj)
-    {
-        const float aspect = 1.0f;          // vid.aspect
-        _recalcRefdef = false;
-        SetVrect(pvrect, ref RefdefVrect, lineadj);
-        _horizontalFieldOfView = (float)(2.0 * Edict.Exact.CMath.Tan(FovX / 360 * Math.PI));
-        float pixelAspect = aspect;
-        float xOrigin = (float)XCentering, yOrigin = (float)YCentering;
-        float screenAspect = RefdefVrect.Width * pixelAspect / RefdefVrect.Height;
-        _verticalFieldOfView = _horizontalFieldOfView / screenAspect;
-
-        _screenEdge[0] = new Vec3((float)(-1.0 / (xOrigin * _horizontalFieldOfView)), 0, 1);     // left side clip
-        _screenEdge[1] = new Vec3((float)(1.0 / ((1.0 - xOrigin) * _horizontalFieldOfView)), 0, 1);  // right side clip
-        _screenEdge[2] = new Vec3(0, (float)(-1.0 / (yOrigin * _verticalFieldOfView)), 1);       // top side clip
-        _screenEdge[3] = new Vec3(0, (float)(1.0 / ((1.0 - yOrigin) * _verticalFieldOfView)), 1);    // bottom side clip
-        for (int i = 0; i < 4; i++)
-            Mathlib.VectorNormalize(ref _screenEdge[i]);
-        // the projection's scales and centers, the alias transition: step 4
-    }
-
     /// <summary>Mod_PointInLeaf: the index of the leaf p is in.</summary>
     private static int PointInLeaf(in Vec3 p, Model* model)
     {
@@ -109,35 +91,6 @@ public sealed unsafe partial class Screen
         return -1 - child;
     }
 
-    /// <summary>R_SetupFrame as far as the walk needs it: the frame count, the view vectors, the view leaf, the frustum.</summary>
-    private void SetupFrame()
-    {
-        // don't allow cheats in multiplayer
-        if (_cl.MaxClients > 1)
-        {
-            CvarSet("r_draworder\0"u8, "0\0"u8);
-            CvarSet("r_fullbright\0"u8, "0\0"u8);
-            CvarSet("r_ambient\0"u8, "0\0"u8);
-            CvarSet("r_drawflat\0"u8, "0\0"u8);
-        }
-        if (CvarValue("r_numsurfs\0"u8) != 0 || CvarValue("r_numedges\0"u8) != 0)
-            throw NotPortedYet;     // the counts' console lines
-        _frameCount++;
-
-        // build the transformation matrix for the given view angles
-        Mathlib.AngleVectors(ViewAngles, out _vpn, out _vright, out _vup);
-
-        // current viewleaf
-        _oldViewLeaf = _viewLeaf;
-        _viewLeaf = PointInLeaf(ViewOrg, _cl.WorldModel);
-        _viewLeafContents = _cl.WorldModel->Leafs[_viewLeaf].Contents;
-        // r_dowarp changing calls R_ViewChanged with the whole screen again: at 320x200 the same rectangle
-
-        TransformFrustum();
-        SetUpFrustumIndexes();
-        CacheThrash = false;
-    }
-
     /// <summary>R_TransformFrustum: the screen edges rotated into the view.</summary>
     private void TransformFrustum()
     {
@@ -150,7 +103,7 @@ public sealed unsafe partial class Screen
                 v1 * _vright.Y + v2 * _vup.Y + v0 * _vpn.Y,
                 v1 * _vright.Z + v2 * _vup.Z + v0 * _vpn.Z);
             _clipNormal[i] = n;
-            _clipDist[i] = Vec3.Dot(ViewOrg, n);    // modelorg
+            _clipDist[i] = Vec3.Dot(_modelOrg, n);
         }
     }
 
@@ -239,9 +192,14 @@ public sealed unsafe partial class Screen
     }
 
     /// <summary>R_RenderWorld: the walk from the root with all four planes to clip against.</summary>
-    private void RenderWorld() => RecursiveWorldNode(0, 15);
+    private void RenderWorld()
+    {
+        _modelOrg = _rOrigin;       // currententity = &cl_entities[0]
+        _currentVertBase = _cl.WorldModel->Vertexes;
+        RecursiveWorldNode(0, 15);
+    }
 
-    /// <summary>R_RecursiveWorldNode without the drawing: the culling, the leafs' statics, the walk's order.</summary>
+    /// <summary>R_RecursiveWorldNode: the culling, the leafs' surfaces and statics, the nodes' faces in the walk's order.</summary>
     private void RecursiveWorldNode(int child, int clipflags)
     {
         Model* world = _cl.WorldModel;
@@ -289,10 +247,18 @@ public sealed unsafe partial class Screen
         if (child < 0)
         {
             int leaf = -1 - child;
-            // the leaf's surfaces' visframes, pleaf->key, r_currentkey: step 4
+            MLeaf* pleaf = world->Leafs + leaf;
+            if (_draw)
+            {
+                MSurface** mark = world->MarkSurfaces + pleaf->FirstMarkSurface;
+                for (int c = pleaf->NumMarkSurfaces; c != 0; c--)
+                    (*mark++)->VisFrame = _frameCount;
+            }
             // deal with model fragments in this leaf
             if (_cl.LeafEfrags[leaf] >= 0)
                 StoreEfrags(leaf);
+            _leafKey[leaf] = _currentKey;
+            _currentKey++;      // all bmodels in a leaf share the same key
             return;
         }
 
@@ -301,15 +267,36 @@ public sealed unsafe partial class Screen
         MPlane* plane = world->Planes + node->PlaneNum;
         double dot = plane->Type switch
         {
-            0 => ViewOrg.X - plane->Dist,
-            1 => ViewOrg.Y - plane->Dist,
-            2 => ViewOrg.Z - plane->Dist,
-            _ => Vec3.Dot(ViewOrg, plane->Normal) - plane->Dist,
+            0 => _modelOrg.X - plane->Dist,
+            1 => _modelOrg.Y - plane->Dist,
+            2 => _modelOrg.Z - plane->Dist,
+            _ => Vec3.Dot(_modelOrg, plane->Normal) - plane->Dist,
         };
         int side = dot >= 0 ? 0 : 1;
         // recurse down the children, front side first
         RecursiveWorldNode(node->Children[side], clipflags);
-        // the node's surfaces (R_RenderFace): step 4
+        // draw stuff
+        int count = node->NumSurfaces;
+        if (count != 0 && _draw)
+        {
+            MSurface* surf = world->Surfaces + node->FirstSurface;
+            if (dot < -BackfaceEpsilon)
+            {
+                for (; count != 0; count--, surf++)
+                    if ((surf->Flags & SurfFlags.PlaneBack) != 0 && surf->VisFrame == _frameCount)
+                        RenderFace(surf, clipflags);
+            }
+            else if (dot > BackfaceEpsilon)
+            {
+                for (; count != 0; count--, surf++)
+                    if ((surf->Flags & SurfFlags.PlaneBack) == 0 && surf->VisFrame == _frameCount)
+                        RenderFace(surf, clipflags);
+            }
+            // all surfaces on the same node share the same sequence number
+            _currentKey++;
+        }
+        else if (count != 0)
+            _currentKey++;
         // recurse down the back side
         RecursiveWorldNode(node->Children[side ^ 1], clipflags);
     }
@@ -357,6 +344,8 @@ public sealed unsafe partial class Screen
             if (r.Array == 0 && r.Index == _cl.ViewEntity)
                 continue;   // don't draw the player
             ref ClientEntity e = ref Entity(r);
+            if (e.Model->Type == ModelType.Alias && _draw)
+                throw NotPortedYet;     // R_AliasCheckBBox, R_AliasDrawModel: step 5
             if (e.Model->Type != ModelType.Sprite)
                 continue;
             int frame = e.Frame;
@@ -364,6 +353,8 @@ public sealed unsafe partial class Screen
                 Msg("R_DrawSprite: no such frame "u8).MsgInt(frame).Msg("\n"u8).EndMsg();
             else if (e.Model->NumFrames <= 0)
                 throw BadSpriteFrameCount;
+            if (_draw)
+                throw NotPortedYet;     // R_DrawSprite: step 5
         }
     }
 }

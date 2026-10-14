@@ -386,7 +386,10 @@ public sealed unsafe partial class ClientState
                 m = _models.LoadedClientModel(name);
             ModelPrecache[i] = (nint)m;
             if (m == null)
-                return;                 // Con_Printf ("Model %s not found\n")
+                return;
+            // Mod_LoadTextures' R_InitSky: a map's brush models load anew on every map, in this order
+            if (m->Type == ModelType.Brush && *(byte*)&m->Name != '*' && m->SkyTexture != null)
+                Con?.InitSky(m->SkyTexture);                 // Con_Printf ("Model %s not found\n")
         }
         // S_PrecacheSound: snd_null's gives no sfx, so sound_precache stays empty
 

@@ -35,6 +35,13 @@ public sealed unsafe partial class ClientState
         public int Type;
     }
 
+    /// <summary>D_DrawParticle: the renderer's, for each particle R_DrawParticles moves (none without a screen).</summary>
+    public interface IParticleDrawer
+    {
+        [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+        void DrawParticle(in Particle p);
+    }
+
     /// <summary>particles[r_numparticles].</summary>
     public Particle[] ParticleArray = null!;
 
@@ -380,7 +387,7 @@ public sealed unsafe partial class ClientState
     /// R_DrawParticles without the drawing (D_DrawParticle is the renderer's, step 5): the particles whose time is up
     /// return to the free list, the others move.
     /// </summary>
-    public void RunParticles(float gravity)
+    public void RunParticles(float gravity, IParticleDrawer? drawer)
     {
         float frametime = (float)(Time - OldTime);
         float time3 = frametime * 15;
@@ -416,7 +423,7 @@ public sealed unsafe partial class ClientState
                 break;
             }
 
-            // D_DrawParticle (p): step 5
+            drawer?.DrawParticle(p);     // D_DrawParticle
 
             p.Org.X += p.Vel.X * frametime;
             p.Org.Y += p.Vel.Y * frametime;

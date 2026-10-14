@@ -776,6 +776,41 @@ string's erase, the tiles at the console's edge, the view's origin and angles, t
 motion), which the full frames of steps 4 and 5 see; three need the platform's input (the console during a
 changelevel, a view size above 100, an alias that reads Cmd_Args); three need exact equalities the frame clock does
 not hit, and one another frame time. Of the 50 mutants left, 35 detected.
+Step 4 (2026-10-14), the world renderer. Corpus data/screen4 (`EXTRA="+r_drawentities 0 +r_drawviewmodel 0"
+tools/screens.sh`: the 19 demos and 12 listen runs with the whole view, entities and gun off, the RAM icon on; 2 min
+14 s). The port, in `Screen` beside the 2D layer, a file per C file: r_main.c and r_misc.c (`RMain.cs`: R_ViewChanged's
+projection, R_SetupFrame with the water warp's view change, R_AnimateLight, R_PushDlights and R_MarkLights, D_Init,
+D_ViewChanged, D_SetupFrame, D_DrawParticle in R_DrawParticles' loop), r_bsp.c (`World.cs`: the leafs' surfaces
+marked, the faces that face the view to R_RenderFace front to back, the keys), r_draw.c (`RDraw.cs`: R_ClipEdge,
+R_EmitEdge, the cached edges of a neighbouring face, R_RenderFace), r_edge.c (`REdge.cs`: the edge list, the active
+edge table, the surface stack and its spans, with C's pointers as indices), d_edge.c and d_scan.c (`DScan.cs`:
+D_DrawSurfaces, D_CalcGradients, D_DrawSpans8, Turbulent8, D_DrawZSpans, D_WarpScreen), d_surf.c and r_surf.c
+(`DSurf.cs`: the surface cache as C's heap, 256k in a native buffer with x64's surfcache_t header of 64 bytes, so
+that its fragments, the rover's laps and r_cache_thrash come out as in C; the lightmaps with the styles and the
+dynamic lights; R_DrawSurface's blocks with C's mix of unsigned and int in the light steps), r_sky.c and d_sky.c
+(`RSky.cs`: R_InitSky for the "sky" textures of each brush model the server info loads, in its order; R_MakeSky's
+static last shift and newsky outlive a map, as in C). The model loader keeps the renderer's lumps (`RenderData.cs`,
+`BrushLoaderRender.cs`: vertexes, edges, surfedges, textures with their animation chains, texinfo with mipadjust,
+faces with their extents, marksurfaces, lighting). D_FlushCaches runs where Host_ClearMemory does (the demo's server
+info, SV_SpawnServer) and at a change of r_fullbright. With -edict2d (the 2D gate) the port skips what only draws.
+Entities, sprites and the gun stop with "not ported yet" when they would be drawn (step 5); so do r_drawflat (its
+color is a surface's address) and r_draworder with a server. On the first run 17 of the 19 demos and all 12 listen
+runs presented as the reference; the two others had particles of a color above 255 (a fuzz demo's ramp), which C
+converts to unsigned char saturating (-fno-strict-float-cast-overflow), now `CCast.U8`. The z-buffer's pair stores
+(D_DrawZSpans ORs the second pixel onto the first's sign-extended upper half) depend on the buffer's address: it is a
+common symbol, which lld aligns to 32 bytes, so a pair starts at an even pixel, as in the port. Gate
+(`WorldGateTests`): all 31 runs, every frame buffer, palette, client record and server record the reference's; with
+the 2D gate 152 s for both classes. The allocation gate plays data/screen4 now, the renderer drawing: no frame
+allocates but those with a command (29 s). R7 group `world` (38 mutants of the projection, the light, the dynamic
+lights, the warp, the particles' pixels, the edge list, the clipping, the edge cache, the keys, the surface cache,
+the lightmaps, the texture animation, the span drawers, the z-buffer and the sky): 32 detected; 6 known blind spots,
+each with its reason in `tools/mutate.py` — three orders of edges or surfaces at the same u or key, whose span
+between has no width; a node's faces without a key of their own; the cache flush at a demo's server info (every
+demo of the corpus plays one map); R_MakeSky's early return (equal unless a new map's sky arrives within 1/8 s of
+the last shift). The step-3 mutants of the particles' motion (3) are detected now; the other step-3 blind spots that
+waited for the full frame stay blind for exact equalities the corpus does not hit or a view size below 100 (the
+platform's sizedown, step 6), their reasons updated. Open for step 4's synthetic inputs (with step 5's): the
+overflow of edges and surfaces, the span steppers' clamps under grazing views, a demo with a second map.
 
 ## D. Effort at 7 h/week (calendar weeks)
 

@@ -16,8 +16,9 @@ public interface IScreenSink
 /// <summary>
 /// The screen of the software renderer (P6, docs/PLAN.md): the video driver of the reference (ref/src/edict_vid.c, a
 /// 320x200 frame buffer and the palette it is shown through), and over it the 2D layer and the view — screen.c,
-/// console.c, draw.c, sbar.c and view.c — with C's globals as fields of one object, as they share them. The 3D view
-/// (R_RenderView) is steps 4 and 5; until then <see cref="Only2D"/> stands for the reference's -edict2d, which runs
+/// console.c, draw.c, sbar.c and view.c — and the 3D view, the software renderer's r_*.c and d_*.c (RMain.cs and
+/// the files beside it) — with C's globals as fields of one object, as they share them. The world is drawn (step
+/// 4); the entities and the gun are step 5. <see cref="Only2D"/> stands for the reference's -edict2d, which runs
 /// the view and clears its rectangle.
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
@@ -45,7 +46,7 @@ public sealed unsafe partial class Screen
     /// <summary>The host's realtime and host_frametime, which the screen reads (set by the host every frame).</summary>
     public double RealTime, FrameTime;
 
-    /// <summary>-edict2d: the view's rectangle is cleared after V_RenderView (the gate of step 3).</summary>
+    /// <summary>-edict2d: the view's rectangle is cleared after V_RenderView (the gate of step 3); what only draws is skipped.</summary>
     public bool Only2D { get; set; }
 
     /// <summary>The frame buffer, as the last present left it.</summary>
@@ -80,7 +81,7 @@ public sealed unsafe partial class Screen
     /// <summary>r_refdef.vrect: the 3D view's rectangle (R_ViewChanged).</summary>
     public VRect RefdefVrect;
 
-    /// <summary>r_cache_thrash: set by the renderer's surface cache (steps 4 and 5); SCR_DrawRam shows it.</summary>
+    /// <summary>r_cache_thrash: set by the surface cache when its rover laps itself in a frame (D_SCAlloc); SCR_DrawRam shows it.</summary>
     public bool CacheThrash;
 
     /// <summary>vrect_t.</summary>
@@ -109,6 +110,7 @@ public sealed unsafe partial class Screen
         _fullbright = 256 - BitConverter.ToInt32(_colormap, 2048 * 4);
         _palette = new byte[768];
         InitWorld();
+        InitRender();
         _centerString = new byte[1024];
         _gammaTable = new byte[256];
         _pal = new byte[768];

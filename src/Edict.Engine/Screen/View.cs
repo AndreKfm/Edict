@@ -140,7 +140,7 @@ public sealed unsafe partial class Screen
         return ref v.Z;
     }
 
-    /// <summary>V_RenderView: the view's state and the 3D view (steps 4 and 5); with the console forced up there is none.</summary>
+    /// <summary>V_RenderView: the view's state and the 3D view; with the console forced up there is none.</summary>
     private void ViewRender()
     {
         if (ForcedUp)
@@ -159,7 +159,9 @@ public sealed unsafe partial class Screen
         else if (_cl.Paused == 0)
             ViewCalcRefdef();
 
-        // R_PushDlights: the surfaces' light marks, the renderer's (step 4)
+        _draw = !Only2D;
+        if (_draw)
+            PushDlights();
         if (CvarValue("lcd_x\0"u8) != 0)
             throw NotPortedYet;             // two interleaved views
         RenderView3D();
@@ -167,27 +169,6 @@ public sealed unsafe partial class Screen
         if (CvarValue("crosshair\0"u8) != 0)
             Character((int)(_scrVrect.X + _scrVrect.Width / 2 + CvarValue("cl_crossx\0"u8)),
                       (int)(_scrVrect.Y + _scrVrect.Height / 2 + CvarValue("cl_crossy\0"u8)), '+');
-    }
-
-    private static readonly SysErrorException NullWorldModel = new("R_RenderView: NULL worldmodel");
-
-    /// <summary>
-    /// R_RenderView as far as the client's state sees it: R_SetupFrame, R_MarkLeaves and the world's walk (the
-    /// statics into cl_visedicts), R_DrawEntitiesOnList's console output, R_DrawParticles' movement of the
-    /// particles, V_SetContentsColor. Drawing the world, the entities and the particles is steps 4 and 5.
-    /// </summary>
-    private void RenderView3D()
-    {
-        if (_cl.Entities[0].Model == null || _cl.WorldModel == null)
-            throw NullWorldModel;
-        SetupFrame();
-        MarkLeaves();       // done here so we know if we're in water
-        RenderWorld();      // R_EdgeDrawing's R_RenderWorld; R_DrawBEntitiesOnList draws only
-        DrawEntitiesOnList();
-        // R_DrawViewModel draws only
-        _cl.RunParticles(CvarValue("sv_gravity\0"u8));      // R_DrawParticles
-        // D_WarpScreen: step 4
-        SetContentsColor(_viewLeafContents);
     }
 
     /// <summary>V_SetContentsColor: the contents' color shift (cshift_empty, _lava, _slime, _water).</summary>

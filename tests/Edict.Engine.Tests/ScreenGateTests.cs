@@ -25,12 +25,14 @@ public sealed class ScreenGateTests
         }
     }
 
-    /// <summary>The runs, or only the one EDICT_SCREENRUN names (for localizing a difference).</summary>
-    public static IEnumerable<TheoryDataRow<string>> Runs =>
-        (System.IO.Directory.Exists(Directory) ? System.IO.Directory.GetFiles(Directory, "*.edh") : [])
+    /// <summary>The runs of a corpus directory, or only the one EDICT_SCREENRUN names (for localizing a difference).</summary>
+    internal static IEnumerable<TheoryDataRow<string>> RunsOf(string dir) =>
+        (System.IO.Directory.Exists(dir) ? System.IO.Directory.GetFiles(dir, "*.edh") : [])
         .Select(f => Path.GetFileNameWithoutExtension(f))
         .Where(r => Environment.GetEnvironmentVariable("EDICT_SCREENRUN") is not { Length: > 0 } only || r == only)
         .Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r));
+
+    public static IEnumerable<TheoryDataRow<string>> Runs => RunsOf(Directory);
 
     /// <summary>Compares every present with the reference's screen records, in order; keeps the first difference.</summary>
     private sealed class Sink(IReadOnlyList<EdhFile.ScreenPresent> reference, Func<int> frameCount) : IScreenSink
@@ -62,10 +64,14 @@ public sealed class ScreenGateTests
         }
     }
 
-    internal static string? FirstDivergence(string run, out int presents, out int clientFrames)
+    internal static string? FirstDivergence(string run, out int presents, out int clientFrames) =>
+        FirstDivergence(Directory, true, run, out presents, out clientFrames);
+
+    /// <summary>A demo run of the corpus in <paramref name="dir"/>, its 3D view cleared (-edict2d) or drawn.</summary>
+    internal static string? FirstDivergence(string dir, bool only2D, string run, out int presents, out int clientFrames)
     {
         presents = clientFrames = 0;
-        var edh = new EdhFile(Path.Combine(Directory, run + ".edh"));
+        var edh = new EdhFile(Path.Combine(dir, run + ".edh"));
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         string cmdline = Encoding.Latin1.GetString(edh.ClientCvars.First(c => Encoding.Latin1.GetString(c.Name) == "cmdline").Value);
         // the reference's arguments are its cmdline (com_cmdline: argv joined by spaces, cut at 255 characters)
@@ -73,7 +79,7 @@ public sealed class ScreenGateTests
             return $"cmdline \"{cmdline}\" may be cut: its arguments are not known";
         string[] args = cmdline.Split(' ', StringSplitOptions.RemoveEmptyEntries)[1..];
         using var host = new ClientHost(files, edh.ClientRandState, args, cmdline, withScreen: true);
-        host.Screen!.Only2D = true;
+        host.Screen!.Only2D = only2D;
         var sink = new Sink(edh.Screens, () => host.FrameCount);
         host.Screen.Sink = sink;
         var hash = new ClientHash();
@@ -184,21 +190,21 @@ public sealed class ScreenGateTests
     }
 
     /// <summary>The listen runs of the 2D corpus (data/screen2d/listen), or only the one EDICT_SCREENRUN names.</summary>
-    public static IEnumerable<TheoryDataRow<string>> ListenRuns =>
-        (System.IO.Directory.Exists(Path.Combine(Directory, "listen")) ? System.IO.Directory.GetFiles(Path.Combine(Directory, "listen"), "*.edh") : [])
-        .Select(f => Path.GetFileNameWithoutExtension(f))
-        .Where(r => Environment.GetEnvironmentVariable("EDICT_SCREENRUN") is not { Length: > 0 } only || r == only)
-        .Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r));
+    public static IEnumerable<TheoryDataRow<string>> ListenRuns => RunsOf(Path.Combine(Directory, "listen"));
 
     /// <summary>
     /// A listen run with the screen: the port's host starts as the reference (Host_Init's console, quake.rc, the
     /// command line's map and the rest), and every server record, every client record and every present must be
     /// the reference's.
     /// </summary>
-    internal static string? ListenDivergence(string run, out int presents, out int frames)
+    internal static string? ListenDivergence(string run, out int presents, out int frames) =>
+        ListenDivergence(Directory, true, run, out presents, out frames);
+
+    /// <summary>A listen run of the corpus in <paramref name="dir"/>, its 3D view cleared (-edict2d) or drawn.</summary>
+    internal static string? ListenDivergence(string dir, bool only2D, string run, out int presents, out int frames)
     {
         presents = frames = 0;
-        string edhPath = Path.Combine(Directory, "listen", run + ".edh");
+        string edhPath = Path.Combine(dir, "listen", run + ".edh");
         var edh = new EdhFile(edhPath);
         string emgPath = Path.ChangeExtension(edhPath, ".emg");
         EmgFile? emg = File.Exists(emgPath) ? new EmgFile(emgPath) : null;
@@ -210,7 +216,7 @@ public sealed class ScreenGateTests
         using var files = new QFileSystem(TraceCorpus.DataDirectory);
         var loop = new Loopback(1 << 20);
         using var host = new Host(files, edh.ClientRandState, loop, inputs.HeaderBytes, VmReplay.NumBuiltins, args, cmdline, withScreen: true);
-        host.Screen!.Only2D = true;
+        host.Screen!.Only2D = only2D;
         var sink = new Sink(edh.Screens, () => host.FrameCount);
         host.Screen.Sink = sink;
         int spawn = 0, nextClient = 0;

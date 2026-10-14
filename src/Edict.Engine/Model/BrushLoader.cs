@@ -31,12 +31,12 @@ public sealed unsafe class BrushModelSet : IDisposable
 }
 
 /// <summary>
-/// <c>Mod_LoadBrushModel</c> (model.c) for the lumps the server's collision code reads: planes, visibility, leafs,
-/// nodes, clip nodes, submodels, and <c>Mod_MakeHull0</c>. Textures, lighting, faces, edges and marksurfaces come
-/// with the renderer. Errors that are Sys_Error in C throw <see cref="InvalidDataException"/>; unlike C, lumps that
-/// point outside the file are an error too.
+/// <c>Mod_LoadBrushModel</c> (model.c): the lumps the server's collision code reads — planes, visibility, leafs,
+/// nodes, clip nodes, submodels, and <c>Mod_MakeHull0</c> — and the renderer's (BrushLoaderRender.cs). Errors that
+/// are Sys_Error in C throw <see cref="InvalidDataException"/>; unlike C, lumps that point outside the file are an
+/// error too.
 /// </summary>
-public static unsafe class BrushLoader
+public static unsafe partial class BrushLoader
 {
     public static BrushModelSet Load(QFile file, ReadOnlySpan<byte> name)
     {
@@ -64,7 +64,8 @@ public static unsafe class BrushLoader
             + NativeArena.SizeOf<DClipNode>(numClip) + NativeArena.SizeOf<DModel>(numSub)
             + NativeArena.SizeOf<DClipNode>(numNodes) + NativeArena.SizeOf<Model>(Math.Max(numSub, 1))
             + NativeArena.SizeOf<PackedNode>(numClip) + NativeArena.SizeOf<PackedNode>(numNodes)
-            + NativeArena.SizeOf<byte>(entLen + 1);
+            + NativeArena.SizeOf<byte>(entLen + 1)
+            + RenderSize(lumps, header);
         var arena = new NativeArena(size);
         try
         {
@@ -73,6 +74,7 @@ public static unsafe class BrushLoader
             mod->Type = ModelType.Brush;
 
             LoadPlanes(mod, arena, (DPlane*)lumps.Data(Bsp.LumpPlanes), numPlanes);
+            LoadRender(mod, arena, lumps, header, name);
             LoadVisibility(mod, arena, lumps.Data(Bsp.LumpVisibility), visLen);
             LoadLeafs(mod, arena, (DLeaf*)lumps.Data(Bsp.LumpLeafs), numLeafs);
             LoadNodes(mod, arena, (DNode*)lumps.Data(Bsp.LumpNodes), numNodes);

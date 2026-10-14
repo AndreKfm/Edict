@@ -185,6 +185,12 @@ with the reference's dump: `tools/screen.py diff`), `EDICT_CLIENTDUMP=<file>` (a
 the first differing byte of a client lane, `EDICT_PORTSTREAM=<file>` writes the port's entities lane, and
 `EDICT_SCREENTRACE=1` prints the view's inputs for the first frames. R7 group `screen`.
 
+P6, step 4: `WorldGateTests` runs the same comparisons with the 3D view drawn on data/screen4, the corpus with the
+entities and the gun off (`EXTRA="+r_drawentities 0 +r_drawviewmodel 0" sh tools/screens.sh ~/edict-ref
+data/screen4`; `EDICT_SCREEN4` for another directory): the world, the surface cache with its light, the sky, the
+water's turbulence and warp, the particles, and the RAM icon, which the surface cache's thrashing shows. The
+allocation gate plays this corpus. R7 group `world`; the group `screen` runs both classes.
+
 ### Test tiers (2026-10-13)
 
 Not every change needs every test. Three tiers, chosen by what a run has to answer:

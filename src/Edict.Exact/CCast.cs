@@ -17,6 +17,14 @@ public static class CCast
     public static int I32(float f) =>
         f >= 2147483648f ? int.MaxValue : f >= -2147483648f ? (int)f : float.IsNaN(f) ? 0 : int.MinValue;
 
+    /// <summary><c>(unsigned char)f</c> for a C <c>float</c>: truncation, saturation to 0 and 255, NaN to 0.</summary>
+    public static byte U8(float f) =>
+        f >= 255f ? (byte)255 : f > -1f ? (byte)f : (byte)0;
+
+    /// <summary><c>(unsigned)f</c> for a C <c>float</c>: truncation, saturation to 0 and UINT_MAX, NaN to 0.</summary>
+    public static uint U32(float f) =>
+        f >= 4294967296f ? uint.MaxValue : f > -1f ? (uint)f : 0;
+
     /// <summary><c>(int)d</c> for a C <c>double</c>: truncation, saturation, NaN to 0.</summary>
     public static int I32(double d) =>
         d >= 2147483648.0 ? int.MaxValue : d > -2147483649.0 ? (int)d : double.IsNaN(d) ? 0 : int.MinValue;
