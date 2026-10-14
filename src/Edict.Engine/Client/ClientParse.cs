@@ -146,6 +146,7 @@ public sealed unsafe partial class ClientState
                     break;
                 case SvcUpdateName:
                 {
+                    Con?.SbarChanged();
                     int i = r.ReadByte();
                     if (i >= MaxClients)
                         throw BadScoreboard;
@@ -160,6 +161,7 @@ public sealed unsafe partial class ClientState
                 }
                 case SvcUpdateFrags:
                 {
+                    Con?.SbarChanged();
                     int i = r.ReadByte();
                     if (i >= MaxClients)
                         throw BadScoreboard;
@@ -168,6 +170,7 @@ public sealed unsafe partial class ClientState
                 }
                 case SvcUpdateColors:
                 {
+                    Con?.SbarChanged();
                     int i = r.ReadByte();
                     if (i >= MaxClients)
                         throw BadScoreboard;
@@ -502,6 +505,7 @@ public sealed unsafe partial class ClientState
         int items = r.ReadLong();
         if (Items != items)
         {   // set flash times
+            Con?.SbarChanged();
             for (int j = 0; j < 32; j++)
                 if ((items & (1 << j)) != 0 && (Items & (1 << j)) == 0)
                     ItemGetTime[j] = (float)Time;
@@ -512,13 +516,22 @@ public sealed unsafe partial class ClientState
         InWater = (bits & SuInWater) != 0 ? 1 : 0;
 
         Stats[StatWeaponFrame] = (bits & SuWeaponFrame) != 0 ? r.ReadByte() : 0;
-        Stats[StatArmor] = (bits & SuArmor) != 0 ? r.ReadByte() : 0;
-        Stats[StatWeapon] = (bits & SuWeapon) != 0 ? r.ReadByte() : 0;
-        Stats[StatHealth] = r.ReadShort();
-        Stats[StatAmmo] = r.ReadByte();
+        SetStat(StatArmor, (bits & SuArmor) != 0 ? r.ReadByte() : 0);
+        SetStat(StatWeapon, (bits & SuWeapon) != 0 ? r.ReadByte() : 0);
+        SetStat(StatHealth, r.ReadShort());
+        SetStat(StatAmmo, r.ReadByte());
         for (int i = 0; i < 4; i++)
-            Stats[StatShells + i] = r.ReadByte();
-        Stats[StatActiveWeapon] = r.ReadByte();     // standard_quake
+            SetStat(StatShells + i, r.ReadByte());
+        SetStat(StatActiveWeapon, r.ReadByte());    // standard_quake
+    }
+
+    /// <summary>A stat of the client data; a change redraws the status bar (Sbar_Changed).</summary>
+    private void SetStat(int stat, int value)
+    {
+        if (Stats[stat] == value)
+            return;
+        Stats[stat] = value;
+        Con?.SbarChanged();
     }
 
     /// <summary>CL_ParseStatic: a static entity into the next slot, which keeps what it held before in other fields.</summary>

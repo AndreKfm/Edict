@@ -509,29 +509,17 @@ public sealed unsafe partial class Screen
             ViewOrg.Z += _oldz - ent.Origin.Z;
             view.Origin.Z += _oldz - ent.Origin.Z;
         }
+        else
+            _oldz = ent.Origin.Z;
 
         if (CvarValue("chase_active\0"u8) != 0)
             throw NotPortedYet;     // Chase_Update
     }
 
-    // ---- sbar.c (next)
+    // ---- sbar.c's update state
 
-#pragma warning disable CS0414     // read by Sbar_Draw (next)
     private int _sbUpdates;                           // sb_updates: if >= vid.numpages, no update needed
-#pragma warning restore CS0414
 
     /// <summary>Sbar_Changed.</summary>
     public void SbarChanged() => _sbUpdates = 0;     // update next frame
-
-    /// <summary>Sbar_Draw.</summary>
-    private void SbarDraw()
-    {
-        if (_conCurrent == Height)
-            return;     // console is full screen
-        throw NotPortedYet;
-    }
-
-    private void IntermissionOverlay() => throw NotPortedYet;
-
-    private void FinaleOverlay() => throw NotPortedYet;
 }

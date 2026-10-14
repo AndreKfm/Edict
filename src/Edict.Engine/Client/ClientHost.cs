@@ -82,9 +82,14 @@ public sealed unsafe class ClientHost : IDisposable
         Cl = new ClientState(Cvars, _models, randSeed, Cmd.Text);
         RegisterCommands();
         // COM_CheckRegistered (in COM_Init, before Con_Init: its print reaches only stdout)
-        SetCvar("cmdline", cmdline);
         if (files.Registered)
+        {
+            SetCvar("cmdline", cmdline);
             SetCvar("registered", "1");
+        }
+        // Host_InitLocal's Host_FindMaxClients: one client, no deathmatch
+        fixed (byte* n = "deathmatch\0"u8)
+            Cvars.SetValue(n, 0);
         if (withScreen)
         {
             Screen = new Screen(files, Cvars, Cl, Keys);      // Con_Init
@@ -94,7 +99,13 @@ public sealed unsafe class ClientHost : IDisposable
             Screen.Printf("32.0 megabyte heap\n"u8);           // "%4.1f megabyte heap": -mem, 32 by default
             Screen.InitVideo();
             Screen.InitScreen();
+            Screen.InitSbar();
         }
+        // R_Init: the surface and edge counts of the stack-based renderer
+        fixed (byte* n = "r_maxedges\0"u8)
+            Cvars.SetValue(n, 2400);    // NUMSTACKEDGES
+        fixed (byte* n = "r_maxsurfs\0"u8)
+            Cvars.SetValue(n, 800);     // NUMSTACKSURFACES
         Cmd.InsertText("exec quake.rc\n"u8);
         SetCvar("host_framerate", HarnessFrameRate);           // edict_sys.c, after Host_Init
         Host.InitializeTypes();
@@ -119,6 +130,8 @@ public sealed unsafe class ClientHost : IDisposable
             Cl.Signon = 0;                  // need new connection messages
         });
         Cmd.Add("startdemos", StartDemos);
+        Cmd.Add("+showscores", () => Screen?.ShowScores(true));
+        Cmd.Add("-showscores", () => Screen?.ShowScores(false));
         Cmd.Add("name", Name);
         Cmd.Add("color", Color);
     }

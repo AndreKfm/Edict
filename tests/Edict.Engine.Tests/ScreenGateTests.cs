@@ -25,9 +25,12 @@ public sealed class ScreenGateTests
         }
     }
 
+    /// <summary>The runs, or only the one EDICT_SCREENRUN names (for localizing a difference).</summary>
     public static IEnumerable<TheoryDataRow<string>> Runs =>
         (System.IO.Directory.Exists(Directory) ? System.IO.Directory.GetFiles(Directory, "*.edh") : [])
-        .Select(f => Path.GetFileNameWithoutExtension(f)).Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r));
+        .Select(f => Path.GetFileNameWithoutExtension(f))
+        .Where(r => Environment.GetEnvironmentVariable("EDICT_SCREENRUN") is not { Length: > 0 } only || r == only)
+        .Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r));
 
     /// <summary>Compares every present with the reference's screen records, in order; keeps the first difference.</summary>
     private sealed class Sink(IReadOnlyList<EdhFile.ScreenPresent> reference, ClientHost host) : IScreenSink
@@ -87,6 +90,9 @@ public sealed class ScreenGateTests
             }
             if (sink.Failure is not null)
                 break;
+            if (Environment.GetEnvironmentVariable("EDICT_SCREENTRACE") is { Length: > 0 } && frame < 8)
+                TestContext.Current.TestOutputHelper?.WriteLine(
+                    $"frame {frame}: time {host.Cl.Time:R} old {host.Cl.OldTime:R} vel {host.Cl.Velocity.X:R},{host.Cl.Velocity.Y:R} onground {host.Cl.OnGround} gun {host.Cl.ViewEnt.Origin.X:R},{host.Cl.ViewEnt.Origin.Y:R},{host.Cl.ViewEnt.Origin.Z:R} ent {host.Cl.Entities[host.Cl.ViewEntity].Origin.Z:R}");
             if (frame == 0)
                 failure = CvarDifference(host.Cvars, edh.ClientCvars);
             if (host.Ended)
@@ -110,11 +116,16 @@ public sealed class ScreenGateTests
             else if (cl.NumEntities != r.NumEntities)
                 failure = $"frame {frame}: cl.num_entities {cl.NumEntities}, the reference's {r.NumEntities}";
             else if (l.Client != r.Client)
-                failure = $"frame {frame}: client lane differs";
+                failure = $"frame {frame}: client lane differs" + ListenGateTests.DumpDifference(hash.Streams(cl).Client, host.FrameCount, 'c');
             else if (l.Entities != r.Entities)
-                failure = $"frame {frame}: entities lane differs";
+            {
+                byte[] stream = hash.Streams(cl).EntitiesLane;
+                failure = $"frame {frame}: entities lane differs" + ListenGateTests.DumpDifference(stream, host.FrameCount, 'E');
+                if (Environment.GetEnvironmentVariable("EDICT_PORTSTREAM") is { Length: > 0 } ps)
+                    File.WriteAllBytes(ps, stream);
+            }
             else if (l.Effects != r.Effects)
-                failure = $"frame {frame}: effects lane differs";
+                failure = $"frame {frame}: effects lane differs" + ListenGateTests.DumpDifference(hash.Streams(cl).Effects, host.FrameCount, 'f');
             else
                 clientFrames++;
         }
