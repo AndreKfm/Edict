@@ -152,6 +152,7 @@ group `messages`; the loop gate is also part of `clients` and `physics` now, who
 
 ```sh
 sh tools/longruns.sh ~/edict-ref data/long      # the ten-minute runs of the cut-3 gate (hashes and messages)
+sh tools/demos.sh ~/edict-ref data/client       # P5: demos of every run's messages, the client's hashes of each
 ```
 
 Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after cut 3): about 146 s for a full run — build 5 s,

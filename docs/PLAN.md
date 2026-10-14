@@ -553,6 +553,42 @@ half the reference's time. Left in the profile: the VM (23 %, with the builtins 
 (13 %), checkclient (5 %), SV_CleanupEnts (3 %); each a few per cent at most. Open: the frame benchmark on .NET 11
 at GA (section G) and on Linux.
 
+**P5: the client** (section D). Steps (agreed 2026-10-14): (1) the reference side: demos of what the server sent
+(the `.emg` of every run), played back by the reference without a screen, with client hashes after every host frame;
+(2) a census of the server messages and client paths the corpus reaches; (3) the port: cl_parse.c, cl_main.c,
+cl_tent.c, the demo reader, gated at every client frame, with a level-1 fuzz of the message parser; (4) the gate on
+every corpus and long-run demo, then R7. A listen server (client and server in one process, one rand stream, §A.1)
+stays a step of its own.
+Step 1 done (2026-10-14). `tools/emg.py dem` writes a Quake demo of a run's `.emg` (cl_demo.c's format: the CD track
+line, then per message its length, three view angles and the bytes), in the order the server sent the messages; the
+view angles are the tape's last clc_move up to the message's host frame, as a recording client would have had them.
+`tools/demos.sh` writes the demos into the game directory (`id1/edict/`, where playdemo looks) and runs the reference
+on each: `-edictclient` (harness only, no hook line) sets scr_skipupdate, so SCR_UpdateScreen returns at once. The
+client is the network state, the renderer is P6, and the renderer's long-for-pointer arithmetic writes through
+truncated pointers on 64-bit Windows (LLP64): with the screen the Windows build crashed in the first demo frame.
+What SCR_UpdateScreen would change on the way (V_UpdatePalette's color shifts, the particles' movement and expiry in
+R_DrawParticles) is therefore not part of the truth; a run ends with its demo, before CL_NextDemo would play the
+game's own. `.edh` version 4 adds a client record `'C'` after every host frame of a playback, three lanes: `client`
+(cls.state and signon, cl's scalars, stats, items, color shifts, view and velocity vectors, the times, the precache
+lists by name, scores, light styles, the visible entities as references, and the rand state), `entities`
+(cl_entities, statics, temp entities, the gun model; pointers as what they point to: models by name, colormaps as
+an index), `effects` (dynamic lights, beams, the numbers of active and free particles). The rand state is hashed
+because client state depends on rand (a muzzle flash's light radius, an entity's syncbase when its model changes, a
+lightning beam's roll), and the particle functions draw from it once per particle they get from the free list; with
+no R_DrawParticles the list runs out and stays out, so the port has to model which particles are taken, not what
+they do. Corpus: the 10 corpus runs and the 3 long runs, 77,253 client frames; Windows and Linux identical on every
+record and entity, two Windows runs identical, and server runs hash as before (version 4 adds only the record kind).
+Found on the way: after a restart the tape's client never sends prespawn again, so the client stays at signon 1, and
+CL_GetMessage, which reads without waiting until the signon is complete, parses the rest of the demo in one frame;
+that is the reference's behaviour on these demos and the port's to reproduce.
+Step 2 (census, `tools/emg.py census`, all 77,858 messages of the 13 runs): 415,905 entity updates (frame 174,490,
+nolerp 108,917, long entity number 11,863, model 8,049, effects 284; colormap and skin never), svc_time and
+svc_clientdata 77,256 each (ideal pitch in 10,747), sound 6,493, baselines 1,570, statics 467, static sounds 508,
+temp entities 1,655 (gunshot 1,560, teleport 52, explosion 38, wizspike 5), light styles 832, prints 640, nops 253,
+damage 71, setangle 52, stats 52, signon 46, particles 26, the scoreboard's name, frags and colors 26 each, cdtrack and
+setview 20 each, stufftext 11, killed monster 4, centerprint 2, found secret 1. Never: disconnect, version,
+stopsound, setpause, intermission, finale, sellscreen, cutscene.
+
 ## D. Effort at 7 h/week (calendar weeks)
 
 Includes ~25 % overhead for the multi-model workflow (generation, gating, ranking per module).

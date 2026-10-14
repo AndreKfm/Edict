@@ -9,7 +9,7 @@ on memory layout enters the gated lanes: strings are hashed by content, entity r
 padding and pointers (edict_t.area) are never read. The C# port produces the same streams.
 
 File layout (all integers little-endian):
-  header   "EDH1"  u32 version (3)  u32 flags
+  header   "EDH1"  u32 version (4)  u32 flags
   record   'M'  char map[64]  u32 progs_crc  u32 entityfields  u32 numglobals          on every new map, and before
                                                                                       every spawn record
   record   'S'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
@@ -20,7 +20,11 @@ File layout (all integers little-endian):
   record   'F'  u32 host_framecount  u64 sv.time bits  u32 num_edicts
                 u64 lane_edicts  u64 lane_globals_typed  u64 lane_globals_raw  u64 lane_messages
                 [u64 entity_hash x num_edicts, if EDH_FLAG_PER_ENTITY]                on every server frame
-Version 1 had no spawn records, version 2 no messages lane.
+  record   'C'  u32 host_framecount  u64 cl.time bits  u32 cl.num_entities
+                u64 lane_client  u64 lane_entities  u64 lane_effects
+                [u64 entity_hash x cl.num_entities, if EDH_FLAG_PER_ENTITY]           after every host frame of a
+                                                                                      demo playback (-edictclient)
+Version 1 had no spawn records, version 2 no messages lane, version 3 no client records.
 Lanes:
   edicts         sv.time, num_edicts, state, paused, serverflags, lightstyles, then (index, entity hash) pairs
   globals_typed  every globals word covered by a globaldef, typed like entity fields
@@ -28,6 +32,12 @@ Lanes:
   messages       what the server sent to the tape connection since the previous record (edict_tape.c), each
                  message as u8 kind (1 reliable, 2 unreliable)  u32 length  bytes; XXH64 of the empty stream if
                  nothing was sent
+
+Client lanes (EdictHash_ClientFrame, below):
+  client         cls.state and signon, cl's scalars, stats, items, color shifts, view and velocity vectors, times,
+                 precache lists by name, scores, light styles, the visible entities as references, the rand state
+  entities       (index, hash) of cl_entities, then the statics, the temp entities and the gun model in full
+  effects        the dynamic lights, the beams, the numbers of active and free particles
 
 Diagnostic: -edictmessages <file> (.emg) writes the messages themselves, for localizing a difference in that lane:
   header   "EMG1"  u32 version (1)
@@ -304,7 +314,7 @@ void EdictHash_Open (char *path, int flags)
 	edh_flags = flags;
 	stream_len = 0;
 	put8 ('E'); put8 ('D'); put8 ('H'); put8 ('1');
-	put32 (3);
+	put32 (4);
 	put32 (flags);
 	FlushStream ();
 }
@@ -427,6 +437,238 @@ void Edict_Spawned (void)
 	if (edict_capture)
 		EdictCapture_Spawn ();
 	EdictHash_Spawn ();
+}
+
+/*
+==============================================================================
+The client (docs/PLAN.md, P5): one 'C' record after every host frame of a demo playback
+
+The client as the harness runs it (-edictclient): no screen updates, so nothing of SCR_UpdateScreen's (the palette's
+color shifts, the particles' movement and expiry in R_DrawParticles) is part of the state. Pointers are hashed as
+what they point to: a model or sound by its name, a colormap as 0 (vid.colormap), 1 + i (scores[i]'s translation)
+or -1 (none), a visible entity by its array and index. Renderer-only fields (efrags, visframe, dlightframe and bits,
+trivial_accept, topnode) and the scoreboard's translation tables (derived from the colors) are left out.
+==============================================================================
+*/
+
+extern int			num_temp_entities;			// cl_tent.c
+extern particle_t	*active_particles, *free_particles;	// r_part.c
+
+static void putvec (vec3_t v)
+{
+	putfloat (v[0]); putfloat (v[1]); putfloat (v[2]);
+}
+
+static void putmodel (model_t *m)
+{
+	putstring (m ? m->name : "");
+}
+
+static int ColormapIndex (byte *colormap)
+{
+	int		i;
+
+	if (!colormap)
+		return -1;
+	if (colormap == vid.colormap)
+		return 0;
+	for (i = 0 ; i < cl.maxclients && cl.scores ; i++)
+		if (colormap == cl.scores[i].translations)
+			return 1 + i;
+	Sys_Error ("EdictHash: a colormap that is neither vid.colormap nor a translation");
+	return 0;
+}
+
+static void PutClientEntity (entity_t *e)
+{
+	put32 (e->forcelink);
+	put32 (e->update_type);
+	putvec (e->baseline.origin);
+	putvec (e->baseline.angles);
+	put32 (e->baseline.modelindex);
+	put32 (e->baseline.frame);
+	put32 (e->baseline.colormap);
+	put32 (e->baseline.skin);
+	put32 (e->baseline.effects);
+	putdouble (e->msgtime);
+	putvec (e->msg_origins[0]);
+	putvec (e->msg_origins[1]);
+	putvec (e->origin);
+	putvec (e->msg_angles[0]);
+	putvec (e->msg_angles[1]);
+	putvec (e->angles);
+	putmodel (e->model);
+	put32 (e->frame);
+	putfloat (e->syncbase);
+	put32 ((unsigned int)ColormapIndex (e->colormap));
+	put32 (e->effects);
+	put32 (e->skinnum);
+}
+
+// The array and index of a visible entity (cl_visedicts): 0 cl_entities, 1 statics, 2 temp entities, 3 viewent.
+static void PutEntityRef (entity_t *e)
+{
+	if (e >= cl_entities && e < cl_entities + MAX_EDICTS)
+		{ put8 (0); put32 (e - cl_entities); }
+	else if (e >= cl_static_entities && e < cl_static_entities + MAX_STATIC_ENTITIES)
+		{ put8 (1); put32 (e - cl_static_entities); }
+	else if (e >= cl_temp_entities && e < cl_temp_entities + MAX_TEMP_ENTITIES)
+		{ put8 (2); put32 (e - cl_temp_entities); }
+	else if (e == &cl.viewent)
+		{ put8 (3); put32 (0); }
+	else
+		Sys_Error ("EdictHash: a visible entity outside the client's arrays");
+}
+
+static edict_u64 HashClientState (void)
+{
+	int		i, j;
+
+	stream_len = 0;
+	put32 (cls.state);
+	put32 (cls.signon);
+	put32 (cl.movemessages);
+	putvec (cl.cmd.viewangles);
+	putfloat (cl.cmd.forwardmove); putfloat (cl.cmd.sidemove); putfloat (cl.cmd.upmove);
+	for (i = 0 ; i < MAX_CL_STATS ; i++)
+		put32 (cl.stats[i]);
+	put32 (cl.items);
+	for (i = 0 ; i < 32 ; i++)
+		putfloat (cl.item_gettime[i]);
+	putfloat (cl.faceanimtime);
+	for (i = 0 ; i < NUM_CSHIFTS ; i++)
+	{
+		for (j = 0 ; j < 3 ; j++)
+			put32 (cl.cshifts[i].destcolor[j]);
+		put32 (cl.cshifts[i].percent);
+		for (j = 0 ; j < 3 ; j++)
+			put32 (cl.prev_cshifts[i].destcolor[j]);
+		put32 (cl.prev_cshifts[i].percent);
+	}
+	putvec (cl.mviewangles[0]); putvec (cl.mviewangles[1]); putvec (cl.viewangles);
+	putvec (cl.mvelocity[0]); putvec (cl.mvelocity[1]); putvec (cl.velocity);
+	putvec (cl.punchangle);
+	putfloat (cl.idealpitch); putfloat (cl.pitchvel); put32 (cl.nodrift); putfloat (cl.driftmove);
+	putdouble (cl.laststop);
+	putfloat (cl.viewheight); putfloat (cl.crouch);
+	put32 (cl.paused); put32 (cl.onground); put32 (cl.inwater);
+	put32 (cl.intermission); put32 (cl.completed_time);
+	putdouble (cl.mtime[0]); putdouble (cl.mtime[1]); putdouble (cl.time); putdouble (cl.oldtime);
+	putfloat (cl.last_received_message);
+	for (i = 0 ; i < MAX_MODELS ; i++)
+		putmodel (cl.model_precache[i]);
+	for (i = 0 ; i < MAX_SOUNDS ; i++)
+		putstring (cl.sound_precache[i] ? cl.sound_precache[i]->name : "");
+	putstring (cl.levelname);
+	put32 (cl.viewentity); put32 (cl.maxclients); put32 (cl.gametype);
+	putmodel (cl.worldmodel);
+	put32 (cl.num_entities); put32 (cl.num_statics);
+	put32 (cl.cdtrack); put32 (cl.looptrack);
+	for (i = 0 ; i < cl.maxclients && cl.scores ; i++)
+	{
+		putstring (cl.scores[i].name);
+		putfloat (cl.scores[i].entertime);
+		put32 (cl.scores[i].frags);
+		put32 (cl.scores[i].colors);
+	}
+	for (i = 0 ; i < MAX_LIGHTSTYLES ; i++)
+	{
+		put32 (cl_lightstyle[i].length);
+		putstring (cl_lightstyle[i].map);
+	}
+	put32 (cl_numvisedicts);
+	for (i = 0 ; i < cl_numvisedicts ; i++)
+		PutEntityRef (cl_visedicts[i]);
+	put32 (edict_rand_state ());
+	return EdictHash_XXH64 (stream, stream_len);
+}
+
+static edict_u64 HashClientEntity (entity_t *e)
+{
+	stream_len = 0;
+	PutClientEntity (e);
+	return EdictHash_XXH64 (stream, stream_len);
+}
+
+static edict_u64 HashClientEffects (void)
+{
+	particle_t	*p;
+	int			i, n;
+
+	stream_len = 0;
+	for (i = 0 ; i < MAX_DLIGHTS ; i++)
+	{
+		putvec (cl_dlights[i].origin);
+		putfloat (cl_dlights[i].radius);
+		putfloat (cl_dlights[i].die);
+		putfloat (cl_dlights[i].decay);
+		putfloat (cl_dlights[i].minlight);
+		put32 (cl_dlights[i].key);
+	}
+	for (i = 0 ; i < MAX_BEAMS ; i++)
+	{
+		put32 (cl_beams[i].entity);
+		putmodel (cl_beams[i].model);
+		putfloat (cl_beams[i].endtime);
+		putvec (cl_beams[i].start);
+		putvec (cl_beams[i].end);
+	}
+	for (n = 0, p = active_particles ; p ; p = p->next)
+		n++;
+	put32 (n);
+	for (n = 0, p = free_particles ; p ; p = p->next)
+		n++;
+	put32 (n);
+	return EdictHash_XXH64 (stream, stream_len);
+}
+
+void EdictHash_ClientFrame (void)
+{
+	edict_u64	lane_client, lane_entities, lane_effects;
+	int			i, n;
+
+	if (!edh || !cls.demoplayback)
+		return;
+	n = cl.num_entities;
+	if (n > entity_hashes_size)
+	{
+		entity_hashes = realloc (entity_hashes, n * sizeof (edict_u64));
+		if (!entity_hashes)
+			Sys_Error ("EdictHash: out of memory");
+		entity_hashes_size = n;
+	}
+	for (i = 0 ; i < n ; i++)
+		entity_hashes[i] = HashClientEntity (&cl_entities[i]);
+
+	// the entities lane: (index, hash) of cl_entities, then the statics, the temp entities and the gun model
+	stream_len = 0;
+	for (i = 0 ; i < n ; i++)
+	{
+		put32 (i);
+		put64 (entity_hashes[i]);
+	}
+	for (i = 0 ; i < cl.num_statics ; i++)
+		PutClientEntity (&cl_static_entities[i]);
+	put32 (num_temp_entities);
+	for (i = 0 ; i < num_temp_entities ; i++)
+		PutClientEntity (&cl_temp_entities[i]);
+	PutClientEntity (&cl.viewent);
+	lane_entities = EdictHash_XXH64 (stream, stream_len);
+	lane_client = HashClientState ();
+	lane_effects = HashClientEffects ();
+
+	stream_len = 0;
+	put8 ('C');
+	put32 (host_framecount);
+	putdouble (cl.time);
+	put32 (n);
+	put64 (lane_client);
+	put64 (lane_entities);
+	put64 (lane_effects);
+	if (edh_flags & EDH_FLAG_PER_ENTITY)
+		for (i = 0 ; i < n ; i++)
+			put64 (entity_hashes[i]);
+	FlushStream ();
 }
 
 /*

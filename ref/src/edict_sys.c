@@ -23,6 +23,10 @@ Arguments (besides Quake's own):
                      the same point: check the corpus file against the map, time reps passes over it, exit
   -edictframetime    time host frames 1 to n-1 as one interval (clock (); frame 0 runs the +map command) and
                      print it; for the frame benchmark, run without -edicthash and -edictcapture
+  -edictclient       the client without the screen: scr_skipupdate, so SCR_UpdateScreen returns at once (the
+                     renderer is phase 6 of docs/PLAN.md, and its long-for-pointer arithmetic breaks on 64-bit
+                     Windows); for demo playback (+playdemo) without -dedicated. The run ends with the demo (the
+                     frame in which CL_StopPlayback ran is the last).
 The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
 */
 #include "quakedef.h"
@@ -229,7 +233,7 @@ static int ArgValue (char *name, int fallback)
 int main (int argc, char **argv)
 {
 	static quakeparms_t	parms;
-	int		frames, frame, before, i, traces, bench, timed;
+	int		frames, frame, before, i, traces, bench, timed, played;
 	clock_t	start = 0;
 
 	COM_InitArgv (argc, argv);
@@ -250,6 +254,7 @@ int main (int argc, char **argv)
 	if (traces && traces >= com_argc - 3)
 		Sys_Error ("-edicttraces <file> <count> <seed>");
 	timed = COM_CheckParm ("-edictframetime") != 0;
+	played = 0;
 	bench = COM_CheckParm ("-edicttracebench");
 	if (bench && bench >= com_argc - 2)
 		Sys_Error ("-edicttracebench <file> <reps>");
@@ -264,6 +269,8 @@ int main (int argc, char **argv)
 	if (i && i < com_argc - 1)
 		EdictCapture_Open (com_argv[i + 1]);
 
+	if (COM_CheckParm ("-edictclient"))
+		scr_skipupdate = true;
 	Host_Init (&parms);
 	Cvar_Set ("host_framerate", EDICT_FRAMETIME);
 
@@ -276,6 +283,11 @@ int main (int argc, char **argv)
 		Host_Frame (host_framerate.value);
 		if (host_framecount != before + 1)
 			Sys_Error ("host frame %i did not run (filtered or aborted)", frame);
+		EdictHash_ClientFrame ();
+		if (cls.demoplayback)
+			played = 1;
+		else if (played)
+			break;		// the demo ended: the run ends with it, before CL_NextDemo plays the game's own demos
 		if (sv.active)
 		{
 			EdictHash_Frame ();

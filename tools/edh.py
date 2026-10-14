@@ -6,9 +6,9 @@ import struct, sys
 def read(path):
     d = open(path, 'rb').read(); p = 12
     assert d[:4] == b'EDH1'; ver, flags = struct.unpack_from('<II', d, 4)
-    assert ver in (1, 2, 3), path
+    assert ver in (1, 2, 3, 4), path
     rec = '<IdIQQQQ' if ver >= 3 else '<IdIQQQ'; rl = struct.calcsize(rec)
-    maps, frames, spawns = [], [], []
+    maps, frames, spawns, clients = [], [], [], []
     while p < len(d):
         k = d[p:p+1]; p += 1
         if k == b'M':
@@ -24,11 +24,23 @@ def read(path):
             fc, t, n, le, lt, lr, *lm = struct.unpack_from(rec, d, p); p += rl
             ents = list(struct.unpack_from('<%dQ' % n, d, p)); p += 8 * n
             spawns.append((fc, t, n, le, lt, lr, ents, maps[-1][1], lm[0] if lm else None))
+        elif k == b'C':             # version 4: a client frame of a demo playback
+            fc, t, n, lc, le, lf = struct.unpack_from('<IdIQQQ', d, p); p += 40
+            ents = []
+            if flags & 1:
+                ents = list(struct.unpack_from('<%dQ' % n, d, p)); p += 8 * n
+            clients.append((fc, t, n, lc, le, lf, ents))
         else: raise SystemExit('bad record at %d' % (p-1))
-    return maps, frames, spawns
+    return maps, frames, spawns, clients
 cmd = sys.argv[1]
 if cmd == 'summary':
-    maps, fr, sp = read(sys.argv[2])
+    maps, fr, sp, cl = read(sys.argv[2])
+    if cl:
+        print('client frames:', len(cl), 'framecount', cl[0][0], '..', cl[-1][0], ' cl.time', cl[0][1], '..', cl[-1][1],
+              ' num_entities', min(c[2] for c in cl), '..', max(c[2] for c in cl), ' distinct client-lane:',
+              len({c[3] for c in cl}), ' entities-lane:', len({c[4] for c in cl}), ' effects-lane:', len({c[5] for c in cl}))
+    if not fr:
+        raise SystemExit(0)
     print('maps:', maps)
     for s in sp:
         print('spawn of %s at framecount %d: %d edicts, lanes %016x %016x' % (s[7], s[0], s[2], s[3], s[4]))
@@ -40,7 +52,17 @@ if cmd == 'summary':
         changed = [i for i in range(fr[0][2]) if len({f[6][i] for f in fr if i < f[2]}) > 1]
         print('entities whose hash changes over the run:', len(changed), 'of', fr[-1][2])
 elif cmd == 'diff':
-    _, a, sa = read(sys.argv[2]); _, b, sb = read(sys.argv[3])
+    _, a, sa, ca = read(sys.argv[2]); _, b, sb, cb = read(sys.argv[3])
+    if ca or cb:
+        if len(ca) != len(cb): print('client frame count differs', len(ca), len(cb))
+        for i, (x, y) in enumerate(zip(ca, cb)):
+            for lane, j in (('cl.time', 1), ('num_entities', 2), ('client', 3), ('entities', 4), ('effects', 5)):
+                if x[j] != y[j]:
+                    print('first difference: client record %d (framecount %d), lane %s: %r vs %r' % (i, x[0], lane, x[j], y[j]))
+                    if x[6] and y[6]:
+                        print('  differing entities:', [k for k in range(min(len(x[6]), len(y[6]))) if x[6][k] != y[6][k]][:20])
+                    raise SystemExit(1)
+        print('identical: %d client frames, all lanes' % len(ca))
     if sa and sb:                   # spawn records only where both files have them (version 1 has none)
         if len(sa) != len(sb): print('spawn count differs', len(sa), len(sb)); raise SystemExit(1)
         for i, (x, y) in enumerate(zip(sa, sb)):
