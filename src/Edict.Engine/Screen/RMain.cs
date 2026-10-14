@@ -83,6 +83,9 @@ public sealed unsafe partial class Screen : ClientState.IParticleDrawer
         InitFaces();
         InitSurfaceCache();
         InitSkyBuffers();
+        InitBModels();
+        InitSprites();
+        InitAlias();
     }
 
     /// <summary>TransformVector (r_misc.c): into the view's axes.</summary>
@@ -383,17 +386,9 @@ public sealed unsafe partial class Screen : ClientState.IParticleDrawer
             ScanEdges();
     }
 
-    /// <summary>R_DrawBEntitiesOnList: the brush entities among the visible ones (step 5).</summary>
-    private void DrawBEntitiesOnList()
-    {
-        if (CvarValue("r_drawentities\0"u8) == 0 || !_draw)
-            return;
-        for (int i = 0; i < _cl.NumVisEdicts; i++)
-            if (Entity(_cl.VisEdicts[i]).Model->Type == ModelType.Brush)
-                throw NotPortedYet;
-    }
+    private static readonly SysErrorException ViewModelNotAlias = new("R_DrawViewModel: the gun is not an alias model (C reads it as one)");
 
-    /// <summary>R_DrawViewModel: the gun (step 5).</summary>
+    /// <summary>R_DrawViewModel: the gun, lit at least 24, its trivial accept never set (cl.viewent's stays 0).</summary>
     private void DrawViewModel()
     {
         if (CvarValue("r_drawviewmodel\0"u8) == 0 || _fovGreaterThan90 || !_draw)
@@ -402,9 +397,28 @@ public sealed unsafe partial class Screen : ClientState.IParticleDrawer
             return;
         if (_cl.Stats[StatHealth] <= 0)
             return;
-        if (_cl.ViewEnt.Model == null)
+        ref ClientEntity e = ref _cl.ViewEnt;
+        if (e.Model == null)
             return;
-        throw NotPortedYet;
+        if (e.Model->Type != ModelType.Alias)
+            throw ViewModelNotAlias;
+        _currentEntity = new EntityRef { Array = 3 };
+        _entOrigin = e.Origin;
+        _modelOrg = Vec3.Subtract(_rOrigin, _entOrigin);
+        int j = LightPoint(e.Origin);
+        if (j < 24)
+            j = 24;     // allways give some light on gun
+        int ambientlight = j, shadelight = j;
+        // add dynamic lights
+        ambientlight = AddDlights(ambientlight, e.Origin, true);
+        // clamp lighting so it doesn't overbright as much
+        if (ambientlight > 128)
+            ambientlight = 128;
+        if (ambientlight + shadelight > 192)
+            shadelight = 192 - ambientlight;
+        _trivialAccept = 0;
+        _pmdl = (AliasModel*)e.Model->Extra;
+        AliasDrawModel(ref e, true, ambientlight, shadelight, new Vec3(-1, 0, 0));
     }
 
     /// <summary>R_DrawParticles: the particles drawn (D_DrawParticle) and moved, those whose time is up freed.</summary>

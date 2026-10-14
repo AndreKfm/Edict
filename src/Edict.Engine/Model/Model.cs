@@ -137,6 +137,9 @@ public unsafe struct Model
 
     public int FirstModelSurface, NumModelSurfaces;
 
+    /// <summary>cache.data: an alias model's <see cref="AliasModel"/> or a sprite's <see cref="SpriteModel"/> (null for brush).</summary>
+    public void* Extra;
+
     public int NumSubmodels;
     public DModel* Submodels;                         // bounds spread by one unit, as Mod_LoadSubmodels does
 

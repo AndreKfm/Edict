@@ -15,6 +15,10 @@
 #     frags with ties, prints with the chat marks 1 and 2, with \r and with words longer than a line, center prints
 #     of one to six lines and of lines longer than 40 characters, and late in the demo the intermission, a finale
 #     with a long text and a cutscene, after frames with a view and a gun; seeds 1 to 4 draw as before
+#   - from seed 7 on, the renderer's profile (P6, steps 4 and 5): 250 entities kept around the view entity, from 24
+#     to 600 units, half of them start.bsp's inline models (the edges and surfaces of the edge list run out, the
+#     alias models clip at the near plane), and models LibreQuake's do not reach (write_render_models): every
+#     sprite type, a sprite frame group, an alias skin group and alias frame groups; seeds 1 to 6 stay as they were
 # Usage: python3 -I tools/demogen.py <data dir (libreq-v0.09-beta)> <seed> <frames> <out.dem>
 import os, random, struct, sys
 
@@ -45,6 +49,75 @@ def write_models(datadir):
         struct.pack_into('<ii', m, 72, 1, f)          # mdl_t.synctype = ST_RAND, mdl_t.flags
         name = 'edict/rand%d.mdl' % f
         open(os.path.join(datadir, 'id1', name), 'wb').write(m)
+        names.append(name)
+    return names
+
+
+EXPLOD = 'progs/s_explod.spr'
+PLAYER = 'progs/player.mdl'
+
+
+def write_render_models(datadir):
+    """
+    Seed 7's models, what LibreQuake's do not reach: s_explod.spr (SPR_VP_PARALLEL, six single frames) as each
+    sprite type (edict/spr<type>.spr; type 3 with a beam length), and as one frame group and one single frame
+    (edict/sprgrp.spr); player.mdl (one skin, single frames) with a skin group of the skin and its inverse beside the
+    skin (edict/skingrp.mdl), and with its frames in groups of three (edict/framegrp.mdl).
+    """
+    out = []
+    spr = pak_file(datadir, EXPLOD)
+    numframes = struct.unpack_from('<i', spr, 24)[0]
+    frames, p = [], 36
+    for _ in range(numframes):
+        w, h = struct.unpack_from('<ii', spr, p + 12)
+        frames.append(spr[p + 4:p + 20 + w * h])        # dspriteframe_t and its pixels
+        p += 20 + w * h
+    for t in range(5):
+        s = bytearray(spr)
+        struct.pack_into('<i', s, 8, t)                  # dsprite_t.type
+        if t == 3:
+            struct.pack_into('<f', s, 28, 8.0)           # dsprite_t.beamlength
+        out.append(('edict/spr%d.spr' % t, s))
+    g = bytearray(spr[:36])
+    struct.pack_into('<i', g, 24, 2)                     # numframes: the group and one single frame
+    g += struct.pack('<ii', 1, numframes)                # SPR_GROUP, dspritegroup_t.numframes
+    for k in range(numframes):
+        g += struct.pack('<f', 0.1 * (k + 1))            # dspriteinterval_t
+    for f in frames:
+        g += f
+    g += struct.pack('<i', 0) + frames[0]                # SPR_SINGLE
+    out.append(('edict/sprgrp.spr', g))
+
+    mdl = pak_file(datadir, PLAYER)
+    numskins, sw, sh, numverts, numtris, nframes = struct.unpack_from('<6i', mdl, 48)
+    assert numskins == 1 and struct.unpack_from('<i', mdl, 84)[0] == 0
+    skin = mdl[88:88 + sw * sh]
+    rest = 88 + sw * sh
+    body_end = rest + numverts * 12 + numtris * 16       # stverts, triangles
+    body = mdl[rest:body_end]
+    fsize = 4 + 4 + 4 + 16 + numverts * 4                # type, bboxmin, bboxmax, name, verts
+    fr = [mdl[body_end + k * fsize + 4:body_end + (k + 1) * fsize] for k in range(nframes)]
+    s = bytearray(mdl[:84])
+    struct.pack_into('<i', s, 48, 2)                     # numskins: the group and the single skin
+    s += struct.pack('<ii', 1, 2) + struct.pack('<ff', 0.3, 0.6)      # ALIAS_SKIN_GROUP of two
+    s += skin + bytes(255 - b for b in skin)
+    s += struct.pack('<i', 0) + skin
+    s += body + mdl[body_end:]
+    out.append(('edict/skingrp.mdl', s))
+    f = bytearray(mdl[:84])
+    groups = [fr[k:k + 3] for k in range(0, nframes, 3)]
+    struct.pack_into('<i', f, 68, len(groups))           # numframes
+    f += mdl[84:body_end]
+    for grp in groups:
+        f += struct.pack('<ii', 1, len(grp)) + grp[0][0:8]                # ALIAS_GROUP, numframes, bboxmin, bboxmax
+        for k in range(len(grp)):
+            f += struct.pack('<f', 0.1 * (k + 1))
+        for one in grp:
+            f += one
+    out.append(('edict/framegrp.mdl', f))
+    names = []
+    for name, data in out:
+        open(os.path.join(datadir, 'id1', name), 'wb').write(data)
         names.append(name)
     return names
 
@@ -83,6 +156,9 @@ def generate(datadir, seed, frames):
     rng = random.Random(seed)
     extra = write_models(datadir)
     screen = seed >= 5
+    render = seed >= 7
+    if render:
+        extra += write_render_models(datadir)
     maxclients = rng.choice([1, 2, 4])
     if screen:
         maxclients = 4
@@ -126,9 +202,16 @@ def generate(datadir, seed, frames):
     # signon 2: the signon buffer (baselines, statics, static sounds)
     ents = {}
     nums = list(range(1, 41)) + [255, 256, 300, 599]
+    if render:
+        nums = list(range(1, 251))                  # up to MAX_VISEDICTS around the view: the edges and surfaces run out
     m = Msg()
     for num in nums:
         e = Ent(rng, num, nmodels)
+        if render and num != 1:
+            e.near = rng.choice([24, 48, 100, 250, 600])    # the distance it keeps from the view entity
+            if rng.random() < 0.5:
+                e.model = rng.randrange(2, 32)              # an inline model of start.bsp
+            e.origin = [ents[1].origin[i] + rng.uniform(-e.near, e.near) for i in range(3)]
         ents[num] = e
         m.byte(22); m.short(num)
         m.byte(e.model); m.byte(e.frame); m.byte(e.colormap); m.byte(e.skin)
@@ -201,7 +284,7 @@ def generate(datadir, seed, frames):
         for num, e in ents.items():
             if rng.random() < 0.08:
                 continue                                # left out of a packet: CL_RelinkEntities drops its model
-            update(m, rng, e, nmodels, maxclients)
+            update(m, rng, e, nmodels, maxclients, ents[1] if render and num != 1 else None)
             if e.effects & 2 and rng.random() < 0.5:
                 last_light = f32(t + 0.1)               # the muzzle flash's die, (float)(cl.time + 0.1) once snapped
         if frame == 0 and edge == 0:
@@ -245,13 +328,15 @@ def clientdata(m, rng, weapons=None):
         m.byte(rng.randrange(256))
 
 
-def update(m, rng, e, nmodels, maxclients):
+def update(m, rng, e, nmodels, maxclients, follow=None):
     bits = 0
     r = rng.random()
     for i in range(3):
         if rng.random() < 0.6:
             bits |= 2 << i                              # U_ORIGIN1..3
-            if r < 0.15:
+            if follow is not None:
+                e.origin[i] = follow.origin[i] + rng.uniform(-e.near, e.near)     # seed 7: around the view
+            elif r < 0.15:
                 e.origin[i] += rng.choice([99, 99.875, 100, 100.125, 101, -99, -100, -100.125, -101])
             else:
                 e.origin[i] += rng.uniform(-20, 20)

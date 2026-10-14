@@ -194,7 +194,9 @@ public sealed unsafe partial class Screen
     /// <summary>R_RenderWorld: the walk from the root with all four planes to clip against.</summary>
     private void RenderWorld()
     {
-        _modelOrg = _rOrigin;       // currententity = &cl_entities[0]
+        _currentEntity = default;   // currententity = &cl_entities[0]
+        _currentModel = _cl.WorldModel;
+        _modelOrg = _rOrigin;
         _currentVertBase = _cl.WorldModel->Vertexes;
         RecursiveWorldNode(0, 15);
     }
@@ -330,10 +332,15 @@ public sealed unsafe partial class Screen
             return ref _cl.Entities[r.Index];
         if (r.Array == 1)
             return ref _cl.StaticEntities[r.Index];
+        if (r.Array == 3)
+            return ref _cl.ViewEnt;
         return ref _cl.TempEntities[r.Index];
     }
 
-    /// <summary>R_DrawEntitiesOnList's console output: a sprite drawn with a frame it does not have (R_GetSpriteframe).</summary>
+    /// <summary>
+    /// R_DrawEntitiesOnList: the visible alias models and sprites (without drawing, -edict2d: only R_GetSpriteframe's
+    /// console message for a frame the sprite does not have).
+    /// </summary>
     private void DrawEntitiesOnList()
     {
         if (CvarValue("r_drawentities\0"u8) == 0)
@@ -344,17 +351,30 @@ public sealed unsafe partial class Screen
             if (r.Array == 0 && r.Index == _cl.ViewEntity)
                 continue;   // don't draw the player
             ref ClientEntity e = ref Entity(r);
-            if (e.Model->Type == ModelType.Alias && _draw)
-                throw NotPortedYet;     // R_AliasCheckBBox, R_AliasDrawModel: step 5
+            if (e.Model->Type == ModelType.Alias)
+            {
+                if (_draw)
+                {
+                    _currentEntity = r;
+                    DrawAliasEntity(ref e);
+                }
+                continue;
+            }
             if (e.Model->Type != ModelType.Sprite)
                 continue;
+            if (_draw)
+            {
+                _currentEntity = r;
+                _entOrigin = e.Origin;
+                _modelOrg = Vec3.Subtract(_rOrigin, _entOrigin);
+                DrawSprite(ref e);
+                continue;
+            }
             int frame = e.Frame;
             if (frame >= e.Model->NumFrames || frame < 0)
                 Msg("R_DrawSprite: no such frame "u8).MsgInt(frame).Msg("\n"u8).EndMsg();
             else if (e.Model->NumFrames <= 0)
                 throw BadSpriteFrameCount;
-            if (_draw)
-                throw NotPortedYet;     // R_DrawSprite: step 5
         }
     }
 }

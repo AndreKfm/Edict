@@ -191,10 +191,10 @@ public sealed unsafe partial class Screen
     }
 
     /// <summary>D_CacheSurface: the surface's block for the mip level, rebuilt if its texture or light changed.</summary>
-    private SurfCache* CacheSurface(MSurface* surface, int miplevel)
+    private SurfCache* CacheSurface(MSurface* surface, int miplevel, int entityFrame)
     {
         // if the surface is animating or flashing, flush the cache
-        _dsTexture = TextureAnimation(surface->TexInfo->Texture, _cl.Entities[0].Frame);
+        _dsTexture = TextureAnimation(surface->TexInfo->Texture, entityFrame);
         for (int i = 0; i < SurfFlags.MaxLightmaps; i++)
             _dsLightAdj[i] = _lightStyleValue[surface->Styles[i]];
 

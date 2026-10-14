@@ -80,7 +80,9 @@ public sealed unsafe partial class Screen
     /// <summary>D_DrawSurfaces: every surface with spans, by its kind.</summary>
     private void DrawSurfaces()
     {
+        _currentEntity = default;   // currententity = &cl_entities[0]
         _transformedModelOrg = TransformVector(_modelOrg);
+        Vec3 worldTransformedModelOrg = _transformedModelOrg;
         if (CvarValue("r_drawflat\0"u8) != 0)
             throw NotPortedYet;     // the color is the low byte of the surface's address
         for (int si = 1; si < _surfaceP; si++)
@@ -117,26 +119,47 @@ public sealed unsafe partial class Screen
                 _cacheBlock = tx->Pixels + tx->MipOffsets[0];
                 _cacheWidth = 64;
                 if (s.InSubmodel)
-                    throw NotPortedYet;     // step 5
+                    EnterBmodelSurface(s.Entity);
                 CalcGradients(pface);
                 Turbulent8(s.Spans);
                 DrawZSpans(s.Spans);
+                if (s.InSubmodel)
+                    LeaveBmodelSurface(worldTransformedModelOrg);
             }
             else
             {
                 if (s.InSubmodel)
-                    throw NotPortedYet;     // step 5
+                    EnterBmodelSurface(s.Entity);
                 MSurface* pface = s.Data;
                 _miplevel = MipLevelForScale(s.NearZi * _scaleForMip * pface->TexInfo->MipAdjust);
                 // FIXME: make this passed in to D_CacheSurface
-                SurfCache* pcurrentcache = CacheSurface(pface, _miplevel);
+                SurfCache* pcurrentcache = CacheSurface(pface, _miplevel, Entity(_currentEntity).Frame);
                 _cacheBlock = pcurrentcache->Data;
                 _cacheWidth = (int)pcurrentcache->Width;
                 CalcGradients(pface);
                 DrawSpans8(s.Spans);
                 DrawZSpans(s.Spans);
+                if (s.InSubmodel)
+                    LeaveBmodelSurface(worldTransformedModelOrg);
             }
         }
+    }
+
+    /// <summary>A brush entity's surface: its origin relative to the view, the view rotated into it (D_DrawSurfaces).</summary>
+    private void EnterBmodelSurface(EntityRef entity)
+    {
+        _currentEntity = entity;
+        Vec3 localModelOrg = Vec3.Subtract(_rOrigin, Entity(entity).Origin);
+        _transformedModelOrg = TransformVector(localModelOrg);
+        RotateBmodel();     // FIXME: don't mess with the frustum, make entity passed in
+    }
+
+    /// <summary>Back to the world's drawing state after a brush entity's surface.</summary>
+    private void LeaveBmodelSurface(in Vec3 worldTransformedModelOrg)
+    {
+        _currentEntity = default;
+        _transformedModelOrg = worldTransformedModelOrg;
+        RestoreWorldView(_baseModelOrg);
     }
 
     /// <summary>D_DrawSpans8: s and t exact every 8 pixels, linear between.</summary>

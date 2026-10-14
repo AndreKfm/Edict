@@ -36,7 +36,7 @@ public sealed unsafe partial class Screen
         public int SpanState;                         // 0 = not in active span, 1 = in active span, -1 = in inverted span (end before start)
         public int Flags;
         public MSurface* Data;
-        public int Entity;                            // the entity: 0, cl_entities[0], for the world (bmodels: step 5)
+        public EntityRef Entity;                      // the entity: cl_entities[0] for the world
         public float NearZi;                          // for mipmap finding
         public bool InSubmodel;
         public float DZiOrigin, DZiStepU, DZiStepV;

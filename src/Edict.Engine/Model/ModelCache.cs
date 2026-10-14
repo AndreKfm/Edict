@@ -227,6 +227,7 @@ public sealed unsafe class ModelCache : IModelSource, IDisposable
             m->NumFrames = BinaryPrimitives.ReadInt32LittleEndian(d[68..]);    // mdl_t.numframes
             m->SyncType = BinaryPrimitives.ReadInt32LittleEndian(d[72..]);     // mdl_t.synctype
             m->Flags = BinaryPrimitives.ReadInt32LittleEndian(d[76..]);        // mdl_t.flags
+            AliasLoader.LoadAlias(d, System.Text.Encoding.Latin1.GetString(name), m, _own);
         }
         else if (d.Length >= 36 && d[..4].SequenceEqual("IDSP"u8))
         {
@@ -236,6 +237,7 @@ public sealed unsafe class ModelCache : IModelSource, IDisposable
             m->SyncType = BinaryPrimitives.ReadInt32LittleEndian(d[32..]);     // dsprite_t.synctype; flags 0
             m->Mins = new Vec3(-width / 2, -width / 2, -height / 2);
             m->Maxs = new Vec3(width / 2, width / 2, height / 2);
+            AliasLoader.LoadSprite(d, System.Text.Encoding.Latin1.GetString(name), m, _own);
         }
         else if (d.Length >= 4 && BinaryPrimitives.ReadInt32LittleEndian(d) == Bsp.Version)
         {

@@ -176,7 +176,8 @@ public sealed unsafe partial class ClientState
                     if (i >= MaxClients)
                         throw BadScoreboard;
                     Scores[i].Colors = r.ReadByte();
-                    break;                  // CL_NewTranslation: the translation table, the renderer's
+                    Con?.NewTranslation(i, Scores[i].Colors);   // CL_NewTranslation
+                    break;
                 }
                 case SvcParticle:
                     ParseParticleEffect();
@@ -336,6 +337,7 @@ public sealed unsafe partial class ClientState
             s.EnterTime = 0;
             s.Frags = s.Colors = 0;
         }
+        Con?.ClearTranslations(MaxClients);
 
         // parse gametype
         GameType = r.ReadByte();

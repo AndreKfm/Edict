@@ -259,21 +259,24 @@ public sealed unsafe partial class Screen
     private void FaceEdge(MEdge* pedge, int a, int b, int pclip)
     {
         _pedge = pedge;
-        // if the edge is cached, we can just reuse the edge (insubmodel: step 5)
-        uint offset = pedge->CachedEdgeOffset;
-        if ((offset & FullyClippedCached) != 0)
+        // if the edge is cached, we can just reuse the edge
+        if (!_inSubmodel)
         {
-            if ((offset & FramecountMask) == (uint)_frameCount)
+            uint offset = pedge->CachedEdgeOffset;
+            if ((offset & FullyClippedCached) != 0)
             {
+                if ((offset & FramecountMask) == (uint)_frameCount)
+                {
+                    _lastVertValid = false;
+                    return;
+                }
+            }
+            else if ((uint)_edgeP > offset && _edges[(int)offset].Owner == pedge)
+            {
+                EmitCachedEdge();
                 _lastVertValid = false;
                 return;
             }
-        }
-        else if ((uint)_edgeP > offset && _edges[(int)offset].Owner == pedge)
-        {
-            EmitCachedEdge();
-            _lastVertValid = false;
-            return;
         }
         // assume it's cacheable
         _cacheOffset = (uint)_edgeP;
@@ -287,7 +290,7 @@ public sealed unsafe partial class Screen
         _lastVertValid = true;
     }
 
-    /// <summary>R_RenderFace: the world face's edges into the edge list, and the face as a surface with its gradients.</summary>
+    /// <summary>R_RenderFace: the face's edges into the edge list, and the face as a surface with its gradients.</summary>
     private void RenderFace(MSurface* fa, int clipflags)
     {
         // skip out if no more surfs
@@ -320,7 +323,7 @@ public sealed unsafe partial class Screen
         _nearZi = 0;
         _nearZiOnly = false;
         _makeLeftEdge = _makeRightEdge = false;
-        Model* model = _cl.WorldModel;      // currententity->model: the world
+        Model* model = _currentModel;       // currententity->model
         MEdge* pedges = model->Edges;
         _lastVertValid = false;
         for (int i = 0; i < fa->NumEdges; i++)
@@ -357,9 +360,9 @@ public sealed unsafe partial class Screen
         s.Data = fa;
         s.NearZi = _nearZi;
         s.Flags = fa->Flags;
-        s.InSubmodel = false;
+        s.InSubmodel = _inSubmodel;
         s.SpanState = 0;
-        s.Entity = 0;
+        s.Entity = _currentEntity;
         s.Key = _currentKey++;
         s.Spans = -1;
         PostGradients(ref s, fa->Plane);
