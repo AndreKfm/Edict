@@ -1008,6 +1008,12 @@ public sealed unsafe partial class Server
     /// </summary>
     public SizeBuf CommandText { get; set; } = null!;
 
+    /// <summary>
+    /// The console a listen server's Con_Printf writes to (the local client's screen); null for a dedicated server,
+    /// whose console output is stdout only (cls.state == ca_dedicated).
+    /// </summary>
+    public Screen? Con { get; set; }
+
     /// <summary>Cbuf_AddText.</summary>
     public void AddCommandText(byte* text)
     {
@@ -1015,7 +1021,10 @@ public sealed unsafe partial class Server
         while (text[l] != 0)
             l++;
         if (CommandText.CurSize + l >= CommandText.MaxSize)
-            return;     // Con_Printf ("Cbuf_AddText: overflow\n")
+        {
+            Con?.Printf("Cbuf_AddText: overflow\n"u8);
+            return;
+        }
         CommandText.Write(text, l);
     }
 

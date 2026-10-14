@@ -138,7 +138,10 @@ public sealed unsafe partial class Server
             {
                 DDef* def = FindField(s);
                 if (def == null)
-                    return false;   // Con_Printf ("Can't find field %s\n", s)
+                {
+                    Con?.Msg("Can't find field "u8).Msg(s).Msg("\n"u8).EndMsg();
+                    return false;
+                }
                 *d = Globals[def->Ofs];
                 break;
             }
@@ -147,7 +150,10 @@ public sealed unsafe partial class Server
             {
                 int func = FindFunction(s);
                 if (func < 0)
-                    return false;   // Con_Printf ("Can't find function %s\n", s)
+                {
+                    Con?.Msg("Can't find function "u8).Msg(s).Msg("\n"u8).EndMsg();
+                    return false;
+                }
                 *d = func;
                 break;
             }
@@ -158,6 +164,8 @@ public sealed unsafe partial class Server
     private static readonly SysErrorException EofInEntity = new("ED_ParseEntity: EOF without closing brace");
     private static readonly SysErrorException BraceWithoutData = new("ED_ParseEntity: closing brace without data");
     private static readonly SysErrorException KeyTooLong = new("ED_ParseEdict: key longer than C's keyname[256]");
+    private static readonly SysErrorException EdPrintNotPorted =
+        new("ED_LoadFromFile: an entity without classname or spawn function, which a listen server's console shows with ED_Print (not ported)");
     private static readonly SysErrorException AngleTooLong = new("ED_ParseEdict: angle longer than C's temp[32]");
 
     /// <summary>ED_ParseEdict: the key/value pairs of one entity into edict <paramref name="ent"/>.</summary>
@@ -216,7 +224,10 @@ public sealed unsafe partial class Server
 
             DDef* def = FindField(key);
             if (def == null)
-                continue;   // Con_Printf ("'%s' is not a field\n", keyname)
+            {
+                Con?.Msg("'"u8).Msg(key).Msg("' is not a field\n"u8).EndMsg();
+                continue;
+            }
 
             scoped ReadOnlySpan<byte> v = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(parse.Token);
             if (anglehack)
@@ -292,7 +303,9 @@ public sealed unsafe partial class Server
             int classname = ((int*)Fields(ent))[EntVars.Classname];
             if (classname == 0)
             {
-                Free(ent);  // Con_Printf ("No classname for:\n"); ED_Print (ent);
+                if (Con != null)
+                    throw EdPrintNotPorted;     // Con_Printf ("No classname for:\n"); ED_Print (ent)
+                Free(ent);
                 continue;
             }
 
@@ -300,7 +313,9 @@ public sealed unsafe partial class Server
             int func = FindFunction(MemoryMarshal.CreateReadOnlySpanFromNullTerminated(String(classname)));
             if (func < 0)
             {
-                Free(ent);  // Con_Printf ("No spawn function for:\n"); ED_Print (ent);
+                if (Con != null)
+                    throw EdPrintNotPorted;     // Con_Printf ("No spawn function for:\n"); ED_Print (ent)
+                Free(ent);
                 continue;
             }
 

@@ -24,8 +24,7 @@ public sealed unsafe class Host : IDisposable
     private readonly int _numBuiltins;
     private readonly Client[] _clients;
     private readonly INetServer _net;
-    private readonly SizeBuf _cmdText = new(8192);     // cmd_text
-    private readonly ComParse _parse = new();
+    private ClientConsole? _console;                   // a listen server's client: its commands, its screen
     private CRand _rand;
     private int _serverflags;                          // svs.serverflags
     private double _realtime, _oldrealtime;
@@ -59,6 +58,26 @@ public sealed unsafe class Host : IDisposable
     /// <param name="headerBytes">The reference's edict header size (docs/adr/D7).</param>
     /// <param name="net">The tape; or a <see cref="Loopback"/>, which makes this a listen server with a local client.</param>
     public Host(QFileSystem files, Cvars cvars, int maxclients, uint randSeed, INetServer net, int headerBytes, int numBuiltins)
+        : this(files, cvars, maxclients, randSeed, net, headerBytes, numBuiltins, null, null, false)
+    {
+    }
+
+    /// <summary>
+    /// A listen server started as the reference starts (<see cref="ClientConsole.Startup"/>): the cvars at their
+    /// defaults, the console's first lines and the screen (when <paramref name="withScreen"/>), and "exec quake.rc"
+    /// in the first frame, which runs the command line's "+" commands (stuffcmds).
+    /// </summary>
+    /// <param name="randSeed">The rand state before frame 0 (the reference's 'I' record).</param>
+    /// <param name="commandLine">The arguments after the program's name.</param>
+    /// <param name="cmdline">The cmdline cvar's value.</param>
+    public Host(QFileSystem files, uint randSeed, Loopback net, int headerBytes, int numBuiltins,
+                IReadOnlyList<string> commandLine, string cmdline, bool withScreen)
+        : this(files, Cvars.FromRegistry(), 1, randSeed, net, headerBytes, numBuiltins, commandLine, cmdline, withScreen)
+    {
+    }
+
+    private Host(QFileSystem files, Cvars cvars, int maxclients, uint randSeed, INetServer net, int headerBytes,
+                 int numBuiltins, IReadOnlyList<string>? commandLine, string? cmdline, bool withScreen)
     {
         _files = files;
         Cvars = cvars;
@@ -73,10 +92,25 @@ public sealed unsafe class Host : IDisposable
         _net = net;
         _rand.Srand(randSeed);
         _firstFrame = net is not Loopback;
+        Cmd = new Cmd(cvars, files) { CommandLine = commandLine ?? [] };
+        Cmd.Add("map", Map);
+        Cmd.Add("restart", Restart);
+        Cmd.Add("changelevel", Changelevel);
         if (net is Loopback)
-            Cl = new ClientState(cvars, _models, randSeed, _cmdText);
+        {
+            Cl = new ClientState(cvars, _models, randSeed, Cmd.Text);
+            _console = new ClientConsole(Cmd, cvars, Cl, () => Sv is { Active: true });
+            if (cmdline is not null)
+                _console.Startup(files, _models, cmdline, withScreen);
+        }
         InitializeTypes();
     }
+
+    /// <summary>cmd.c: the command buffer and the commands.</summary>
+    public Cmd Cmd { get; }
+
+    /// <summary>A listen server's screen, or null.</summary>
+    public Screen? Screen => _console?.Screen;
 
     /// <summary>A listen server's local client, null for a server alone.</summary>
     public ClientState? Cl { get; }
@@ -100,28 +134,9 @@ public sealed unsafe class Host : IDisposable
     }
 
     private bool _firstFrame;
-    private bool _cmdWait;                             // cmd_wait
 
     /// <summary>Cbuf_AddText.</summary>
-    public void AddText(ReadOnlySpan<byte> text)
-    {
-        if (_cmdText.CurSize + text.Length >= _cmdText.MaxSize)
-            return;     // Con_Printf ("Cbuf_AddText: overflow\n")
-        fixed (byte* t = text)
-            _cmdText.Write(t, text.Length);
-    }
-
-    /// <summary>Cbuf_InsertText: the text ahead of what the buffer holds (a script's lines run before the rest).</summary>
-    private void InsertText(ReadOnlySpan<byte> text)
-    {
-        byte[] rest = new ReadOnlySpan<byte>(_cmdText.Data, _cmdText.CurSize).ToArray();
-        _cmdText.Clear();
-        AddText(text);
-        if (_cmdText.CurSize + rest.Length > _cmdText.MaxSize)
-            throw new InvalidOperationException("SZ_GetSpace: overflow without allowoverflow set (cmd_text)");
-        fixed (byte* r = rest)
-            _cmdText.Write(r, rest.Length);
-    }
+    public void AddText(ReadOnlySpan<byte> text) => Cmd.AddText(text);
 
     /// <summary>
     /// _Host_Frame (time): rand () (except in the first frame, whose draw the given seed includes), the frame time,
@@ -150,8 +165,11 @@ public sealed unsafe class Host : IDisposable
                 FrameTime = 0.001;
         }
 
+        if (Screen is { } screen)
+            screen.RealTime = _realtime;
+
         // process console commands
-        ExecuteCommands();
+        Cmd.Execute();
 
         ClientState? cl = Cl;
         if (cl is not null)
@@ -186,7 +204,13 @@ public sealed unsafe class Host : IDisposable
                 cl.ReadFromServer();
                 rand = cl.Rand;
             }
-            // SCR_UpdateScreen: no screen; S_Update and CDAudio_Update are output
+            // update video (host_frametime as the frame left it: a spawn sets 0.1)
+            if (Screen is { } s)
+            {
+                s.FrameTime = FrameTime;
+                s.UpdateScreen();
+            }
+            // S_Update and CDAudio_Update are output
             if (cl.Signon == ClientState.Signons)
                 cl.DecayLights();
         }
@@ -209,122 +233,59 @@ public sealed unsafe class Host : IDisposable
         return ref _rand;
     }
 
-    /// <summary>Cbuf_Execute: every line (to a newline, or a ; outside quotes) of the command buffer.</summary>
-    private void ExecuteCommands()
+    /// <summary>Host_Map_f: a new server; a listen server's client connects to it ("connect local").</summary>
+    private void Map()
     {
-        byte* line = stackalloc byte[1024];
-        while (_cmdText.CurSize != 0)
+        if (Cmd.Source != Cmd.SrcCommand)
+            return;
+        _console?.StopDemoLoop();       // cls.demonum = -1: stop demo loop in case this fails
+        // CL_Disconnect, Host_ShutdownServer (false)
+        if (Sv is { Active: true })
+            throw new InvalidOperationException("map while a server runs (Host_ShutdownServer) is not ported");
+        if (Cl is not null)
         {
-            // find a \n or ; line break
-            byte* text = _cmdText.Data;
-            int quotes = 0, i;
-            for (i = 0; i < _cmdText.CurSize; i++)
-            {
-                if (text[i] == '"')
-                    quotes++;
-                if ((quotes & 1) == 0 && text[i] == ';')
-                    break;  // don't break if inside a quoted string
-                if (text[i] == '\n')
-                    break;
-            }
-            if (i >= 1024)
-                throw new InvalidOperationException("Cbuf_Execute: a line longer than C's line[1024]");
-            for (int k = 0; k < i; k++)
-                line[k] = text[k];
-            line[i] = 0;
-
-            // delete the text from the command buffer and move remaining commands down
-            if (i == _cmdText.CurSize)
-                _cmdText.CurSize = 0;
-            else
-            {
-                i++;
-                _cmdText.CurSize -= i;
-                for (int k = 0; k < _cmdText.CurSize; k++)
-                    text[k] = text[k + i];
-            }
-
-            // execute the command line
-            Execute(line);
-
-            if (_cmdWait)
-            {
-                // skip out while text still remains in buffer, leaving it for next frame
-                _cmdWait = false;
-                break;
-            }
+            if (Cl.State == ClientState.CaConnected)
+                throw new InvalidOperationException("map while connected (CL_Disconnect) is not ported");
+            _console!.Keys.Dest = Keys.KeyGame;     // remove console or menu
+            Screen?.BeginLoadingPlaque();
+        }
+        _serverflags = 0;   // haven't completed an episode yet
+        SpawnServer(Cmd.Argc > 1 ? Cmd.Argv(1) : []);
+        if (Sv is not { Active: true })
+            return;
+        if (Cl is not null)
+        {
+            if (Cmd.Argc > 2)
+                throw new InvalidOperationException("map with spawn parms (cls.spawnparms) is not ported");
+            Cl.EstablishConnection(((Loopback)_net).Connect());     // connect local
         }
     }
 
-    /// <summary>Cmd_ExecuteString (line, src_command) for the commands a game issues.</summary>
-    private void Execute(byte* line)
+    /// <summary>Host_Restart_f: the same map spawned again.</summary>
+    private void Restart()
     {
-        // Cmd_TokenizeString: up to the first newline; the words as COM_Parse reads them
-        var argv = new List<byte[]>();
-        byte* text = line;
-        while (true)
-        {
-            while (*text != 0 && (sbyte)*text <= ' ' && *text != '\n')
-                text++;
-            if (*text == '\n' || *text == 0)
-                break;
-            text = _parse.Parse(text);
-            if (text == null)
-                break;
-            argv.Add(MemoryMarshal.CreateReadOnlySpanFromNullTerminated(_parse.Token).ToArray());
-        }
-        if (argv.Count == 0)
-            return;     // no tokens
+        if (Cl is { DemoPlayback: true } || Sv is not { Active: true })
+            return;
+        if (Cmd.Source != Cmd.SrcCommand)
+            return;
+        SpawnServer(Sv.MapName);
+    }
 
-        string cmd = System.Text.Encoding.Latin1.GetString(argv[0]).ToLowerInvariant();
-        switch (cmd)
+    /// <summary>Host_Changelevel_f: the next map, the clients' parms kept.</summary>
+    private void Changelevel()
+    {
+        if (Cmd.Argc != 2)
         {
-            case "map":
-                // Host_Map_f (a server without a local client: no connect afterwards)
-                if (Sv is { Active: true })
-                    throw new InvalidOperationException("map while a server runs (Host_ShutdownServer) is not ported");
-                _serverflags = 0;   // haven't completed an episode yet
-                SpawnServer(argv.Count > 1 ? argv[1] : []);
-                if (Cl is not null && Sv is { Active: true })
-                    Cl.EstablishConnection(((Loopback)_net).Connect());     // connect local (cls.spawnparms "")
-                break;
-            case "restart":
-                // Host_Restart_f
-                if (Sv is not { Active: true })
-                    return;
-                SpawnServer(Sv.MapName);
-                break;
-            case "wait":
-                // Cmd_Wait_f: the rest of the buffer waits for the next frame
-                _cmdWait = true;
-                break;
-            case "exec":
-                // Cmd_Exec_f: the script's text (to its first NUL, as COM_LoadHunkFile's terminator ends it) inserted
-                if (argv.Count != 2)
-                    return;     // Con_Printf ("exec <filename> : execute a script file\n")
-                if (_files.Find(argv[1]) is not { } script)
-                    return;     // Con_Printf ("couldn't exec %s\n")
-                ReadOnlySpan<byte> f = script.Span;
-                int nul = f.IndexOf((byte)0);
-                InsertText(nul < 0 ? f : f[..nul]);
-                break;
-            case "reconnect":
-                // Host_Reconnect_f: SCR_BeginLoadingPlaque (the screen and sound: none), and new connection messages
-                if (Cl is not null)
-                    Cl.Signon = 0;
-                break;
-            case "changelevel":
-                // Host_Changelevel_f
-                if (argv.Count != 2)
-                    return;     // Con_Printf ("changelevel <levelname> : continue game on a new level\n")
-                if (Sv is not { Active: true })
-                    return;     // Con_Printf ("Only the server may changelevel\n")
-                SaveSpawnparms(Sv);
-                SpawnServer(argv[1]);
-                break;
-            default:
-                throw new InvalidOperationException($"the console command \"{cmd}\" is not ported");
+            Cmd.Printf("changelevel <levelname> : continue game on a new level\n"u8);
+            return;
         }
+        if (Sv is not { Active: true } || Cl is { DemoPlayback: true })
+        {
+            Cmd.Printf("Only the server may changelevel\n"u8);
+            return;
+        }
+        SaveSpawnparms(Sv);
+        SpawnServer(Cmd.Argv(1));
     }
 
     /// <summary>SV_SaveSpawnparms: serverflags kept, and every client's parms from SetChangeParms.</summary>
@@ -355,8 +316,7 @@ public sealed unsafe class Host : IDisposable
         if (Sv is { Active: true } old)
         {
             old.SendReconnect();
-            if (Cl is not null)
-                Cl.Signon = 0;      // a listen server executes "reconnect" itself: Host_Reconnect_f
+            _console?.Reconnect();  // a listen server executes "reconnect" itself: Host_Reconnect_f
         }
         CRand rand = Rand();
         FreeServer();
@@ -378,7 +338,8 @@ public sealed unsafe class Host : IDisposable
         };
         sv.Clients = _clients;
         sv.Net = _net;
-        sv.CommandText = _cmdText;
+        sv.CommandText = Cmd.Text;
+        sv.Con = Screen;            // a listen server prints to its client's console
         sv.ServerFlags = _serverflags;
         sv.Rand = rand;
         sv.Hooks = new GameHooks(sv);

@@ -34,7 +34,11 @@ run() {
     args="$args +$c"
     echo "$c" >> "$OUT/$name.cmd"
   done
+  # the arguments, one per line (<run>.args): the cmdline cvar keeps only 255 characters of them, too few here
   # shellcheck disable=SC2086 # the commands split into words, as Quake's command line does
+  printf '%s\n' $CLIENT -edictframes "$FRAMES" -edictperent -edicthash "$OUT/$name.edh" -edictmessages "$OUT/$name.emg" \
+    $args > "$OUT/$name.args"
+  # shellcheck disable=SC2086
   "$REF/edict_ref$EXE" $CLIENT -edictframes "$FRAMES" -edictperent -edicthash "$OUT/$name.edh" \
     -edictmessages "$OUT/$name.emg" $args > "$OUT/$name.log" 2>&1 || { echo "$name: exit $?"; tail -2 "$OUT/$name.log"; exit 1; }
   echo "$name: $($PY -I "$TOOLS/edh.py" summary "$OUT/$name.edh" | sed -n '1p;4p' | tr '\n' ' ' | cut -c1-160)"
