@@ -30,6 +30,13 @@ public sealed unsafe partial class ClientState
     private const int DefaultViewHeight = 22, ProtocolVersion = 15, StRand = 1, CShiftDamage = 1, CShiftBonus = 2;
     private const int ClcStringCmd = 4;
 
+    // CL_ParseServerInfo's bar before the level's name: "\n\n\35", 35 times "\36", "\37\n\n" (octal escapes in C)
+    private static ReadOnlySpan<byte> ServerInfoBar =>
+    [
+        10, 10, 29, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
+        30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 30, 31, 10, 10,
+    ];
+
     private static readonly HostErrorException BadServerMessage = new("CL_ParseServerMessage: Bad server message");
     private static readonly HostErrorException IllegibleMessage = new("CL_ParseServerMessage: Illegible server message");
     private static readonly HostErrorException NotPorted = new("CL_ParseServerMessage: a message the port does not have yet (disconnect, sellscreen)");
@@ -87,9 +94,18 @@ public sealed unsafe partial class ClientState
                         throw WrongProtocol;
                     break;
                 case SvcPrint:
-                case SvcCenterPrint:
-                    r.ReadString();         // Con_Printf, SCR_CenterPrint: the screen's
+                {
+                    byte* s = r.ReadString();
+                    if (Con is { } con)
+                        con.Msg(s).EndMsg();        // Con_Printf ("%s", MSG_ReadString ())
                     break;
+                }
+                case SvcCenterPrint:
+                {
+                    byte* s = r.ReadString();
+                    Con?.CenterPrint(s);
+                    break;
+                }
                 case SvcStuffText:
                     AddText(r.ReadString());
                     break;
@@ -218,12 +234,18 @@ public sealed unsafe partial class ClientState
                 case SvcFinale:
                     Intermission = 2;
                     CompletedTime = CCast.I32(Time);
-                    r.ReadString();         // SCR_CenterPrint
+                    {
+                        byte* s = r.ReadString();
+                        Con?.CenterPrint(s);
+                    }
                     break;
                 case SvcCutScene:
                     Intermission = 3;
                     CompletedTime = CCast.I32(Time);
-                    r.ReadString();
+                    {
+                        byte* s = r.ReadString();
+                        Con?.CenterPrint(s);
+                    }
                     break;
                 case SvcDisconnect:
                 case SvcSellScreen:
@@ -315,6 +337,13 @@ public sealed unsafe partial class ClientState
         byte* str = r.ReadString();
         for (int i = 0; i < LevelNameSize - 1 && str[i] != 0; i++)
             LevelName[i] = str[i];
+
+        // separate the printfs so the server message can have a color
+        if (Con is { } con)
+        {
+            con.Printf(ServerInfoBar);
+            con.Msg([2]).Msg(str).Msg("\n"u8).EndMsg();       // Con_Printf ("%c%s\n", 2, str)
+        }
 
         // precache models
         int nummodels;
@@ -605,7 +634,8 @@ public sealed unsafe partial class ClientState
                     m.WriteString(s);
                 break;
             case 4:
-                break;      // SCR_EndLoadingPlaque
+                Con?.EndLoadingPlaque();    // allow normal screen updates
+                break;
         }
     }
 

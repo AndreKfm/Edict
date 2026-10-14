@@ -224,6 +224,48 @@ public static class CAtof
         return (float)(val * sign);
     }
     /// <summary>
+    /// Q_atoi (common.c): optional '-', "0x" hexadecimal, "'c'" character, or decimal digits up to the first other
+    /// character; in int arithmetic, which wraps on overflow as clang's code does.
+    /// </summary>
+    public static int QAtoi(ReadOnlySpan<byte> str)
+    {
+        int i = 0, sign = 1, val = 0, c;
+        if (At(str, 0) == '-')
+        {
+            sign = -1;
+            i++;
+        }
+        unchecked
+        {
+            if (At(str, i) == '0' && (At(str, i + 1) == 'x' || At(str, i + 1) == 'X'))
+            {
+                i += 2;
+                while (true)
+                {
+                    c = At(str, i++);
+                    if (c >= '0' && c <= '9')
+                        val = (val << 4) + c - '0';
+                    else if (c >= 'a' && c <= 'f')
+                        val = (val << 4) + c - 'a' + 10;
+                    else if (c >= 'A' && c <= 'F')
+                        val = (val << 4) + c - 'A' + 10;
+                    else
+                        return val * sign;
+                }
+            }
+            if (At(str, i) == '\'')
+                return sign * (sbyte)At(str, i + 1);    // char is signed on the reference platforms
+            while (true)
+            {
+                c = At(str, i++);
+                if (c < '0' || c > '9')
+                    return val * sign;
+                val = val * 10 + c - '0';
+            }
+        }
+    }
+
+    /// <summary>
     /// C's atoi: white space (space, tab, newline, vertical tab, form feed, carriage return), an optional sign,
     /// decimal digits. False if the value is outside int: there the reference's C libraries differ (glibc goes through
     /// a 64-bit strtol and truncates, UCRT saturates at 32 bits), so it is not part of the pinned behaviour.

@@ -47,6 +47,11 @@ public sealed unsafe class Cvars
         }
     }
 
+    /// <summary>The reference's cvar list with every cvar at its default, as Host_Init leaves them before quake.rc.</summary>
+    [NoAllocUnchecked("load path: builds the table once")]
+    public static Cvars FromRegistry() =>
+        new(Registry.Cvars.Select(c => (System.Text.Encoding.Latin1.GetBytes(c.Name), System.Text.Encoding.Latin1.GetBytes(c.Default))).ToList());
+
     private static void Store(Cvar v, ReadOnlySpan<byte> value)
     {
         if (value.Length > MaxString)
@@ -132,6 +137,9 @@ public sealed unsafe class Cvars
             return;
         Store(_vars[i], new ReadOnlySpan<byte>(value, Length(value)));
     }
+
+    /// <summary>Whether a cvar has this name (Cvar_FindVar).</summary>
+    public bool Exists(byte* name) => Find(name) >= 0;
 
     /// <summary>The value field (<c>var->value</c>) that engine code reads; 0 for an unknown name.</summary>
     public float Value(byte* name)

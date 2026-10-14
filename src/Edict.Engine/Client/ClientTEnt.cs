@@ -49,7 +49,7 @@ public sealed unsafe partial class ClientState
                 return;
             }
         }
-        // Con_Printf ("beam list overflow!\n")
+        Con?.Printf("beam list overflow!\n"u8);
     }
 
     private void SetBeam(ref Beam b, int ent, Model* m, in Vec3 start, in Vec3 end)

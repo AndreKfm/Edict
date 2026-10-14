@@ -91,6 +91,9 @@ public sealed unsafe partial class ClientState
     public bool DemoPlayback;
     public IClientConnection? NetCon;                 // cls.netcon: a listen server's loopback socket
 
+    /// <summary>The console and screen Con_Printf and SCR_CenterPrint go to; null where the screen is skipped.</summary>
+    public Screen? Con;
+
     /// <summary>sv.active: in a listen server the client does not lerp and CL_ClearState leaves the signon alone.</summary>
     public bool ServerActive { get; set; }
     public int ForceTrack;
@@ -186,6 +189,7 @@ public sealed unsafe partial class ClientState
             _modelNames[i] = GC.AllocateArray<byte>(64, pinned: true);
         InitParticles();
         _move = new SizeBuf(128);
+        Buttons = new KButton[NumButtons];
     }
 
     private readonly SizeBuf _move;                    // CL_SendMove's buf[128]

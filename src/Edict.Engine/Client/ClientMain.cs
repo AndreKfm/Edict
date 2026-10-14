@@ -30,6 +30,7 @@ public sealed unsafe partial class ClientState
         if (Signon == Signons)
         {
             // get basic movement from keyboard (CL_BaseMove: CL_AdjustAngles, the cmd from the key states)
+            CheckButtons();
             AdjustAngles();
             CmdViewAngles = default;            // Q_memset (cmd, 0, sizeof(*cmd)), then += and -= of zero key states
             float side = CvarValue("cl_sidespeed\0"u8), up = CvarValue("cl_upspeed\0"u8),
