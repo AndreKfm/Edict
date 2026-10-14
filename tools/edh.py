@@ -6,9 +6,9 @@ import struct, sys
 def read(path):
     d = open(path, 'rb').read(); p = 12
     assert d[:4] == b'EDH1'; ver, flags = struct.unpack_from('<II', d, 4)
-    assert ver in (1, 2, 3, 4), path
+    assert ver in (1, 2, 3, 4, 5), path
     rec = '<IdIQQQQ' if ver >= 3 else '<IdIQQQ'; rl = struct.calcsize(rec)
-    maps, frames, spawns, clients = [], [], [], []
+    maps, frames, spawns, clients, screens = [], [], [], [], []
     while p < len(d):
         k = d[p:p+1]; p += 1
         if k == b'M':
@@ -34,11 +34,18 @@ def read(path):
             if flags & 1:
                 ents = list(struct.unpack_from('<%dQ' % n, d, p)); p += 8 * n
             clients.append((fc, t, n, lc, le, lf, ents))
+        elif k == b'V':             # version 5: a present of the screen (VID_Update)
+            screens.append(struct.unpack_from('<IIIQQ', d, p)); p += 28
         else: raise SystemExit('bad record at %d' % (p-1))
+    read.screens = screens
     return maps, frames, spawns, clients
 cmd = sys.argv[1]
 if cmd == 'summary':
     maps, fr, sp, cl = read(sys.argv[2])
+    if read.screens:
+        sc = read.screens
+        print('screen presents:', len(sc), 'framecount', sc[0][0], '..', sc[-1][0], ' distinct frame buffers:',
+              len({v[3] for v in sc}), ' palettes:', len({v[4] for v in sc}))
     if cl:
         print('client frames:', len(cl), 'framecount', cl[0][0], '..', cl[-1][0], ' cl.time', cl[0][1], '..', cl[-1][1],
               ' num_entities', min(c[2] for c in cl), '..', max(c[2] for c in cl), ' distinct client-lane:',
@@ -56,7 +63,15 @@ if cmd == 'summary':
         changed = [i for i in range(fr[0][2]) if len({f[6][i] for f in fr if i < f[2]}) > 1]
         print('entities whose hash changes over the run:', len(changed), 'of', fr[-1][2])
 elif cmd == 'diff':
-    _, a, sa, ca = read(sys.argv[2]); _, b, sb, cb = read(sys.argv[3])
+    _, a, sa, ca = read(sys.argv[2]); va = read.screens; _, b, sb, cb = read(sys.argv[3]); vb = read.screens
+    if va or vb:
+        if len(va) != len(vb): print('screen present count differs', len(va), len(vb))
+        for i, (x, y) in enumerate(zip(va, vb)):
+            if x != y:
+                what = 'frame buffer' if x[3] != y[3] else 'palette' if x[4] != y[4] else 'framecount or size'
+                print('first difference: screen present %d (framecount %d vs %d): %s' % (i, x[0], y[0], what))
+                raise SystemExit(1)
+        print('identical: %d screen presents' % len(va))
     if ca or cb:
         if len(ca) != len(cb): print('client frame count differs', len(ca), len(cb))
         for i, (x, y) in enumerate(zip(ca, cb)):

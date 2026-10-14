@@ -652,6 +652,41 @@ reliable send keeping the sender free and a spawn keeping cl only by the two res
 equivalent in a listen run (listed in `tools/mutate.py`: the alignment matters only within 3 bytes of a full
 buffer, where C stops with Sys_Error; cls.signon is 0 whenever a listen client gets the serverinfo or the
 "reconnect"; no listen client waits 5 s for a signon stage, so no keepalive nop is sent).
+P5 closed (2026-10-14) by the owner's decision, without the milestone checks of the listen server (its gate on
+Linux, R9 of the listen runs); the listen corpus was written by the Linux reference.
+
+**P6: renderer, sound, networking** (steps agreed 2026-10-14). The software renderer is ported bit-exact, as the
+rest (D1), and gated by a hash of what it draws; sound by a hash of what it mixes; networking is outside the proof.
+(1) The reference with its screen: a patch for the renderer's pointer casts to `long` (about 20 sites in r_*.c and
+d_*.c, truncated on LLP64 Windows; unchanged on LP64), a video driver of the harness's own in place of vid_null.c
+that keeps the palette VID_SetPalette and VID_ShiftPalette are given, and a record of the 320×200 frame buffer and
+the palette after every SCR_UpdateScreen, with a dump of both for a range of frames; checked as P0 checked the
+server (two runs, -O0 and -O2, Windows and Linux, the sanitizers). (2) A census of the renderer's paths the corpus
+reaches (world surfaces, alias models, sprites, sky, warp, particles, the 2D layer) and synthetic inputs for the
+rest, as `tools/demogen.py` did for the client. (3) The view and the 2D layer: view.c (V_RenderView, V_CalcRefdef,
+V_UpdatePalette), draw.c, sbar.c, console.c (the notify lines, so every Con_Printf a frame can show), screen.c.
+(4) The world: r_bsp, r_edge, d_edge, d_scan, the surface cache (r_surf, d_surf), r_light, sky and warp. (5) Alias
+models (r_alias, d_polyse), sprites, and the particles in full: with a screen R_DrawParticles moves and expires
+them, so which ones the effects get, and the client's rand draws, change. (6) The platform, a project of its own so
+that the engine keeps no runtime dependency (D6): a window that shows the frame buffer through the palette, keyboard
+and mouse into the key bindings, the frame clock. The game is playable from here. (7) Sound: snd_dma.c and
+snd_mix.c, gated by a hash of the paint buffer (S_Update draws from rand). (8) Networking: net_dgrm.c over UDP.
+Each of (3)–(5) is gated by the frame buffer of every frame of the client and listen corpora, then R7.
+Step 1 done (2026-10-14). Patch 0007 builds the renderer's nine pointers from integers through size_t instead of
+long (the cache alignment of five stack arrays, the cached edge of a medge_t, the light surface's row step); the
+casts that only test low bits stay. `ref/src/edict_vid.c` replaces vid_null.c: the same 320×200 buffers, and it keeps
+the palette and, at every VID_Update, writes a screen record `'V'` (`.edh` version 5: framecount, size, the hashes of
+the frame buffer and the palette); `-edictscreen` is `-edictclient` with the screen drawn, `-edictscreendump` writes
+the images themselves (`tools/screen.py`: PNG, and where two dumps differ). A frame can present more than once:
+Con_Printf redraws the screen during the signon. Two texts on the screen depended on the build, both found in the
+first image: the "Exe:" line's __TIME__ and __DATE__ (pinned by SOURCE_DATE_EPOCH in build.sh to WinQuake's source
+release, 1999-12-21) and the version Draw_ConsoleBackground writes into the console ("(Linux Quake 1.30) 1.09" on
+Linux; patch 0008 takes WinQuake's on every build). Corpus (`tools/screens.sh`, data/screen): the 17 demos and the 12
+listen runs with the screen, 151,171 presents. Every record identical between Linux release, -O0, ASan/UBSan and
+Windows (Windows no longer crashes); without the screen, the new build writes the corpora of P5 byte for byte as
+before, the listen runs on Windows too (the listen check P5 left open). With the screen the client's state differs
+from frame 1 on (V_CalcRefdef sets the view entity's angles and cl's view state; R_DrawParticles moves and expires
+the particles), so steps 3 and 5 gate the client records of data/screen as well as the frames.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
@@ -728,6 +763,13 @@ per-entity, per-field first-divergence report, not only a frame hash.
 - `0006` (2026-10-13, harness hook): a capture point at the start of `Host_ServerFrame` and the include, 2 lines,
   24 of the 30 hook lines used (capture version 8, record `'H'`). All 90 hash files of the corpus (10 maps × 4,000
   frames, 80 spawn variants) identical with and without the patch.
+- `0007` (2026-10-14, 64-bit): nine casts to long or unsigned long in r_alias.c, r_draw.c, r_edge.c, r_main.c,
+  r_surf.c and d_polyse.c that build a pointer become size_t; long is 32 bits on Windows (LLP64), and the first
+  frame with a screen wrote through a truncated pointer. On Linux size_t and long have one width: the corpora of P5
+  are byte for byte unchanged.
+- `0008` (2026-10-14, build-independent output): Draw_ConsoleBackground's version text is WinQuake's on every build
+  (`#if defined(_WIN32) || defined(EDICT)`, build.sh defines EDICT), 1 line. The "Exe:" line's build time needs no
+  patch: build.sh sets SOURCE_DATE_EPOCH.
 - State 2026-10-12: `0001` (`COM_FileBase` read before its argument; old/new compared on 21 paths, 0 differences),
   `0002` (string_t offsets, see §A.1). With both, the release build loads LibreQuake `start`, runs the QuakeC spawn
   functions and keeps running headless (client + server, `vid_null`).
@@ -737,11 +779,23 @@ per-entity, per-field first-divergence report, not only a frame hash.
     `-fno-sanitize=alignment` once this is recorded in an ADR;
   - `model.c:666` writes `vecs[0][j]` for `j < 8` across a `float[2][4]` (contiguous, works; the port reads 8 floats);
   - `draw.c:885` null `draw_disc` before `Draw_Init`, `cl_parse.c:548` `1<<31`: client side, revisit in P5;
-  - `R_RenderView` aborts under ASan with "called without enough stack": its 10,000-byte stack-depth check trips on
-    ASan's larger frames; sanitizer runs of the server use dedicated mode (no renderer).
+  - `R_RenderView` aborts under ASan with "called without enough stack": its check that the stack is within 10,000
+    bytes of where R_Init found it trips on ASan's fake stack (detect_stack_use_after_return, which puts locals on
+    the heap); the screen's R9 (`tools/r9-screen.sh`, 2026-10-14) runs with it off and draws.
+  - The renderer under UBSan (2026-10-14, the screen corpus): surfcache_t misaligned, as D_SCAlloc rounds a block
+    to 4 bytes and the struct holds 8-byte pointers on x64 (x86-64 tolerates it; the port's cache arithmetic must
+    use the x64 C sizes, as D7 does for edicts); signed overflow in r_surf.c's light and texture steps and shifts of
+    negative values in d_edge.c, r_edge.c, r_surf.c, console.c, sbar.c (two's complement on every build, -O0 to
+    -O2, clang 18 and 23; C#'s unchecked int arithmetic is the same; -fwrapv would pin it and is left until a
+    difference shows); a float out of int's range in r_draw.c (saturated by -fno-strict-float-cast-overflow, D3);
+    d_surf.c's offsetof through a null pointer, and world.c's (STRUCT_FROM_LINK, now in the listen runs under ASan);
+    r_part.c:140 filling avelocities[NUMVERTEXNORMALS][3] as one array of floats; d_part.c:108 storing a particle's
+    float color above 255 (TE_EXPLOSION2's colors in the synthetic demos) into a byte, which every build saturates
+    to 0..255 (-O0 and -O2, clang 18 and 23, measured), so the port saturates too. No ASan error.
 - Headless: dedicated mode with the null drivers `vid_null.c`, `snd_null.c`, `cd_null.c`, `in_null.c`, `sys_null.c`
   (all five present in the pinned tree). `sys_null.c`'s `Sys_FloatTime` already returns a virtual clock, but it
-  advances by 0.1 per *call*, not per frame; the harness replaces it.
+  advances by 0.1 per *call*, not per frame; the harness replaces it. Since P6 `vid_null.c` is replaced too
+  (`edict_vid.c`: the same buffers, plus the palette and the screen record at VID_Update).
 
 ### E.4 Inputs
 

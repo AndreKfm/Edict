@@ -7,9 +7,9 @@ using System.Text;
 namespace Edict.Harness;
 
 /// <summary>
-/// A reference .edh file (ref/src/edict_hash.c, version 3 or 4): its spawn records, the frame-0 states after
-/// ED_LoadFromFile, each with the map it belongs to, its frame records by host_framecount, and (version 4) the client
-/// records of a demo playback.
+/// A reference .edh file (ref/src/edict_hash.c, version 3 to 5): its spawn records, the frame-0 states after
+/// ED_LoadFromFile, each with the map it belongs to, its frame records by host_framecount, (version 4) the client
+/// records of a demo playback or a listen server, and (version 5) the screen's presents.
 /// </summary>
 public sealed class EdhFile
 {
@@ -23,6 +23,12 @@ public sealed class EdhFile
     /// <summary>A client record: the client's state after a host frame of a demo playback (P5).</summary>
     public readonly record struct ClientFrame(uint FrameCount, double Time, int NumEntities, uint RandState, ulong Client,
                                               ulong Entities, ulong Effects, ulong[] PerEntity);
+
+    /// <summary>A screen record: the frame buffer and palette at a VID_Update (P6); a frame can present more than once.</summary>
+    public readonly record struct ScreenPresent(uint FrameCount, int Width, int Height, ulong FrameBuffer, ulong Palette);
+
+    /// <summary>The screen records, in order.</summary>
+    public IReadOnlyList<ScreenPresent> Screens { get; }
 
     /// <summary>The client's inputs ('I'): the rand state before the first host frame, and the cvars.</summary>
     public uint ClientRandState { get; private set; }
@@ -41,12 +47,13 @@ public sealed class EdhFile
     public EdhFile(string path)
     {
         byte[] d = File.ReadAllBytes(path);
-        if (d.Length < 12 || !d.AsSpan(0, 4).SequenceEqual("EDH1"u8) || BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(4)) is not (3 or 4))
-            throw new InvalidDataException($"{path}: not an EDH1 version 3 or 4 file (run tools/captures.sh)");
+        if (d.Length < 12 || !d.AsSpan(0, 4).SequenceEqual("EDH1"u8) || BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(4)) is not (3 or 4 or 5))
+            throw new InvalidDataException($"{path}: not an EDH1 version 3, 4 or 5 file (run tools/captures.sh)");
         uint flags = BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(8));
         var spawns = new List<Spawn>();
         var frameRecords = new Dictionary<uint, Frame>();
         var clients = new List<ClientFrame>();
+        var screens = new List<ScreenPresent>();
         string map = "";
         int p = 12, frames = 0;
         while (p < d.Length)
@@ -116,12 +123,19 @@ public sealed class EdhFile
                     clients.Add(new ClientFrame(fc, t, n, rs, lc, le, lf, ents));
                     break;
                 }
+                case (byte)'V':
+                    screens.Add(new ScreenPresent(BinaryPrimitives.ReadUInt32LittleEndian(d.AsSpan(p)),
+                        BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(p + 4)), BinaryPrimitives.ReadInt32LittleEndian(d.AsSpan(p + 8)),
+                        BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 12)), BinaryPrimitives.ReadUInt64LittleEndian(d.AsSpan(p + 20))));
+                    p += 28;
+                    break;
                 default:
                     throw new InvalidDataException($"{path}: bad record '{(char)k}' at {p - 1}");
             }
         }
         Spawns = spawns;
         ClientFrames = clients;
+        Screens = screens;
         Frames = frames;
         FrameRecords = frameRecords;
     }

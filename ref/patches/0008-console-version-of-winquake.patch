@@ -1,0 +1,21 @@
+EDICT 0008: WinQuake's version text on the console background of every build
+
+Category: build-independent output, no change in results on Windows.
+Draw_ConsoleBackground writes the version into the console picture, chosen by the platform the build is for:
+"(WinQuake) 1.09" on Windows, "(Linux Quake 1.30) 1.09" on Linux. With the screen in the hash (-edictscreen),
+that made the Linux and Windows references differ in every frame that shows the console. The reference is
+WinQuake, so every build takes the Windows text (build.sh defines EDICT). The other build-dependent text on the
+screen, the "Exe:" line of Host_Init with __TIME__ and __DATE__, is pinned by build.sh through
+SOURCE_DATE_EPOCH, without a patch.
+
+--- a/draw.c
++++ b/draw.c
+@@ -548,7 +548,7 @@
+ 	conback = Draw_CachePic ("gfx/conback.lmp");
+
+ // hack the version number directly into the pic
+-#ifdef _WIN32
++#if defined(_WIN32) || defined(EDICT)	// EDICT: WinQuake's text on every build (patch 0008)
+ 	sprintf (ver, "(WinQuake) %4.2f", (float)VERSION);
+ 	dest = conback->data + 320*186 + 320 - 11 - 8*strlen(ver);
+ #elif defined(X11)

@@ -24,9 +24,12 @@ Arguments (besides Quake's own):
   -edictframetime    time host frames 1 to n-1 as one interval (clock (); frame 0 runs the +map command) and
                      print it; for the frame benchmark, run without -edicthash and -edictcapture
   -edictclient       the client without the screen: scr_skipupdate, so SCR_UpdateScreen returns at once (the
-                     renderer is phase 6 of docs/PLAN.md, and its long-for-pointer arithmetic breaks on 64-bit
-                     Windows); for demo playback (+playdemo) without -dedicated. The run ends with the demo (the
+                     corpora of P5, whose truth is the client's state alone); for demo playback (+playdemo) without -dedicated. The run ends with the demo (the
                      frame in which CL_StopPlayback ran is the last).
+  -edictscreen       the client with the screen: as -edictclient, but SCR_UpdateScreen draws, and every
+                     VID_Update writes a screen record (edict_vid.c, edict_hash.c)
+  -edictscreendump <first> <last> <file>
+                     the frame buffer and palette of every VID_Update for host_framecount first to last
   -edictclientdump <first> <last> <file>
                      the client records' canonical streams for host_framecount first to last (edict_hash.c)
 The frame time is fixed by setting host_framerate to EDICT_FRAMETIME before the first frame.
@@ -283,7 +286,7 @@ int main (int argc, char **argv)
 		scr_skipupdate = true;
 	Host_Init (&parms);
 	Cvar_Set ("host_framerate", EDICT_FRAMETIME);
-	client = COM_CheckParm ("-edictclient") != 0;
+	client = COM_CheckParm ("-edictclient") != 0 || COM_CheckParm ("-edictscreen") != 0;
 	client_seed = edict_rand_state ();
 
 	for (frame = 0 ; frame < frames ; frame++)

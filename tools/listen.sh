@@ -8,12 +8,14 @@
 # Two runs spawn a second time while the client is connected: after the waits of id1/edict/wait1000.cfg (written
 # here; one wait per frame), a changelevel to the next map and a restart of the same one. Their console commands are
 # also written as <run>.cmd, which the port's gate runs in place of "map <run>".
-# Usage: [ONLY="<run> ..."] tools/listen.sh <dir with edict_ref or edict_ref.exe> <out-dir>
+# With SCREEN=1 the client draws its screen (-edictscreen), and the hashes get its presents too (tools/screens.sh).
+# Usage: [ONLY="<run> ..."] [SCREEN=1] tools/listen.sh <dir with edict_ref or edict_ref.exe> <out-dir>
 set -eu
 REF="$(cd "$1" && pwd)"
 mkdir -p "$2"
 OUT="$(cd "$2" && pwd)"
 FRAMES="${FRAMES:-4000}"
+CLIENT="-edictclient"; [ -n "${SCREEN:-}" ] && CLIENT="-edictscreen"
 EXE=""; [ -x "$REF/edict_ref.exe" ] && EXE=".exe"
 PY="python3"; command -v python3 > /dev/null || PY="python"
 TOOLS="$(cd "$(dirname "$0")" && pwd)"
@@ -33,7 +35,7 @@ run() {
     echo "$c" >> "$OUT/$name.cmd"
   done
   # shellcheck disable=SC2086 # the commands split into words, as Quake's command line does
-  "$REF/edict_ref$EXE" -edictclient -edictframes "$FRAMES" -edictperent -edicthash "$OUT/$name.edh" \
+  "$REF/edict_ref$EXE" $CLIENT -edictframes "$FRAMES" -edictperent -edicthash "$OUT/$name.edh" \
     -edictmessages "$OUT/$name.emg" $args > "$OUT/$name.log" 2>&1 || { echo "$name: exit $?"; tail -2 "$OUT/$name.log"; exit 1; }
   echo "$name: $($PY -I "$TOOLS/edh.py" summary "$OUT/$name.edh" | sed -n '1p;4p' | tr '\n' ' ' | cut -c1-160)"
 }

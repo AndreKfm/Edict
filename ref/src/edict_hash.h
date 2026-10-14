@@ -27,6 +27,8 @@ void EdictHash_ClientStart (unsigned int rand_before);
 void EdictHash_OpenClientDump (char *path, int first, int last);
 // Called after every host frame; writes one client record while the client is connected (demo or listen server).
 void EdictHash_ClientFrame (void);
+// Called by the video driver at every VID_Update (edict_vid.c): one screen record of the presented frame.
+void EdictHash_Screen (const unsigned char *buffer, int width, int height, const unsigned char *palette);
 // Called after ED_LoadFromFile in SV_SpawnServer (patch 0005): the spawn records of the hash and the capture.
 void Edict_Spawned (void);
 // Diagnostic: -edictdumpglobals <framecount> <file>

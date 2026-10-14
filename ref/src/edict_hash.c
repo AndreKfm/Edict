@@ -32,7 +32,16 @@ File layout (all integers little-endian):
                 [u64 entity_hash x cl.num_entities, if EDH_FLAG_PER_ENTITY]           after every host frame of a
                                                                                       connected client (a demo, a
                                                                                       listen server: -edictclient)
-Version 1 had no spawn records, version 2 no messages lane, version 3 no client records.
+  record   'V'  u32 host_framecount  u32 width  u32 height  u64 frame buffer hash  u64 palette hash
+                                                                                      at every VID_Update (the
+                                                                                      screen's present, edict_vid.c;
+                                                                                      -edictscreen): the frame buffer
+                                                                                      row by row, the 256 x RGB
+                                                                                      palette it is shown through;
+                                                                                      a frame can present more than
+                                                                                      once (Con_Printf during the
+                                                                                      signon redraws the screen)
+Version 1 had no spawn records, version 2 no messages lane, version 3 no client records, version 4 no screen records.
 Lanes:
   edicts         sv.time, num_edicts, state, paused, serverflags, lightstyles, then (index, entity hash) pairs
   globals_typed  every globals word covered by a globaldef, typed like entity fields
@@ -322,7 +331,7 @@ void EdictHash_Open (char *path, int flags)
 	edh_flags = flags;
 	stream_len = 0;
 	put8 ('E'); put8 ('D'); put8 ('H'); put8 ('1');
-	put32 (4);
+	put32 (5);
 	put32 (flags);
 	FlushStream ();
 }
@@ -739,6 +748,24 @@ void EdictHash_ClientFrame (void)
 	if (edh_flags & EDH_FLAG_PER_ENTITY)
 		for (i = 0 ; i < n ; i++)
 			put64 (entity_hashes[i]);
+	FlushStream ();
+}
+
+void EdictHash_Screen (const unsigned char *buffer, int width, int height, const unsigned char *palette)
+{
+	edict_u64	frame_hash, palette_hash;
+
+	if (!edh)
+		return;
+	frame_hash = EdictHash_XXH64 (buffer, width * height);
+	palette_hash = EdictHash_XXH64 (palette, 768);
+	stream_len = 0;
+	put8 ('V');
+	put32 (host_framecount);
+	put32 (width);
+	put32 (height);
+	put64 (frame_hash);
+	put64 (palette_hash);
 	FlushStream ();
 }
 
