@@ -6,9 +6,8 @@ using Edict.Exact;
 namespace Edict.Engine;
 
 /// <summary>
-/// cl_main.c and cl_input.c as far as a playback reaches them: CL_SendCmd (with no key held, CL_AdjustAngles and
-/// CL_BaseMove still do their arithmetic), CL_ReadFromServer, CL_LerpPoint, CL_RelinkEntities, CL_AllocDlight,
-/// CL_DecayLights.
+/// cl_main.c and cl_input.c: CL_SendCmd and CL_SendMove (the movement itself is Input.cs's), CL_ReadFromServer,
+/// CL_LerpPoint, CL_RelinkEntities, CL_AllocDlight, CL_DecayLights.
 /// </summary>
 public sealed unsafe partial class ClientState
 {
@@ -19,8 +18,9 @@ public sealed unsafe partial class ClientState
     private static readonly HostErrorException LostConnection = new("CL_ReadFromServer: lost server connection");
 
     /// <summary>
-    /// CL_SendCmd: with the signon complete the movement of no held key (CL_BaseMove, CL_SendMove: cl.cmd; a
-    /// playback sends nothing and counts no move messages), then in a playback the reliable message is dropped.
+    /// CL_SendCmd: with the signon complete the movement (CL_BaseMove, IN_Move, CL_SendMove: cl.cmd, the buttons'
+    /// impulses cleared; a playback sends nothing and counts no move messages), then in a playback the reliable
+    /// message is dropped.
     /// </summary>
     public void SendCmd()
     {
@@ -29,25 +29,12 @@ public sealed unsafe partial class ClientState
 
         if (Signon == Signons)
         {
-            // get basic movement from keyboard (CL_BaseMove: CL_AdjustAngles, the cmd from the key states)
-            CheckButtons();
-            AdjustAngles();
-            CmdViewAngles = default;            // Q_memset (cmd, 0, sizeof(*cmd)), then += and -= of zero key states
-            float side = CvarValue("cl_sidespeed\0"u8), up = CvarValue("cl_upspeed\0"u8),
-                forward = CvarValue("cl_forwardspeed\0"u8), back = CvarValue("cl_backspeed\0"u8);
-            float sidemove = 0, upmove = 0, forwardmove = 0;
-            sidemove += side * 0f;
-            sidemove -= side * 0f;
-            upmove += up * 0f;
-            upmove -= up * 0f;
-            forwardmove += forward * 0f;
-            forwardmove -= back * 0f;
-            // CL_SendMove: cl.cmd = *cmd; a playback returns before cl.movemessages counts up
-            CmdForwardMove = forwardmove;
-            CmdSideMove = sidemove;
-            CmdUpMove = upmove;
-            if (!DemoPlayback)
-                SendMove();
+            // get basic movement from keyboard
+            BaseMove();
+            // allow mice or other external controllers to add to the move
+            InMove();
+            // send the unreliable message
+            SendMove();
         }
 
         if (DemoPlayback)
@@ -71,8 +58,9 @@ public sealed unsafe partial class ClientState
     private const int ClcMove = 3;
 
     /// <summary>
-    /// CL_SendMove's message: clc_move, the last message's time, the view angles, the moves (of no held key: 0),
-    /// no buttons, no impulse; the first two after a connect are dropped.
+    /// CL_SendMove: cl.cmd, and the message: clc_move, the last message's time, the view angles, the moves, the
+    /// attack and jump bits (their impulses cleared), the impulse; a playback sends none, and the first two after a
+    /// connect are dropped.
     /// </summary>
     private void SendMove()
     {
@@ -85,37 +73,27 @@ public sealed unsafe partial class ClientState
         buf.WriteShort(CCast.I32(CmdForwardMove));
         buf.WriteShort(CCast.I32(CmdSideMove));
         buf.WriteShort(CCast.I32(CmdUpMove));
-        buf.WriteByte(0);                  // in_attack and in_jump are up
-        buf.WriteByte(0);                  // in_impulse
 
+        // send button bits
+        int bits = 0;
+        if ((Buttons[InAttack].State & 3) != 0)
+            bits |= 1;
+        Buttons[InAttack].State &= ~2;
+        if ((Buttons[InJump].State & 3) != 0)
+            bits |= 2;
+        Buttons[InJump].State &= ~2;
+        buf.WriteByte(bits);
+        buf.WriteByte(Impulse);
+        Impulse = 0;
+
+        // deliver the message
+        if (DemoPlayback)
+            return;
         // allways dump the first two message, because it may contain leftover inputs from the last level
         if (++MoveMessages <= 2)
             return;
         if (NetCon!.SendUnreliableMessage(buf) == -1)
             throw LostConnectionMove;      // Con_Printf ("CL_SendMove: lost server connection\n"), CL_Disconnect
-    }
-
-    /// <summary>CL_AdjustAngles with no key held (in_speed, in_strafe, in_klook up; every key state 0).</summary>
-    private void AdjustAngles()
-    {
-        float speed = (float)FrameTime;
-        float yawspeed = CvarValue("cl_yawspeed\0"u8), pitchspeed = CvarValue("cl_pitchspeed\0"u8);
-
-        ViewAngles.Y -= speed * yawspeed * 0f;
-        ViewAngles.Y += speed * yawspeed * 0f;
-        ViewAngles.Y = Mathlib.Anglemod(ViewAngles.Y);
-
-        ViewAngles.X -= speed * pitchspeed * 0f;
-        ViewAngles.X += speed * pitchspeed * 0f;
-
-        if (ViewAngles.X > 80)
-            ViewAngles.X = 80;
-        if (ViewAngles.X < -70)
-            ViewAngles.X = -70;
-        if (ViewAngles.Z > 50)
-            ViewAngles.Z = 50;
-        if (ViewAngles.Z < -50)
-            ViewAngles.Z = -50;
     }
 
     /// <summary>CL_ReadFromServer: cl.time advanced, every message that is due parsed, the entities relinked.</summary>

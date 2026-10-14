@@ -56,6 +56,27 @@ public sealed unsafe class Cmd
         Add("wait", () => _wait = true);
     }
 
+    /// <summary>A player's game (a platform): a command of the table the port lacks prints, instead of stopping the run.</summary>
+    public bool Interactive { get; set; }
+
+    /// <summary>
+    /// Cmd_CompleteCommand, then Cvar_CompleteVariable: the first command (newest first, as cmd_functions is linked)
+    /// and then cvar whose name begins with the partial text; null for none or an empty text.
+    /// </summary>
+    public byte[]? Complete(ReadOnlySpan<byte> partial)
+    {
+        if (partial.Length == 0)
+            return null;
+        string p = System.Text.Encoding.Latin1.GetString(partial);
+        for (int i = Registry.Commands.Length - 1; i >= 0; i--)
+            if (Registry.Commands[i].StartsWith(p, StringComparison.Ordinal))
+                return System.Text.Encoding.Latin1.GetBytes(Registry.Commands[i]);
+        foreach (Registry.CvarDef c in Registry.Cvars)
+            if (c.Name.StartsWith(p, StringComparison.Ordinal))
+                return System.Text.Encoding.Latin1.GetBytes(c.Name);
+        return null;
+    }
+
     /// <summary>Cmd_AddCommand for a command of the reference's table.</summary>
     public void Add(string name, Action handler)
     {
@@ -206,7 +227,14 @@ public sealed unsafe class Cmd
         if (_registered.Contains(name))
         {
             if (!_commands.TryGetValue(name, out Action? handler))
+            {
+                if (Interactive)
+                {
+                    Msg("\""u8).Msg(_argv[0]).Msg("\" is not ported yet\n"u8).End();
+                    return;
+                }
                 throw new InvalidOperationException($"the console command \"{name}\" is not ported");
+            }
             handler();
             return;
         }

@@ -250,7 +250,7 @@ public sealed unsafe partial class Screen
             v += 8;
         }
         if (_keys.Dest == Keys.KeyMessage)
-            throw NotPortedYet;     // the chat line ("say:"): typed input, the platform's (step 6)
+            v = DrawChatLine(v);
         if (v > _notifyLines)
             _notifyLines = v;
     }

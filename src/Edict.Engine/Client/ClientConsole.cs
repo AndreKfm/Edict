@@ -51,7 +51,8 @@ public sealed unsafe class ClientConsole
     /// and Sbar_Init (when <paramref name="withScreen"/>), R_Init's cvars, and "exec quake.rc" for the first frame.
     /// </summary>
     /// <param name="cmdline">The cmdline cvar's value (com_cmdline: the program's name too, at most 255 characters).</param>
-    public void Startup(QFileSystem files, ModelCache models, string cmdline, bool withScreen)
+    /// <param name="harness">host_framerate as the reference's harness sets it (edict_sys.c); a game keeps it 0.</param>
+    public void Startup(QFileSystem files, ModelCache models, string cmdline, bool withScreen, bool harness = true)
     {
         // COM_CheckRegistered (in COM_Init, before Con_Init: its print reaches only stdout)
         if (files.Registered)
@@ -73,6 +74,7 @@ public sealed unsafe class ClientConsole
             s.InitVideo();
             s.InitScreen();
             s.InitSbar();
+            s.AddConsoleCommands(_cmd);
         }
         // R_Init: the surface and edge counts of the stack-based renderer
         fixed (byte* n = "r_maxedges\0"u8)
@@ -80,7 +82,8 @@ public sealed unsafe class ClientConsole
         fixed (byte* n = "r_maxsurfs\0"u8)
             _cvars.SetValue(n, 800);     // NUMSTACKSURFACES
         _cmd.InsertText("exec quake.rc\n"u8);
-        SetCvar("host_framerate", ClientHost.HarnessFrameRate);     // edict_sys.c, after Host_Init
+        if (harness)
+            SetCvar("host_framerate", ClientHost.HarnessFrameRate);     // edict_sys.c, after Host_Init
     }
 
     private void SetCvar(string name, string value)

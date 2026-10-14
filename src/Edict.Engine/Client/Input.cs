@@ -11,9 +11,9 @@ public struct KButton
 }
 
 /// <summary>
-/// cl_input.c's buttons and their commands (+forward, -forward, ..., impulse), as the configs run them. The movement
-/// they make (CL_KeyState in CL_BaseMove) is the platform's (step 6): until then a button other than mlook held
-/// down, or an impulse, stops CL_SendCmd with an error.
+/// cl_input.c: the buttons and their commands (+forward, -forward, ..., impulse), CL_KeyState, CL_AdjustAngles and
+/// CL_BaseMove; in_win.c's IN_MouseMove for a platform's mouse (<see cref="IMouse"/>); view.c's pitch drift
+/// starts and stops.
 /// </summary>
 public sealed unsafe partial class ClientState
 {
@@ -28,8 +28,11 @@ public sealed unsafe partial class ClientState
     /// <summary>in_impulse.</summary>
     public int Impulse;
 
-    private static readonly SysErrorException ButtonNotPorted =
-        new("CL_BaseMove: a button held or an impulse; the movement of keys is not ported yet (step 6)");
+    /// <summary>The platform's mouse, or null (in_null.c's IN_Move: nothing).</summary>
+    public IMouse? Mouse { get; set; }
+
+    /// <summary>noclip_anglehack: set by noclip in a single player game (host_cmd.c), which the port does not run.</summary>
+    public bool NoclipAngleHack;
 
     /// <summary>Registers the button commands (CL_InitInput) with the command system.</summary>
     [NoAllocUnchecked("load path")]
@@ -53,7 +56,7 @@ public sealed unsafe partial class ClientState
         {
             KeyUp(cmd, InMlook);
             if ((Buttons[InMlook].State & 1) == 0 && Lookspring())
-                throw ButtonNotPorted;      // V_StartPitchDrift
+                StartPitchDrift();
         });
         cmd.Add("impulse", () => Impulse = Edict.Exact.CAtof.QAtoi(cmd.Argv(1)));
     }
@@ -123,13 +126,173 @@ public sealed unsafe partial class ClientState
             return _cvars.Value(n) != 0;
     }
 
-    /// <summary>Whether CL_BaseMove sees only what the port has: no button down but mlook, no impulse.</summary>
-    private void CheckButtons()
+    /// <summary>CL_KeyState: the fraction of the frame the button was down; its impulses cleared.</summary>
+    private float KeyState(int button)
     {
-        for (int i = 0; i < NumButtons; i++)
-            if (i != InMlook && Buttons[i].State != 0)
-                throw ButtonNotPorted;
-        if (Impulse != 0)
-            throw ButtonNotPorted;
+        ref KButton key = ref Buttons[button];
+        bool impulsedown = (key.State & 2) != 0;
+        bool impulseup = (key.State & 4) != 0;
+        bool down = (key.State & 1) != 0;
+        float val = 0;
+        if (impulsedown && !impulseup)
+            val = down ? 0.5f : 0;      // pressed and held this frame
+        if (impulseup && !impulsedown)
+            val = 0;                    // released this frame
+        if (!impulsedown && !impulseup)
+            val = down ? 1.0f : 0;      // held the entire frame, or up the entire frame
+        if (impulsedown && impulseup)
+            val = down ? 0.75f : 0.25f; // released and re-pressed, or pressed and released this frame
+        key.State &= 1;     // clear impulses
+        return val;
     }
+
+    /// <summary>CL_AdjustAngles: the view turned by the keys, the pitch and roll bounded.</summary>
+    private void AdjustAngles()
+    {
+        float speed = (Buttons[InSpeed].State & 1) != 0
+            ? (float)(FrameTime * CvarValue("cl_anglespeedkey\0"u8))
+            : (float)FrameTime;
+        float yawspeed = CvarValue("cl_yawspeed\0"u8), pitchspeed = CvarValue("cl_pitchspeed\0"u8);
+        if ((Buttons[InStrafe].State & 1) == 0)
+        {
+            ViewAngles.Y -= speed * yawspeed * KeyState(InRight);
+            ViewAngles.Y += speed * yawspeed * KeyState(InLeft);
+            ViewAngles.Y = Mathlib.Anglemod(ViewAngles.Y);
+        }
+        if ((Buttons[InKlook].State & 1) != 0)
+        {
+            StopPitchDrift();
+            ViewAngles.X -= speed * pitchspeed * KeyState(InForward);
+            ViewAngles.X += speed * pitchspeed * KeyState(InBack);
+        }
+        float up = KeyState(InLookup);
+        float down = KeyState(InLookdown);
+        ViewAngles.X -= speed * pitchspeed * up;
+        ViewAngles.X += speed * pitchspeed * down;
+        if (up != 0 || down != 0)
+            StopPitchDrift();
+        if (ViewAngles.X > 80)
+            ViewAngles.X = 80;
+        if (ViewAngles.X < -70)
+            ViewAngles.X = -70;
+        if (ViewAngles.Z > 50)
+            ViewAngles.Z = 50;
+        if (ViewAngles.Z < -50)
+            ViewAngles.Z = -50;
+    }
+
+    /// <summary>CL_BaseMove: the angles, then the move of the keys into cl.cmd's moves.</summary>
+    private void BaseMove()
+    {
+        AdjustAngles();
+        CmdViewAngles = default;            // Q_memset (cmd, 0, sizeof(*cmd))
+        float side = CvarValue("cl_sidespeed\0"u8), up = CvarValue("cl_upspeed\0"u8),
+            forward = CvarValue("cl_forwardspeed\0"u8), back = CvarValue("cl_backspeed\0"u8);
+        float sidemove = 0, upmove = 0, forwardmove = 0;
+        if ((Buttons[InStrafe].State & 1) != 0)
+        {
+            sidemove += side * KeyState(InRight);
+            sidemove -= side * KeyState(InLeft);
+        }
+        sidemove += side * KeyState(InMoveright);
+        sidemove -= side * KeyState(InMoveleft);
+        upmove += up * KeyState(InUp);
+        upmove -= up * KeyState(InDown);
+        if ((Buttons[InKlook].State & 1) == 0)
+        {
+            forwardmove += forward * KeyState(InForward);
+            forwardmove -= back * KeyState(InBack);
+        }
+        // adjust for speed key
+        if ((Buttons[InSpeed].State & 1) != 0)
+        {
+            float movespeedkey = CvarValue("cl_movespeedkey\0"u8);
+            forwardmove *= movespeedkey;
+            sidemove *= movespeedkey;
+            upmove *= movespeedkey;
+        }
+        CmdForwardMove = forwardmove;
+        CmdSideMove = sidemove;
+        CmdUpMove = upmove;
+    }
+
+    private int _oldMouseX, _oldMouseY;               // in_win.c's old_mouse_x, old_mouse_y
+
+    /// <summary>IN_Move (in_win.c's IN_MouseMove): the mouse's motion into the view angles or the moves.</summary>
+    private void InMove()
+    {
+        if (Mouse is not { } mouse || !mouse.Active)
+            return;
+        mouse.TakeMotion(out int mx, out int my);
+        float mouseX, mouseY;
+        if (CvarValue("m_filter\0"u8) != 0)
+        {
+            mouseX = (float)((mx + _oldMouseX) * 0.5);
+            mouseY = (float)((my + _oldMouseY) * 0.5);
+        }
+        else
+        {
+            mouseX = mx;
+            mouseY = my;
+        }
+        _oldMouseX = mx;
+        _oldMouseY = my;
+        float sensitivity = CvarValue("sensitivity\0"u8);
+        mouseX *= sensitivity;
+        mouseY *= sensitivity;
+        bool strafe = (Buttons[InStrafe].State & 1) != 0, mlook = (Buttons[InMlook].State & 1) != 0;
+        // add mouse X/Y movement to cmd
+        if (strafe || (CvarValue("lookstrafe\0"u8) != 0 && mlook))
+            CmdSideMove += CvarValue("m_side\0"u8) * mouseX;
+        else
+            ViewAngles.Y -= CvarValue("m_yaw\0"u8) * mouseX;
+        if (mlook)
+            StopPitchDrift();
+        if (mlook && !strafe)
+        {
+            ViewAngles.X += CvarValue("m_pitch\0"u8) * mouseY;
+            if (ViewAngles.X > 80)
+                ViewAngles.X = 80;
+            if (ViewAngles.X < -70)
+                ViewAngles.X = -70;
+        }
+        else if (strafe && NoclipAngleHack)
+            CmdUpMove -= CvarValue("m_forward\0"u8) * mouseY;
+        else
+            CmdForwardMove -= CvarValue("m_forward\0"u8) * mouseY;
+    }
+
+    /// <summary>V_StartPitchDrift.</summary>
+    public void StartPitchDrift()
+    {
+        if (LastStop == Time)
+            return;     // something else is keeping it from drifting
+        if (NoDrift != 0 || PitchVel == 0)
+        {
+            PitchVel = CvarValue("v_centerspeed\0"u8);
+            NoDrift = 0;
+            DriftMove = 0;
+        }
+    }
+
+    /// <summary>V_StopPitchDrift.</summary>
+    public void StopPitchDrift()
+    {
+        LastStop = Time;
+        NoDrift = 1;
+        PitchVel = 0;
+    }
+}
+
+/// <summary>A platform's mouse: whether it moves the view (in_win.c's mouseactive), and its motion since the last move.</summary>
+public interface IMouse
+{
+    bool Active
+    {
+        [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+        get;
+    }
+
+    [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
+    void TakeMotion(out int mx, out int my);
 }

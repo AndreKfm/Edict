@@ -82,11 +82,11 @@ public sealed class AllocationTests
         int commandFrames = 0;
         for (int frame = 0; frame < 100_000 && !host.Ended; frame++)
         {
-            int commands = host.CommandsExecuted;
+            int commands = host.Cmd.Executed;
             long before = GC.GetAllocatedBytesForCurrentThread();
             host.Frame(time);
             long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
-            if (frame == 0 || host.CommandsExecuted != commands)
+            if (frame == 0 || host.Cmd.Executed != commands)
                 commandFrames++;
             else if (bytes != 0)
                 allocating.Add((frame, bytes));
@@ -95,6 +95,51 @@ public sealed class AllocationTests
             $"{run}: {commandFrames} frames with playdemo or a command; {allocating.Count} other frames allocated" +
             (allocating.Count == 0 ? "" : ": " + string.Join(", ", allocating.Take(12).Select(a => $"{a.Frame} ({a.Bytes} B)"))));
         Assert.True(allocating.Count == 0, $"{run}: {allocating.Count} client frames without a command allocated, the first at frame "
+                                           + $"{(allocating.Count > 0 ? allocating[0].Frame : -1)} ({(allocating.Count > 0 ? allocating[0].Bytes : 0)} bytes)");
+    }
+
+    private sealed class CirclingMouse : IMouse
+    {
+        private int _n;
+        public bool Active => true;
+
+        public void TakeMotion(out int mx, out int my)
+        {
+            mx = _n % 7 - 3;
+            my = _n++ % 5 - 2;
+        }
+    }
+
+    /// <summary>
+    /// A player's game (<see cref="Host.CreateGame"/>, P6 step 6): after the spawn, frames with a key held (+forward,
+    /// +attack), the mouse moving under +mlook and a weapon impulse allocate nothing but those that ran a command.
+    /// </summary>
+    [Fact]
+    public void Game_frames_allocate_nothing()
+    {
+        using var files = new QFileSystem(TraceCorpus.DataDirectory);
+        using Host host = Host.CreateGame(files, ["+map", "start"]);
+        host.Cl!.Mouse = new CirclingMouse();
+        for (int i = 0; i < 200; i++)
+            host.Frame(0.014f);
+        host.Cmd.ExecuteString("+mlook");
+        Screen s = host.Screen!;
+        var allocating = new List<(int Frame, long Bytes)>();
+        for (int frame = 0; frame < 2000; frame++)
+        {
+            int key = frame % 400 < 200 ? 'w' : Screen.KMouse1;
+            if (frame % 200 == 0)
+                s.KeyEvent(key, true);
+            if (frame % 200 == 150)
+                s.KeyEvent(key, false);
+            int commands = host.Cmd.Executed;
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            host.Frame(0.014f);
+            long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (host.Cmd.Executed == commands && bytes != 0)
+                allocating.Add((frame, bytes));
+        }
+        Assert.True(allocating.Count == 0, $"{allocating.Count} game frames without a command allocated, the first at frame "
                                            + $"{(allocating.Count > 0 ? allocating[0].Frame : -1)} ({(allocating.Count > 0 ? allocating[0].Bytes : 0)} bytes)");
     }
 
@@ -119,11 +164,11 @@ public sealed class AllocationTests
         int commandFrames = 0;
         for (int frame = 0; frame < 100_000 && !host.Ended; frame++)
         {
-            int commands = host.CommandsExecuted;
+            int commands = host.Cmd.Executed;
             long before = GC.GetAllocatedBytesForCurrentThread();
             host.Frame(time);
             long bytes = GC.GetAllocatedBytesForCurrentThread() - before;
-            if (frame == 0 || host.CommandsExecuted != commands)
+            if (frame == 0 || host.Cmd.Executed != commands)
                 commandFrames++;
             else if (bytes != 0)
                 allocating.Add((frame, bytes));

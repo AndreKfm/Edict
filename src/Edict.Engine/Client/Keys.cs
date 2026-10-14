@@ -4,8 +4,8 @@
 namespace Edict.Engine;
 
 /// <summary>
-/// keys.c as far as the console and the configs need it: the key names, the bindings and their commands (bind,
-/// unbind, unbindall), key_dest and the console's input lines. Key events are the platform's (step 6).
+/// keys.c's state: the key names, the bindings and their commands (bind, unbind, unbindall), key_dest, the console's
+/// input lines and history, the chat buffer, and Key_Init's tables. The events are the screen's (KeyInput.cs).
 /// </summary>
 public sealed class Keys
 {
@@ -27,6 +27,23 @@ public sealed class Keys
     public readonly byte[]?[] Bindings = new byte[256][];
 
     private readonly Cmd _cmd;
+
+    /// <summary>keydown, key_repeats (if > 1, it is autorepeating).</summary>
+    public readonly bool[] KeyDown = new bool[256];
+    public readonly int[] Repeats = new int[256];
+
+    /// <summary>consolekeys (if true, can't be rebound while in console), menubound, keyshift (the key with shift held).</summary>
+    public readonly bool[] ConsoleKeys = new bool[256], MenuBound = new bool[256];
+    public readonly int[] KeyShift = new int[256];
+
+    /// <summary>shift_down, key_lastpress, key_count (incremented every key event), history_line.</summary>
+    public bool ShiftDown;
+    public int LastPress, Count, HistoryLine;
+
+    /// <summary>chat_buffer[32], Key_Message's chat_bufferlen, team_message.</summary>
+    public readonly byte[] ChatBuffer = new byte[32];
+    public int ChatBufferLen;
+    public bool TeamMessage;
 
     private static readonly (string Name, int Key)[] KeyNames =
     [
@@ -58,6 +75,23 @@ public sealed class Keys
             Lines[i][0] = (byte)']';
         }
         LinePos = 1;
+        // init ascii characters in console mode
+        for (int i = 32; i < 128; i++)
+            ConsoleKeys[i] = true;
+        foreach (int k in (ReadOnlySpan<int>)[13, 9, 130, 131, 128, 129, 127, 150, 149, 134, 239, 240])
+            ConsoleKeys[k] = true;  // enter, tab, the arrows, backspace, pgup, pgdn, shift, the wheel
+        ConsoleKeys['`'] = false;
+        ConsoleKeys['~'] = false;
+        for (int i = 0; i < 256; i++)
+            KeyShift[i] = i;
+        for (int i = 'a'; i <= 'z'; i++)
+            KeyShift[i] = i - 'a' + 'A';
+        ReadOnlySpan<byte> from = "1234567890-=,./;'[]`\\"u8, to = "!@#$%^&*()_+<>?:\"{}~|"u8;
+        for (int i = 0; i < from.Length; i++)
+            KeyShift[from[i]] = to[i];
+        MenuBound[27] = true;
+        for (int i = 0; i < 12; i++)
+            MenuBound[135 + i] = true;
         cmd.Add("bind", Bind);
         cmd.Add("unbind", Unbind);
         cmd.Add("unbindall", UnbindAll);
@@ -85,6 +119,15 @@ public sealed class Keys
                 return key;
         }
         return -1;
+    }
+
+    /// <summary>The name of a key of the table (keynames), or empty.</summary>
+    public static ReadOnlySpan<byte> NameOf(int keynum)
+    {
+        foreach ((string name, int key) in KeyNames)
+            if (key == keynum)
+                return System.Text.Encoding.Latin1.GetBytes(name);
+        return [];
     }
 
     /// <summary>Key_SetBinding.</summary>

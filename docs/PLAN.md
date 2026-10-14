@@ -841,6 +841,30 @@ entity just outside a frustum plane whose faces R_ClipEdge clips away whole). Wi
 blind spots of step 4 are detected now (the orders of edges and surfaces at the same u or key, the keys of a
 node's faces: the brush entities' 1/z sort and the bmodel keys see them), which shows the "span of no width"
 reasons given for them wrong; the cache flush at a second demo map and R_MakeSky's early return stay blind.
+Step 6 (2026-10-14), the platform. The engine's side first, what the harness never pressed: keys.c's events
+(`Screen.KeyEvent`, KeyInput.cs: Key_Event with the autorepeat, the button commands' key numbers on the way down and
+up, Key_Console with history, completion and scrollback, Key_Message, Key_Init's tables), console.c's toggleconsole,
+messagemode, messagemode2 and clear, Host_Quit_f from the console; cl_input.c's CL_KeyState, CL_AdjustAngles,
+CL_BaseMove and CL_SendMove with the attack and jump bits and the impulse (the move had been computed with every key
+state 0, the same arithmetic with no key held: the gates hold unchanged); V_StartPitchDrift and V_StopPitchDrift;
+in_win.c's IN_MouseMove behind `IMouse` (the platform's motion; m_filter, sensitivity, lookstrafe, +mlook,
++strafe). `Host.Frame` returns false where Host_FilterTime holds a frame back (C returns, after the rand draw and
+the real time; the harness never ran into it, the port had stopped there). `Host.CreateGame` starts a player's game:
+the reference's start without the harness' host_framerate, in_win.c's m_filter after the reference's cvars, and a
+console command of the table the port lacks printing that it is not ported instead of stopping the game. The
+platform, `src/Edict.Platform` (the program `edict`, no packages): Win32 (a window, the frame buffer through the
+palette by StretchDIBits, vid_win.c's scan codes, the mouse buttons and wheel as keys, the motion from the window's
+centre with the cursor hidden and confined while the game has it, ClearAllStates on losing the focus) and X11 (an
+XImage the palette is scaled into, keysyms as vid_x.c's XLateKey, detectable autorepeat, the pointer grabbed and
+warped back); sys_win.c's loop with a Stopwatch for Sys_FloatTime. The start map runs at the 72 frames a second
+Host_FilterTime allows, on Windows and under WSLg's X server (`-edictframes <n>` and `-edictshot <file.bmp>` for an
+unattended run). Tests: `GameInputTests` (a held key moves the player, the mouse turns the view and pitches it under
++mlook, the console takes typed commands, the chat line opens and closes, quit ends the game) and
+`AllocationTests.Game_frames_allocate_nothing` (2,000 frames with keys held, the mouse moving and the attack: none
+allocates but those that ran a command). Not in this step: the menu (the reference's is a stub, so the port's is
+too: Escape does nothing), the demo loop (startdemos with nothing running stops with "not ported"; the game starts
+"+map start" when no map is named), the host commands a client forwards to the server (god, noclip, kill, give,
+say: "not ported yet" at the console), sound (step 8).
 
 ## D. Effort at 7 h/week (calendar weeks)
 

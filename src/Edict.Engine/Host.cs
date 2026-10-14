@@ -76,8 +76,30 @@ public sealed unsafe class Host : IDisposable
     {
     }
 
+    /// <summary>offsetof (edict_t, v) of the reference on x64 (the captures' map records hold it): 108 bytes.</summary>
+    public const int ReferenceEdictHeaderBytes = 108;
+
+    /// <summary>pr_numbuiltins: pr_builtin[] compiled without QUAKE2.</summary>
+    public const int ReferenceNumBuiltins = 79;
+
+    /// <summary>
+    /// A player's game, for a platform: a listen server started as the reference starts it, with the screen, the
+    /// frame clock the platform's (host_framerate stays 0), the platform's cvars (in_win.c's m_filter) after the
+    /// reference's, and a console command the port lacks printing that it is not ported instead of stopping.
+    /// </summary>
+    [NoAllocUnchecked("load path")]
+    public static Host CreateGame(QFileSystem files, IReadOnlyList<string> commandLine)
+    {
+        string cmdline = string.Join(' ', ["edict", .. commandLine]);
+        if (cmdline.Length > 255)
+            cmdline = cmdline[..255];
+        var cvars = Cvars.FromRegistry([("m_filter", "0")]);
+        return new Host(files, cvars, 1, 0, new Loopback(1 << 20), ReferenceEdictHeaderBytes, ReferenceNumBuiltins,
+            commandLine, cmdline, withScreen: true, game: true);
+    }
+
     private Host(QFileSystem files, Cvars cvars, int maxclients, uint randSeed, INetServer net, int headerBytes,
-                 int numBuiltins, IReadOnlyList<string>? commandLine, string? cmdline, bool withScreen)
+                 int numBuiltins, IReadOnlyList<string>? commandLine, string? cmdline, bool withScreen, bool game = false)
     {
         _files = files;
         Cvars = cvars;
@@ -92,7 +114,7 @@ public sealed unsafe class Host : IDisposable
         _net = net;
         _rand.Srand(randSeed);
         _firstFrame = net is not Loopback;
-        Cmd = new Cmd(cvars, files) { CommandLine = commandLine ?? [] };
+        Cmd = new Cmd(cvars, files) { CommandLine = commandLine ?? [], Interactive = game };
         Cmd.Add("map", Map);
         Cmd.Add("restart", Restart);
         Cmd.Add("changelevel", Changelevel);
@@ -101,7 +123,7 @@ public sealed unsafe class Host : IDisposable
             Cl = new ClientState(cvars, _models, randSeed, Cmd.Text);
             _console = new ClientConsole(Cmd, cvars, Cl, () => Sv is { Active: true });
             if (cmdline is not null)
-                _console.Startup(files, _models, cmdline, withScreen);
+                _console.Startup(files, _models, cmdline, withScreen, harness: !game);
         }
         InitializeTypes();
     }
@@ -140,9 +162,10 @@ public sealed unsafe class Host : IDisposable
 
     /// <summary>
     /// _Host_Frame (time): rand () (except in the first frame, whose draw the given seed includes), the frame time,
-    /// the command buffer, the server frame, and host_framecount.
+    /// the command buffer, the server frame, and host_framecount. False when Host_FilterTime holds the frame back
+    /// (less than 1/72 s since the last one): only the rand draw and the real time happened.
     /// </summary>
-    public void Frame(float time)
+    public bool Frame(float time)
     {
         if (!_firstFrame)
             Rand().Next();          // keep the random time dependent
@@ -151,7 +174,7 @@ public sealed unsafe class Host : IDisposable
         // decide the simulation time (Host_FilterTime)
         _realtime += time;
         if (_realtime - _oldrealtime < 1.0 / 72.0)
-            throw new InvalidOperationException("Host_FilterTime: the frame would not run (the reference stops there too)");
+            return false;       // framerate is too high
         FrameTime = _realtime - _oldrealtime;
         _oldrealtime = _realtime;
         float framerate = HostFramerate();
@@ -216,6 +239,7 @@ public sealed unsafe class Host : IDisposable
         }
 
         FrameCount++;
+        return true;
     }
 
     /// <summary>host_framerate's value.</summary>

@@ -238,8 +238,7 @@ public sealed unsafe partial class Screen
     /// <summary>V_DriftPitch: moves the client pitch angle towards cl.idealpitch sent by the server.</summary>
     private void DriftPitch()
     {
-        // noclip_anglehack: set by noclip in a single player game, which the port's runs never use
-        if (_cl.OnGround == 0 || _cl.DemoPlayback)
+        if (_cl.NoclipAngleHack || _cl.OnGround == 0 || _cl.DemoPlayback)
         {
             _cl.DriftMove = 0;
             _cl.PitchVel = 0;
@@ -253,7 +252,7 @@ public sealed unsafe partial class Screen
             else
                 _cl.DriftMove = (float)(_cl.DriftMove + FrameTime);
             if (_cl.DriftMove > CvarValue("v_centermove\0"u8))
-                throw NotPortedYet;         // V_StartPitchDrift
+                _cl.StartPitchDrift();
             return;
         }
         float delta = _cl.IdealPitch - _cl.ViewAngles.X;

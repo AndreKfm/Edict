@@ -199,6 +199,11 @@ allocation gate plays this corpus now. `tools/demogen.py` seed 7 is the renderer
 not reach, written next to the demos: every sprite type, a sprite frame group, alias skin and frame groups; 250
 entities around the view). R7 group `frame`; the group `world` runs both classes.
 
+P6, step 6: no corpus records input, so the platform's side is tested by the port's behaviour, not against the
+reference: `GameInputTests` (keys through `Screen.KeyEvent`, a fake `IMouse`, the console, the chat line, quit) and
+`AllocationTests.Game_frames_allocate_nothing`. An unattended run of the program itself:
+`edict -basedir <dir> -edictframes 300 -edictshot shot.bmp` (Windows; on Linux with an X server, WSLg included).
+
 ### Test tiers (2026-10-13)
 
 Not every change needs every test. Three tiers, chosen by what a run has to answer:
