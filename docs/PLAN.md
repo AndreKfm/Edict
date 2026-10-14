@@ -591,6 +591,38 @@ temp entities 1,655 (gunshot 1,560, teleport 52, explosion 38, wizspike 5), ligh
 damage 71, setangle 52, stats 52, signon 46, particles 26, the scoreboard's name, frags and colors 26 each, cdtrack and
 setview 20 each, stufftext 11, killed monster 4, centerprint 2, found secret 1. Never: disconnect, version,
 stopsound, setpause, intermission, finale, sellscreen, cutscene.
+Step 3 done (2026-10-14): `src/Edict.Engine/Client/` — `ClientState` (cls, cl and the client's arrays; CL_ClearState
+with Host_ClearMemory's part; the demo reader of CL_GetMessage), `ClientParse` (CL_ParseServerMessage with every
+message type but svc_disconnect and svc_sellscreen, which act outside the client and stop with an error;
+CL_ParseServerInfo, CL_ParseUpdate, baselines, statics, client data, V_ParseDamage's color shift, CL_SignonReply),
+`ClientMain` (CL_SendCmd with what CL_AdjustAngles and CL_BaseMove compute when no key is held, CL_ReadFromServer,
+CL_LerpPoint, CL_RelinkEntities with its lights and trails, CL_AllocDlight, CL_DecayLights), `ClientTEnt` (every
+temp entity, the beams and CL_UpdateTEnts), `Particles` (which particles are taken and how often each draws from
+rand: 4 to 8 per particle by function, R_RocketTrail's float loop, R_EntityParticles' lazy setup of 486 draws that
+repeats while its first value is 0), `ClientHost` (the client's _Host_Frame and the commands a playback issues:
+playdemo, bf, reconnect). The models: `ModelCache` reads synctype and flags from alias and sprite headers, loads at
+playdemo every name in the demo that ends in .mdl, .spr or .bsp (the server's Preload, for the client) and looks
+them up at the server info without allocating; a map registers its inline models "*1", ... again on every load, as
+Mod_LoadBrushModel does (the server holds them directly and had not noticed that the names kept the last map's).
+Found in C on the way: CL_UpdateTEnts's segment loop reuses the beam loop's i, so after a beam with segments the beam
+loop goes on from i = 4 while its pointer keeps going, and reads past cl_beams for a beam from index 4 on; the port
+does the same and stops with an error where C would read past the array. The C client keeps cl_static_entities over
+a CL_ClearState; the port too. `ClientHash` (Edict.Harness) builds the reference's client streams.
+Gate (`ClientGateTests`): every corpus and long-run demo, 77,253 client frames, every record identical — the rand
+state, the three lanes, every entity — on the first run. R7 (`client`) then showed what the corpus does not reach:
+of 25 mutants 17 detected, 2 blind (no lightning, no TE_SPIKE in the corpus), 6 survived (one equivalent: clearing
+the statics, whose untouched fields are 0 forever). `tools/demogen.py` writes synthetic demos for that (4 seeds × 3,000
+messages, in `tools/demos.sh`): message times with every kind of step, gap and jump back, entity numbers from 256
+on, moves of 99 to 101 units, angles across ±180, model changes onto copies of progs/armor.mdl with synctype ST_RAND
+and each trail flag (LibreQuake has no ST_RAND model at all), every effect bit and temp entity type (lightning from
+the view entity too), particles of every count, damage, stats, the scoreboard, light styles, setangle, setpause,
+the bonus flash, intermission, finale and cutscene. The edges of CL_LerpPoint and CL_DecayLights are not reachable
+in a steady playback: the client reads until a message's time reaches cl.time, so at CL_LerpPoint mtime[1] < cl.time
+<= mtime[0] — frac is in [0, 1] and f is never 0. They are reachable in the signon frame, where CL_ParseServerInfo
+has set cl.time to 0 and the client reads without looking at the times; each seed puts one edge there (a time that
+goes back makes f negative and frac above 1: in (1, 1.01] and above 1.01; f exactly 0.1f; f == 0 with an explosion's
+die equal to cl.time). With them (23,554 client frames more, identical on Windows and Linux, the port's on the first
+run) all 24 non-equivalent mutants are detected.
 
 ## D. Effort at 7 h/week (calendar weeks)
 

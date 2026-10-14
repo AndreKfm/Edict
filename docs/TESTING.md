@@ -152,7 +152,7 @@ group `messages`; the loop gate is also part of `clients` and `physics` now, who
 
 ```sh
 sh tools/longruns.sh ~/edict-ref data/long      # the ten-minute runs of the cut-3 gate (hashes and messages)
-sh tools/demos.sh ~/edict-ref data/client       # P5: demos of every run's messages, the client's hashes of each
+sh tools/demos.sh ~/edict-ref data/client       # P5: demos of every run's messages and synthetic ones, the client's hashes
 ```
 
 Run time (Windows, Ryzen 9 3900X, 2026-10-13, wall clock, after cut 3): about 146 s for a full run — build 5 s,
@@ -166,6 +166,10 @@ Run time after the messages lane and the tiers (same machine, 2026-10-13): `tool
 engine tests 44 s (219 tests; before the split the whole engine suite took 131 s, its critical path the replay modes
 and the long runs in one class each), exact tests 8 s. The three long runs, now in parallel, 25 s (62 s one after
 another). `tools/mutate.py move check physics messages` (87 mutants, stopping at the first failing test) 631 s.
+
+P5 (the client): the gate is `ClientGateTests`, the port's client on every demo of `data/client` against the
+reference's records. The corpus's demos are what a server sends; `tools/demogen.py` adds synthetic ones for what it
+does not (R7 group `client` showed which), among them the edges of CL_LerpPoint that only the signon frame can reach.
 
 ### Test tiers (2026-10-13)
 

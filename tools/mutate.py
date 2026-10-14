@@ -32,6 +32,9 @@ import os, shutil, subprocess, sys
 # - SV_FatPVS over the (numleafs + 7) >> 3 bytes of a PVS row instead of (numleafs + 31) >> 3: the bits tested are
 #   leafnums of world leafs 1..numleafs (leaf - 1 < numleafs), all within the row; the three bytes more only OR in what
 #   Mod_DecompressVis left past the row.
+# - CL_ClearState clearing cl_static_entities too: of a static, CL_ParseStatic writes every field the state reads
+#   but msgtime, the lerp origins and angles, forcelink, update_type, syncbase and baseline.effects, and nothing else
+#   ever writes those, so they are 0 from the start and clearing them changes nothing.
 # - PF_checkclient's interval with > instead of >=: sv.time - sv.lastchecktime == 0.1 cannot hold. 0.1 as a double is
 #   an odd multiple of 2^-55; with sv.time >= 1 (it starts at 1) the difference is exact and a multiple of 2^-52.
 
@@ -292,6 +295,38 @@ MUTANTS = {
          'if (c >= 0 && Is(name, _vars[c].Name))', 'if (c >= 0)'),
         ('point cache: z not compared', 'src/Edict.Engine/Server/Move.cs',
          ' && _pointKeys[k + 2] == z)', ')'),
+    ]),
+    # P5: the client, against every demo of the client corpus
+    'client': (['Edict.Engine.Tests.ClientGateTests'], [
+        ('particles: a small effect draws 4', 'src/Edict.Engine/Client/Particles.cs', 'Draw(count == 1024 ? 7 : 5);', 'Draw(count == 1024 ? 7 : 4);'),
+        ('particles: the free list never runs out', 'src/Edict.Engine/Client/Particles.cs',
+         '        if (FreeParticles == 0)\n            return false;\n', ''),
+        ('particles: teleport splash one layer short', 'src/Edict.Engine/Client/Particles.cs', 'Particles(8 * 8 * 14, 6)', 'Particles(8 * 8 * 13, 6)'),
+        ('particles: a trail particle every 2 units', 'src/Edict.Engine/Client/Particles.cs', '            dec = 3;', '            dec = 2;'),
+        ('particles: R_NewMap keeps the particles', 'src/Edict.Engine/Client/ClientParse.cs', '        ClearParticles();               // R_NewMap', ''),
+        ('lerp: snap above 1.0', 'src/Edict.Engine/Client/ClientMain.cs', 'if (frac > 1.01)', 'if (frac > 1.0)'),
+        ('lerp: dropped packet at 0.1f', 'src/Edict.Engine/Client/ClientMain.cs', 'if (f > 0.1)', 'if (f > 0.1f)'),
+        ('relink: teleport at 99 units', 'src/Edict.Engine/Client/ClientMain.cs',
+         'if (At(ref delta, j) > 100 || At(ref delta, j) < -100)', 'if (At(ref delta, j) > 99 || At(ref delta, j) < -99)'),
+        ('relink: view angle delta reversed', 'src/Edict.Engine/Client/ClientMain.cs',
+         'float d = At(ref MViewAngles0, j) - At(ref MViewAngles1, j);', 'float d = At(ref MViewAngles1, j) - At(ref MViewAngles0, j);'),
+        ('relink: muzzle flash lives 0.2 s', 'src/Edict.Engine/Client/ClientMain.cs', 'dl.Die = (float)(Time + 0.1);', 'dl.Die = (float)(Time + 0.2);'),
+        ('dlight: no key match', 'src/Edict.Engine/Client/ClientMain.cs', '        if (key != 0)\n        {\n            for', '        if (key == -12345)\n        {\n            for'),
+        ('dlight: decay of a light dying now', 'src/Edict.Engine/Client/ClientMain.cs', 'if (dl.Die < Time || dl.Radius == 0)', 'if (dl.Die <= Time || dl.Radius == 0)'),
+        ('read: old time after the step', 'src/Edict.Engine/Client/ClientMain.cs', '        OldTime = Time;\n        Time += FrameTime;', '        Time += FrameTime;\n        OldTime = Time;'),
+        ('parse: syncbase over 0x8000', 'src/Edict.Engine/Client/ClientParse.cs', '(float)(Rand.Next() & 0x7fff) / 0x7fff', '(float)(Rand.Next() & 0x7fff) / 0x8000'),
+        ('parse: forcelink from the newest time', 'src/Edict.Engine/Client/ClientParse.cs', 'bool forcelink = ent.MsgTime != MTime1;', 'bool forcelink = ent.MsgTime != MTime0;'),
+        ('parse: velocity times 8', 'src/Edict.Engine/Client/ClientParse.cs', 'r.ReadChar() * 16 : 0;', 'r.ReadChar() * 8 : 0;'),
+        ('parse: item times not set', 'src/Edict.Engine/Client/ClientParse.cs', '                    ItemGetTime[j] = (float)Time;\n', ''),
+        ('parse: damage shift clamped at 100', 'src/Edict.Engine/Client/ClientParse.cs', '        if (cs.Percent > 150)\n            cs.Percent = 150;', '        if (cs.Percent > 100)\n            cs.Percent = 100;'),
+        ('parse: new slots without colormap', 'src/Edict.Engine/Client/ClientParse.cs', '                Entities[NumEntities].Colormap = 1;     // vid.colormap', ''),
+        ('parse: signon completed one stage early', 'src/Edict.Engine/Client/ClientParse.cs', 'if (Signon == Signons - 1)', 'if (Signon == Signons - 2)'),
+        ('parse: idealpitch kept when not sent', 'src/Edict.Engine/Client/ClientParse.cs', 'IdealPitch = (bits & SuIdealPitch) != 0 ? r.ReadChar() : 0;', 'IdealPitch = (bits & SuIdealPitch) != 0 ? r.ReadChar() : IdealPitch;'),
+        ('tent: explosion light without decay', 'src/Edict.Engine/Client/ClientTEnt.cs', '                dl.Decay = 300;\n                break;\n            }\n            case TeTarExplosion:', '                break;\n            }\n            case TeTarExplosion:'),
+        ('tent: beam roll not drawn', 'src/Edict.Engine/Client/ClientTEnt.cs', 'ent.Angles.Z = Rand.Next() % 360;', 'ent.Angles.Z = 0;'),
+        ('tent: spike draws no sound choice', 'src/Edict.Engine/Client/ClientTEnt.cs',
+         '                RunParticleEffect(10);\n                if (Rand.Next() % 5 == 0)\n                    Rand.Next();        // rnd = rand () & 3: which ricochet sound',
+         '                RunParticleEffect(10);'),
     ]),
     'spawn': (['Edict.Engine.Tests.SpawnGateTests', 'Edict.Engine.Tests.SpawnParseTests'], [
         ('COM_Parse: unsigned char', 'src/Edict.Engine/Common/ComParse.cs',

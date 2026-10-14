@@ -4,7 +4,7 @@
 # The client corpus of P5 (docs/PLAN.md): per run of tools/captures.sh and tools/longruns.sh a demo of what its
 # server sent the client (tools/emg.py dem, into the game directory, where playdemo looks: id1/edict/<run>.dem), and
 # the reference's client hashes of its playback (.edh with client records, ref/src/edict_hash.c), no screen
-# (-edictclient), one hash per entity.
+# (-edictclient), one hash per entity; then the synthetic demos of tools/demogen.py.
 # Usage: tools/demos.sh <dir with edict_ref or edict_ref.exe> <out-dir>
 set -eu
 REF="$(cd "$1" && pwd)"
@@ -22,6 +22,15 @@ for emg in "$DATA"/captures/*.emg "$DATA"/long/*.emg; do
   $PY -I "$TOOLS/emg.py" dem "$emg" "${emg%.emg}.etp" "id1/edict/$run.dem" > /dev/null
   frames=$(( $(od -An -tu4 -j12 -N4 "${emg%.emg}.etp") + 100 ))      # the tape's frames and some to spare
   "$REF/edict_ref$EXE" -edictclient -edictframes "$frames" -edictperent -edicthash "$OUT/$run.edh" \
+    +playdemo "edict/$run" > "$OUT/$run.log" 2>&1 || { echo "$run: exit $?"; tail -2 "$OUT/$run.log"; exit 1; }
+  echo "$run: $($PY -I "$TOOLS/edh.py" summary "$OUT/$run.edh" | head -1)"
+done
+
+# synthetic demos (tools/demogen.py): what the corpus rarely or never sends
+for seed in 1 2 3 4; do
+  run="fuzz_$seed"
+  $PY -I "$TOOLS/demogen.py" . "$seed" 3000 "id1/edict/$run.dem" > /dev/null
+  "$REF/edict_ref$EXE" -edictclient -edictframes 20000 -edictperent -edicthash "$OUT/$run.edh" \
     +playdemo "edict/$run" > "$OUT/$run.log" 2>&1 || { echo "$run: exit $?"; tail -2 "$OUT/$run.log"; exit 1; }
   echo "$run: $($PY -I "$TOOLS/edh.py" summary "$OUT/$run.edh" | head -1)"
 done
