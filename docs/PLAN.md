@@ -811,6 +811,36 @@ the last shift). The step-3 mutants of the particles' motion (3) are detected no
 waited for the full frame stay blind for exact equalities the corpus does not hit or a view size below 100 (the
 platform's sizedown, step 6), their reasons updated. Open for step 4's synthetic inputs (with step 5's): the
 overflow of edges and surfaces, the span steppers' clamps under grazing views, a demo with a second map.
+Step 5 (2026-10-14), the entities. The port: r_alias.c and r_aclip.c (`RAlias.cs`: R_AliasCheckBBox with its trivial
+accept and the far subdivision, R_AliasSetUpTransform, the vertices' light from the normals, the clipping at the
+near plane and the view's edges, R_LightPoint, the entity's and the gun's light with the dynamic lights),
+d_polyse.c (`DPolyse.cs`: D_DrawSubdiv's recursive points, D_DrawNonSubdiv with the edge tables, the left edge's
+span packages and the affine spans; adivtab.h generated into `Adivtab.cs`; FloorDivMod), r_sprite.c and d_sprite.c
+(`RSprite.cs`: every sprite type, frame groups, the beam length, the poster clipped in world space and scanned),
+r_bsp.c's and r_draw.c's brush entities (`RBModel.cs`: R_RotateBmodel, R_BmodelCheckBBox, R_SplitEntityOnNode2,
+R_RecursiveClipBPoly down the world's BSP or the 1/z sort of an entity in one leaf, R_RenderBmodelFace, their
+dynamic lights; D_DrawSurfaces rotates the view for their surfaces), R_DrawViewModel (cl.viewent's trivial accept
+is never set, so the gun always takes the clipped path), and CL_NewTranslation's color tables (zeroed with the
+scores at every server info, as Hunk_AllocName does). The model cache now loads alias models and sprites in full
+(`AliasLoader.cs`: skins and skin groups, s and t in 16.16, triangles, frames and frame groups; sprite frames and
+groups; C's Sys_Errors). Corpus data/screen regenerated with the current reference (the first one was from before
+tan was pinned) and from short paths: the reference's cmdline keeps 255 characters, which the demo runs read their
+arguments from, and a scratch directory's path had cut it. Gate (`FullFrameGateTests`): all 31 runs presented as
+the reference on the first run; 113 s. The allocation gate plays data/screen now (40 s). LibreQuake's models have no
+seam vertex and no back-facing triangle, and its sprites are all of one type with single frames, so `demogen.py`
+seed 7 (the renderer's profile; seeds 1 to 6 byte for byte as before) brings models made from its own: s_explod.spr
+as every sprite type (one with a beam length) and as a frame group, player.mdl with a skin group, with frame groups
+and with back-facing triangles and seam vertices (only where s + skinwidth/2 stays inside the skin, which C does
+not check), and 250 entities kept 24 to 600 units around the view, half of them start.bsp's inline models. In
+every gate (client, 2D, world, full) it played as the reference on the first run. R7 group `frame` (50 mutants of
+the box test, the transform, the light, the clipping, both triangle drawers, the color tables, the sprites, the
+brush entities and the loaders): 43 detected at first, 46 with the seam model; 4 known blind spots with their
+reasons in `tools/mutate.py` (a vertex exactly on the view's right edge, the color tables kept over a server info
+whose signon resends every color, a sprite drawn from behind whose negative 1/z the z test rejects, a rotated brush
+entity just outside a frustum plane whose faces R_ClipEdge clips away whole). With the full frames, 4 of the 6
+blind spots of step 4 are detected now (the orders of edges and surfaces at the same u or key, the keys of a
+node's faces: the brush entities' 1/z sort and the bmodel keys see them), which shows the "span of no width"
+reasons given for them wrong; the cache flush at a second demo map and R_MakeSky's early return stay blind.
 
 ## D. Effort at 7 h/week (calendar weeks)
 

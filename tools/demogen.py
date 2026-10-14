@@ -18,7 +18,8 @@
 #   - from seed 7 on, the renderer's profile (P6, steps 4 and 5): 250 entities kept around the view entity, from 24
 #     to 600 units, half of them start.bsp's inline models (the edges and surfaces of the edge list run out, the
 #     alias models clip at the near plane), and models LibreQuake's do not reach (write_render_models): every
-#     sprite type, a sprite frame group, an alias skin group and alias frame groups; seeds 1 to 6 stay as they were
+#     sprite type, a sprite frame group, an alias skin group, alias frame groups and a seam; seeds 1 to 6 stay as
+#     they were
 # Usage: python3 -I tools/demogen.py <data dir (libreq-v0.09-beta)> <seed> <frames> <out.dem>
 import os, random, struct, sys
 
@@ -62,7 +63,8 @@ def write_render_models(datadir):
     Seed 7's models, what LibreQuake's do not reach: s_explod.spr (SPR_VP_PARALLEL, six single frames) as each
     sprite type (edict/spr<type>.spr; type 3 with a beam length), and as one frame group and one single frame
     (edict/sprgrp.spr); player.mdl (one skin, single frames) with a skin group of the skin and its inverse beside the
-    skin (edict/skingrp.mdl), and with its frames in groups of three (edict/framegrp.mdl).
+    skin (edict/skingrp.mdl), with its frames in groups of three (edict/framegrp.mdl), and with back-facing
+    triangles and seam vertices (edict/seam.mdl).
     """
     out = []
     spr = pak_file(datadir, EXPLOD)
@@ -115,6 +117,15 @@ def write_render_models(datadir):
         for one in grp:
             f += one
     out.append(('edict/framegrp.mdl', f))
+    # LibreQuake's models have no seam: player.mdl with every other triangle back-facing (facesfront 0) and its
+    # vertices in the skin's left half on the seam, so that the seam's s + skinwidth/2 stays inside the skin
+    m = bytearray(mdl)
+    for i in range(numverts):
+        if (struct.unpack_from('<i', m, rest + 12 * i + 4)[0]) < sw // 2:
+            struct.pack_into('<i', m, rest + 12 * i, 0x20)                # stvert_t.onseam = ALIAS_ONSEAM
+    for i in range(0, numtris, 2):
+        struct.pack_into('<i', m, rest + numverts * 12 + 16 * i, 0)      # dtriangle_t.facesfront
+    out.append(('edict/seam.mdl', m))
     names = []
     for name, data in out:
         open(os.path.join(datadir, 'id1', name), 'wb').write(data)

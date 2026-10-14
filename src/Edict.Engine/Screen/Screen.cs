@@ -17,9 +17,8 @@ public interface IScreenSink
 /// The screen of the software renderer (P6, docs/PLAN.md): the video driver of the reference (ref/src/edict_vid.c, a
 /// 320x200 frame buffer and the palette it is shown through), and over it the 2D layer and the view — screen.c,
 /// console.c, draw.c, sbar.c and view.c — and the 3D view, the software renderer's r_*.c and d_*.c (RMain.cs and
-/// the files beside it) — with C's globals as fields of one object, as they share them. The world is drawn (step
-/// 4); the entities and the gun are step 5. <see cref="Only2D"/> stands for the reference's -edict2d, which runs
-/// the view and clears its rectangle.
+/// the files beside it) — with C's globals as fields of one object, as they share them. <see cref="Only2D"/> stands
+/// for the reference's -edict2d, which runs the view and clears its rectangle.
 /// </summary>
 [NoAlloc(Constraints.All, Allow = Allow.Throw, Reason = QcVm.ErrorReason)]
 public sealed unsafe partial class Screen

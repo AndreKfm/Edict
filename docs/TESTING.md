@@ -191,6 +191,14 @@ data/screen4`; `EDICT_SCREEN4` for another directory): the world, the surface ca
 water's turbulence and warp, the particles, and the RAM icon, which the surface cache's thrashing shows. The
 allocation gate plays this corpus. R7 group `world`; the group `screen` runs both classes.
 
+P6, step 5: `FullFrameGateTests` on data/screen, the whole frame (`sh tools/screens.sh ~/edict-ref data/screen`;
+`EDICT_SCREEN` for another directory): the brush entities, the alias models, the sprites, the gun. The reference's
+cmdline keeps 255 characters, and the demo runs take their arguments from it: generate the corpora with short
+paths to the reference and the output (a long one cuts the cmdline, and the gate reports "may be cut"). The
+allocation gate plays this corpus now. `tools/demogen.py` seed 7 is the renderer's profile (models LibreQuake does
+not reach, written next to the demos: every sprite type, a sprite frame group, alias skin and frame groups; 250
+entities around the view). R7 group `frame`; the group `world` runs both classes.
+
 ### Test tiers (2026-10-13)
 
 Not every change needs every test. Three tiers, chosen by what a run has to answer:

@@ -10,8 +10,8 @@ namespace Edict.Engine;
 /// The software renderer's frame (r_main.c, r_misc.c, r_light.c, d_init.c, d_modech.c, d_part.c): R_ViewChanged's
 /// projection, R_SetupFrame, R_RenderView's order, the light styles and dynamic lights, the particles' pixels. The
 /// world's surfaces go through the edge list (REdge.cs, RDraw.cs) to the span drawers (DScan.cs, DSurf.cs, RSky.cs).
-/// What only draws is skipped with <see cref="Only2D"/>: the reference's -edict2d clears it again. Entities (alias
-/// models, sprites, brush entities) and the gun are step 5.
+/// What only draws is skipped with <see cref="Only2D"/>: the reference's -edict2d clears it again. The entities are
+/// RAlias.cs, DPolyse.cs, RSprite.cs and RBModel.cs.
 /// </summary>
 public sealed unsafe partial class Screen : ClientState.IParticleDrawer
 {
@@ -28,7 +28,7 @@ public sealed unsafe partial class Screen : ClientState.IParticleDrawer
     private Vec3 _modelOrg, _baseModelOrg, _rOrigin;  // modelorg, base_modelorg, r_origin
     private Vec3 _baseVpn, _baseVright, _baseVup;
     private float _xcenter, _ycenter, _xscale, _yscale, _xscaleinv, _yscaleinv, _xscaleshrink, _yscaleshrink;
-    private float _aliasXScale, _aliasYScale, _aliasXCenter, _aliasYCenter;  // R_ViewChanged's, for step 5
+    private float _aliasXScale, _aliasYScale, _aliasXCenter, _aliasYCenter;  // R_ViewChanged's, for the alias models
     private float _aliasTransition, _resFudge;        // r_aliastransition, r_resfudge
     private bool _fovGreaterThan90;                   // r_fov_greater_than_90
     private float _pixelAspect;
@@ -351,7 +351,7 @@ public sealed unsafe partial class Screen : ClientState.IParticleDrawer
 
     /// <summary>
     /// R_RenderView: R_SetupFrame, R_MarkLeaves, R_EdgeDrawing (the world's walk, the edges' scan and the surfaces'
-    /// spans), the entities and the gun (step 5), R_DrawParticles, D_WarpScreen, V_SetContentsColor.
+    /// spans), the entities and the gun, R_DrawParticles, D_WarpScreen, V_SetContentsColor.
     /// </summary>
     private void RenderView3D()
     {
