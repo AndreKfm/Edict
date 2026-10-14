@@ -656,7 +656,8 @@ P5 closed (2026-10-14) by the owner's decision, without the milestone checks of 
 Linux, R9 of the listen runs); the listen corpus was written by the Linux reference.
 
 **P6: renderer, sound, networking** (steps agreed 2026-10-14). The software renderer is ported bit-exact, as the
-rest (D1), and gated by a hash of what it draws; sound by a hash of what it mixes; networking is outside the proof.
+rest (D1), and gated by a hash of what it draws; sound by a hash of what it mixes; the GPU renderer, the default for
+playing (step 7), and networking are outside the proof.
 (1) The reference with its screen: a patch for the renderer's pointer casts to `long` (about 20 sites in r_*.c and
 d_*.c, truncated on LLP64 Windows; unchanged on LP64), a video driver of the harness's own in place of vid_null.c
 that keeps the palette VID_SetPalette and VID_ShiftPalette are given, and a record of the 320×200 frame buffer and
@@ -669,8 +670,17 @@ V_UpdatePalette), draw.c, sbar.c, console.c (the notify lines, so every Con_Prin
 models (r_alias, d_polyse), sprites, and the particles in full: with a screen R_DrawParticles moves and expires
 them, so which ones the effects get, and the client's rand draws, change. (6) The platform, a project of its own so
 that the engine keeps no runtime dependency (D6): a window that shows the frame buffer through the palette, keyboard
-and mouse into the key bindings, the frame clock. The game is playable from here. (7) Sound: snd_dma.c and
-snd_mix.c, gated by a hash of the paint buffer (S_Update draws from rand). (8) Networking: net_dgrm.c over UDP.
+and mouse into the key bindings, the frame clock. The game is playable from here. (7) A GPU renderer (owner's
+decision, 2026-10-14): OpenGL 3.3 core through bindings of the platform's own (no package), with GLQuake's look
+(gl_*.c of the pinned tree as the model: filtered textures, lightmaps multiplied in, GLQuake's 2D layer), the default
+renderer; a switch (command line and cvar) selects the software renderer of (3)–(5). It is outside the proof, as
+networking is: a GPU's rasterization and filtering are not bit-pinned. It reads the client's state and never writes
+it: V_CalcRefdef, the particles' movement and expiry, the efrags and the light styles stay in the engine's exact
+code, which both renderers run, so neither a game's state nor the rand stream it shares with the server depends on
+the renderer (the client records of data/screen hold with either). Its own tests: what it draws (the surfaces, the
+entities, the particles of a frame) matches what the exact renderer found visible, and golden images of corpus
+frames, compared with a tolerance. (8) Sound: snd_dma.c and snd_mix.c, gated by a hash of the paint buffer
+(S_Update draws from rand). (9) Networking: net_dgrm.c over UDP.
 Each of (3)–(5) is gated by the frame buffer of every frame of the client and listen corpora, then R7.
 Step 1 done (2026-10-14). Patch 0007 builds the renderer's nine pointers from integers through size_t instead of
 long (the cache alignment of five stack arrays, the cached edge of a medge_t, the light surface's row step); the
