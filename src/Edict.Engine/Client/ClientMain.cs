@@ -254,7 +254,7 @@ public sealed unsafe partial class ClientState
                 ent.Angles.Y = bobjrotate;
 
             if ((ent.Effects & EfBrightField) != 0)
-                EntityParticles();
+                EntityParticles(ent.Origin);
             if ((ent.Effects & EfMuzzleFlash) != 0)
             {
                 ref DLight dl = ref AllocDlight(i);

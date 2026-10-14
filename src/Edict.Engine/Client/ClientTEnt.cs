@@ -77,33 +77,28 @@ public sealed unsafe partial class ClientState
         switch (type)
         {
             case TeWizSpike:            // spike hitting wall
-                ReadPos();
-                RunParticleEffect(30);
+                RunParticleEffect(ReadPos(), default, 20, 30);
                 break;
             case TeKnightSpike:         // spike hitting wall
-                ReadPos();
-                RunParticleEffect(20);
+                RunParticleEffect(ReadPos(), default, 226, 20);
                 break;
             case TeSpike:               // spike hitting wall
-                ReadPos();
-                RunParticleEffect(10);
+                RunParticleEffect(ReadPos(), default, 0, 10);
                 if (Rand.Next() % 5 == 0)
                     Rand.Next();        // rnd = rand () & 3: which ricochet sound
                 break;
             case TeSuperSpike:          // super spike hitting wall
-                ReadPos();
-                RunParticleEffect(20);
+                RunParticleEffect(ReadPos(), default, 0, 20);
                 if (Rand.Next() % 5 == 0)
                     Rand.Next();
                 break;
             case TeGunshot:             // bullet hitting wall
-                ReadPos();
-                RunParticleEffect(20);
+                RunParticleEffect(ReadPos(), default, 0, 20);
                 break;
             case TeExplosion:           // rocket explosion
             {
                 Vec3 pos = ReadPos();
-                ParticleExplosion();
+                ParticleExplosion(pos);
                 ref DLight dl = ref AllocDlight(0);
                 dl.Origin = pos;
                 dl.Radius = 350;
@@ -112,8 +107,7 @@ public sealed unsafe partial class ClientState
                 break;
             }
             case TeTarExplosion:        // tarbaby explosion
-                ReadPos();
-                BlobExplosion();
+                BlobExplosion(ReadPos());
                 break;
             case TeLightning1:          // lightning bolts
                 ParseBeam(BeamModel("progs/bolt.mdl\0"u8));
@@ -128,19 +122,17 @@ public sealed unsafe partial class ClientState
                 ParseBeam(BeamModel("progs/beam.mdl\0"u8));
                 break;
             case TeLavaSplash:
-                ReadPos();
-                LavaSplash();
+                LavaSplash(ReadPos());
                 break;
             case TeTeleport:
-                ReadPos();
-                TeleportSplash();
+                TeleportSplash(ReadPos());
                 break;
             case TeExplosion2:          // color mapped explosion
             {
                 Vec3 pos = ReadPos();
-                r.ReadByte();           // colorStart
-                r.ReadByte();           // colorLength
-                ParticleExplosion2();
+                int colorStart = r.ReadByte();
+                int colorLength = r.ReadByte();
+                ParticleExplosion2(pos, colorStart, colorLength);
                 ref DLight dl = ref AllocDlight(0);
                 dl.Origin = pos;
                 dl.Radius = 350;

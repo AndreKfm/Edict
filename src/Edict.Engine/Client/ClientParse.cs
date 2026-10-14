@@ -547,8 +547,10 @@ public sealed unsafe partial class ClientState
         MsgReader r = _reader;
         int armor = r.ReadByte();
         int blood = r.ReadByte();
-        for (int i = 0; i < 3; i++)
-            r.ReadCoord();
+        Vec3 from;
+        from.X = r.ReadCoord();
+        from.Y = r.ReadCoord();
+        from.Z = r.ReadCoord();
 
         float count = (float)(blood * 0.5 + armor * 0.5);
         if (count < 10)
@@ -580,8 +582,20 @@ public sealed unsafe partial class ClientState
             cs.DestColor[1] = 0;
             cs.DestColor[2] = 0;
         }
-        // the view angle kicks (v_dmg_roll, v_dmg_pitch, v_dmg_time) are the renderer's
+        // calculate view angle kicks
+        ref ClientEntity ent = ref Entities[ViewEntity];
+        from = Vec3.Subtract(from, ent.Origin);
+        Mathlib.VectorNormalize(ref from);
+        Mathlib.AngleVectors(ent.Angles, out Vec3 forward, out Vec3 right, out _);
+        float side = Vec3.Dot(from, right);
+        DmgRoll = count * side * CvarValue("v_kickroll\0"u8);
+        side = Vec3.Dot(from, forward);
+        DmgPitch = count * side * CvarValue("v_kickpitch\0"u8);
+        DmgTime = CvarValue("v_kicktime\0"u8);
     }
+
+    /// <summary>view.c's v_dmg_roll, v_dmg_pitch, v_dmg_time: the view's kick from the last damage, which V_CalcViewRoll fades.</summary>
+    public float DmgRoll, DmgPitch, DmgTime;
 
     /// <summary>V_BonusFlash_f (the "bf" command the server stuffs in).</summary>
     public void BonusFlash()
