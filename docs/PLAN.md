@@ -687,6 +687,35 @@ Windows (Windows no longer crashes); without the screen, the new build writes th
 before, the listen runs on Windows too (the listen check P5 left open). With the screen the client's state differs
 from frame 1 on (V_CalcRefdef sets the view entity's angles and cl's view state; R_DrawParticles moves and expires
 the particles), so steps 3 and 5 gate the client records of data/screen as well as the frames.
+Step 2 (2026-10-14), the census: `tools/census-screen.sh` builds the reference with clang's source coverage
+(`ref/build.sh cov`), runs the screen corpus with it and reports lines and functions per file. Of the 32 files of the
+renderer, the view and the 2D layer, 9,135 lines in 282 functions: 75 % of the lines and 221 functions ran (r_light,
+r_alias, r_aclip, d_scan, d_sprite, d_sky above 94 %; r_main and r_bsp 88 %; the 2D layer 46–62 %). What did not run,
+by kind:
+- Not reachable in this build: the 16-bit paths (r_pixbytes 2: R_DrawSurfaceBlock16, the 16-bit halves of Draw_*,
+  R_GenTurbTile16, R_GenSkyTile16), a console of another width than 320 (Con_CheckResize, the scaled
+  Draw_ConsoleBackground), what only a driver asks for (r_drawpolys, r_drawculledpolys, r_worldpolysbacktofront:
+  R_RenderPoly, R_DrawCulledPolys, R_ZDrawSubmodelPolys), R_GenTile (no caller), D_PolysetFillSpans8 and
+  D_DrawZPoint (no caller in the C paths), the mission packs' code (hipnotic and rogue in sbar.c, half of
+  Sbar_DrawInventory and all of Sbar_DrawFace's team frame), and the debug cvars and commands (r_draworder:
+  R_GenerateSpansBackward, R_LeadingEdgeBackwards; r_drawflat; r_speeds, r_dspeeds, r_timegraph, r_aliasstats,
+  r_reportsurfout and r_reportedgeout with their prints; r_maxsurfs, r_maxedges; d_mipcap; lcd_x; timerefresh,
+  pointfile, screenshot, Draw_DebugChar). The port leaves them out and stops with an error where a cvar would lead
+  there.
+- Reachable with input the platform brings (step 6): the console and chat keys (Con_ToggleConsole_f, message mode,
+  the notify line's "say:"), the menus (edict_menu.c stands in for menu.c: Draw_TransPicTranslate, Draw_FadeScreen,
+  SCR_ModalMessage, Con_NotifyBox), the view size (sizeup and sizedown: V_CalcRefdef's view heights for 80, 90 and
+  110, the status bar's partial redraw, Draw_TileClear), pitch drift (V_StartPitchDrift, V_DriftPitch when moving
+  without mlook), chase_active.
+- Reachable by a game, not in the corpus — the synthetic inputs each step adds before its R7, as P5 did:
+  step 3: deathmatch (cl.gametype from the server info: Sbar_DrawFrags, Sbar_MiniDeathmatchOverlay, the scoreboard),
+  prints with the chat marks 1 and 2 and with \r (Con_Print), centerprints of several lines and in an intermission;
+  step 4: the clamps of the span steppers at the texture's edges (Turbulent8, D_SpriteDrawSpans) under grazing views,
+  the overflow of edges and surfaces ("Out of edges for bmodel", r_outofedges), "Too many efrags"; step 5: the sprite
+  types LibreQuake does not use (its three sprites are all one type: SPR_FACING_UPRIGHT, SPR_VP_PARALLEL_UPRIGHT,
+  SPR_ORIENTED, SPR_VP_PARALLEL_ORIENTED) and sprite frame groups, alias skin groups (R_AliasSetupSkin), back-facing
+  triangles on a seam (R_AliasClipTriangle, D_DrawSubdiv), particles closer than d_pix_max allows (D_DrawParticle's
+  default size). As with ST_RAND in P5, by copies of LibreQuake's models and sprites with the header changed.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
