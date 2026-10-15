@@ -45,6 +45,19 @@ public sealed unsafe class GameInputTests
         return host;
     }
 
+    /// <summary>
+    /// A game's loopback logs nothing: the log of the server's sends is the gates', who empty it every frame; a game
+    /// that kept one filled its 1 MB after some minutes of play and stopped with "Loopback: the send log is full".
+    /// </summary>
+    [Fact]
+    public void A_game_keeps_no_log_of_the_servers_sends()
+    {
+        using var files = new QFileSystem(TraceCorpus.DataDirectory);
+        using Host host = Start(files);
+        Run(host, 100);
+        Assert.Equal(0, host.Net!.Loop.Sent.Length);
+    }
+
     [Fact]
     public void A_held_key_moves_the_player()
     {
