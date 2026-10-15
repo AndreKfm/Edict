@@ -1,0 +1,42 @@
+# Copyright (C) 2026 Andre Kaufmann
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Runtime library members Edict assumes to satisfy the listed [NoAlloc] constraints, in addition to the analyzer's
+# embedded baseline (analyzers/Edict.NoAlloc/README.md, section Allowlist). Every entry needs a reason; an entry is
+# an assumption, not a proof: the allocation tests (docs/TESTING.md) are the measurement.
+
+[[member]]
+symbol = "cs:*/M:System.Double.IsNaN(System.Double)"
+constraints = ["All"]
+runtime = "*"
+reason = "bit test on the argument; no allocation, lock, throw or type initialization"
+
+[[member]]
+symbol = "cs:*/M:System.Single.IsNaN(System.Single)"
+constraints = ["All"]
+runtime = "*"
+reason = "bit test on the argument; no allocation, lock, throw or type initialization"
+
+[[member]]
+symbol = "cs:*/M:System.Double.TryParse(System.ReadOnlySpan{System.Byte},System.Globalization.NumberStyles,System.IFormatProvider,System.Double@)"
+constraints = ["All"]
+runtime = "*"
+reason = "UTF-8 number parsing into a stack buffer; does not throw for NumberStyles.Float; used by CAtof.Atof on validated text (map load, not the frame loop)"
+
+[[member]]
+symbol = "cs:*/M:System.Globalization.NumberFormatInfo.get_InvariantInfo"
+constraints = ["All"]
+runtime = "*"
+reason = "returns the cached invariant NumberFormatInfo; the first access initializes the invariant culture once (map load, not the frame loop)"
+
+[[member]]
+symbol = "cs:*/M:System.Runtime.InteropServices.Marshal.GetLastPInvokeError"
+constraints = ["All"]
+runtime = "*"
+reason = "reads the error the marshaller saved after a SetLastError import (the UDP driver's EAGAIN); a thread-static field, no allocation"
+
+[[member]]
+symbol = "cs:*/M:System.Diagnostics.Stopwatch.GetTimestamp"
+constraints = ["All"]
+runtime = "*"
+reason = "Sys_FloatTime of a game's network (outside the proof): QueryPerformanceCounter or clock_gettime, no allocation, no lock"

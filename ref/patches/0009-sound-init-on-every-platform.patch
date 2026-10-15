@@ -1,0 +1,18 @@
+EDICT 0009: S_Init in Host_Init on every build
+
+Category: build-independent behaviour, no change in results (snd_null's S_Init does nothing).
+On Win32 the software build's Host_Init leaves S_Init to vid_win.c, which the reference replaces (edict_vid.c), so
+a Windows build with the sound of snd_dma.c (build.sh SOUND=1) never initialized it. Every build now calls S_Init
+where Linux does, after R_Init: the same cvar and console order on both.
+
+--- a/host.c
++++ b/host.c
+@@ -890,7 +890,7 @@
+ 		Draw_Init ();
+ 		SCR_Init ();
+ 		R_Init ();
+-#ifndef	_WIN32
++#if !defined(_WIN32) || defined(EDICT)	// EDICT: S_Init here on every build (patch 0009)
+ 	// on Win32, sound initialization has to come before video initialization, so we
+ 	// can put up a popup if the sound hardware is in use
+ 		S_Init ();

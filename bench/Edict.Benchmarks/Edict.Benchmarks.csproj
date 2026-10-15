@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- BenchmarkDotNet variants per module (docs/PLAN.md section B.4). Only gate-passing variants are measured. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsPackable>false</IsPackable>
+    <!-- BenchmarkDotNet's public types are not annotated for these analyzers. -->
+    <NoWarn>$(NoWarn);CA1515;CA1822</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" />
+    <ProjectReference Include="../../src/Edict.Engine/Edict.Engine.csproj" />
+    <ProjectReference Include="../../src/Edict.Harness/Edict.Harness.csproj" />
+  </ItemGroup>
+</Project>

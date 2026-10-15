@@ -1,0 +1,128 @@
+EDICT 0010: snd_dma.c and snd_mix.c on their portable path on every build
+
+Category: build-independent behaviour, no change in results on Linux (the sound build, build.sh SOUND=1).
+The Win32 parts of the sound code drive DirectSound through winquake.h, which needs DirectDraw, DirectSound and
+SciTech MGL headers, and keep their own buffer (pDSBuf). The reference's sound goes to its own DMA buffer
+(edict_snd.c), so every build takes the portable path: the same mixing, the same buffer, on Windows and Linux.
+
+--- a/snd_dma.c
++++ b/snd_dma.c
+@@ -21,7 +21,7 @@
+ 
+ #include "quakedef.h"
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ #include "winquake.h"
+ #endif
+ 
+@@ -147,7 +147,7 @@
+ 
+ 		if (!rc)
+ 		{
+-#ifndef	_WIN32
++#if !defined(_WIN32) || defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 			Con_Printf("S_Startup: SNDDMA_Init failed.\n");
+ #endif
+ 			sound_started = 0;
+@@ -560,7 +560,7 @@
+ {
+ 	int		clear;
+ 		
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	if (!sound_started || !shm || (!shm->buffer && !pDSBuf))
+ #else
+ 	if (!sound_started || !shm || !shm->buffer)
+@@ -572,7 +572,7 @@
+ 	else
+ 		clear = 0;
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	if (pDSBuf)
+ 	{
+ 		DWORD	dwSize;
+@@ -844,7 +844,7 @@
+ void S_ExtraUpdate (void)
+ {
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	IN_Accumulate ();
+ #endif
+ 
+@@ -877,7 +877,7 @@
+ 	if (endtime - soundtime > samps)
+ 		endtime = soundtime + samps;
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ // if the buffer was lost or stopped, restore it and/or restart it
+ 	{
+ 		DWORD	dwStatus;
+--- a/snd_mix.c
++++ b/snd_mix.c
+@@ -21,7 +21,7 @@
+ 
+ #include "quakedef.h"
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ #include "winquake.h"
+ #else
+ #define DWORD	unsigned long
+@@ -67,7 +67,7 @@
+ 	int		lpos;
+ 	int		lpaintedtime;
+ 	DWORD	*pbuf;
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	int		reps;
+ 	DWORD	dwSize,dwSize2;
+ 	DWORD	*pbuf2;
+@@ -79,7 +79,7 @@
+ 	snd_p = (int *) paintbuffer;
+ 	lpaintedtime = paintedtime;
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	if (pDSBuf)
+ 	{
+ 		reps = 0;
+@@ -130,7 +130,7 @@
+ 		lpaintedtime += (snd_linear_count>>1);
+ 	}
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	if (pDSBuf)
+ 		pDSBuf->lpVtbl->Unlock(pDSBuf, pbuf, dwSize, NULL, 0);
+ #endif
+@@ -146,7 +146,7 @@
+ 	int		val;
+ 	int		snd_vol;
+ 	DWORD	*pbuf;
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	int		reps;
+ 	DWORD	dwSize,dwSize2;
+ 	DWORD	*pbuf2;
+@@ -166,7 +166,7 @@
+ 	step = 3 - shm->channels;
+ 	snd_vol = volume.value*256;
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	if (pDSBuf)
+ 	{
+ 		reps = 0;
+@@ -228,7 +228,7 @@
+ 		}
+ 	}
+ 
+-#ifdef _WIN32
++#if defined(_WIN32) && !defined(EDICT)	// EDICT: the portable path (patch 0010)
+ 	if (pDSBuf) {
+ 		DWORD dwNewpos, dwWrite;
+ 		int il = paintedtime;

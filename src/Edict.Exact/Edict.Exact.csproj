@@ -1,0 +1,3 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- C semantics the simulation depends on: pinned libm, C casts, C rand, C string compare, C formatting. -->
+</Project>

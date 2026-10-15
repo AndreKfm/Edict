@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The platform (docs/PLAN.md, P6 step 6): a window, the keys and the mouse, the frame clock; no packages, the
+       operating system's own libraries through P/Invoke. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>edict</AssemblyName>
+    <RootNamespace>Edict.Platform</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Edict.Engine/Edict.Engine.csproj" />
+    <ProjectReference Include="../Edict.Gl/Edict.Gl.csproj" />
+    <ProjectReference Include="../Edict.Net/Edict.Net.csproj" />
+  </ItemGroup>
+</Project>

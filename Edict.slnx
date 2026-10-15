@@ -1,0 +1,23 @@
+<Solution>
+  <Folder Name="/analyzers/" />
+  <Folder Name="/analyzers/Edict.NoAlloc/">
+    <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers/Edict.NoAlloc.Analyzers.csproj" />
+    <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers.Tests/Edict.NoAlloc.Analyzers.Tests.csproj" />
+    <Project Path="analyzers/Edict.NoAlloc/Edict.NoAlloc.Annotations/Edict.NoAlloc.Annotations.csproj" />
+  </Folder>
+  <Folder Name="/bench/">
+    <Project Path="bench/Edict.Benchmarks/Edict.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Edict.Engine/Edict.Engine.csproj" />
+    <Project Path="src/Edict.Exact/Edict.Exact.csproj" />
+    <Project Path="src/Edict.Harness/Edict.Harness.csproj" />
+    <Project Path="src/Edict.Gl/Edict.Gl.csproj" />
+    <Project Path="src/Edict.Net/Edict.Net.csproj" />
+    <Project Path="src/Edict.Platform/Edict.Platform.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Edict.Engine.Tests/Edict.Engine.Tests.csproj" />
+    <Project Path="tests/Edict.Exact.Tests/Edict.Exact.Tests.csproj" />
+  </Folder>
+</Solution>

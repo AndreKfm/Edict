@@ -1,0 +1,15 @@
+<Project>
+  <!-- Engine code: unsafe allowed, [NoAlloc] analyzer active, attribute namespace imported globally. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+  <Import Project="$(MSBuildThisFileDirectory)../analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers/build/Edict.NoAlloc.Analyzers.props" />
+  <PropertyGroup>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="$(MSBuildThisFileDirectory)../analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers/Edict.NoAlloc.Analyzers.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <Using Include="Edict.NoAlloc" />
+    <AdditionalFiles Include="$(MSBuildThisFileDirectory)noalloc-allowlist.toml" />
+  </ItemGroup>
+</Project>

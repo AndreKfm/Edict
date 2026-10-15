@@ -1,0 +1,28 @@
+EDICT 0005: the frame-0 hash point in SV_SpawnServer
+
+Category: harness hook, no change in results.
+One call after ED_LoadFromFile: the state after spawn, before SV_SpawnServer's two settling SV_Physics calls and
+SV_CreateBaseline, is the cut-2 gate (docs/PLAN.md section C, cut 2, step 4). Edict_Spawned (ref/src/edict_hash.c)
+writes, with -edicthash, a map record and a spawn record with the lanes and one hash per edict, and with
+-edictcapture a spawn record with what changed since the last spawn function; it only reads.
+Checked when added: the per-frame hashes of all 10 R9 maps x 4,000 frames are identical with and without the patch,
+and the captures are byte-identical apart from the cvar cmdline (the command line, which holds the output paths).
+
+--- a/sv_main.c
++++ b/sv_main.c
+@@ -20,6 +20,7 @@
+ // sv_main.c -- server main program
+ 
+ #include "quakedef.h"
++#include "edict_hash.h"	// EDICT
+ 
+ server_t		sv;
+ server_static_t	svs;
+@@ -1176,6 +1177,7 @@
+ 	pr_global_struct->serverflags = svs.serverflags;
+ 	
+ 	ED_LoadFromFile (sv.worldmodel->entities);
++	Edict_Spawned ();	// EDICT: the frame-0 state, before the two settling SV_Physics
+ 
+ 	sv.active = true;
+ 

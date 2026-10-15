@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The port: one assembly (docs/PLAN.md section F). Phase 1: PAK file system, brush model loader, hull tracing. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Edict.Engine.Tests" />
+    <ProjectReference Include="../Edict.Exact/Edict.Exact.csproj" />
+  </ItemGroup>
+</Project>

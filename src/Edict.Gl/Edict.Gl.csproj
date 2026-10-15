@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- The GPU renderer (docs/PLAN.md, P6 step 7): OpenGL 3.3 core through the platform's own entry points (no
+       package), GLQuake's look. It reads the engine's state and never writes it; outside the proof. -->
+  <PropertyGroup>
+    <RootNamespace>Edict.Gl</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Edict.Engine/Edict.Engine.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,52 @@
+EDICT 0003: capture points in the QuakeC VM
+
+Category: harness hook, no change in results.
+Five macro lines (and two braces) in PR_ExecuteProgram for the record mode -edictcapture (ref/src/edict_capture.c,
+docs/TESTING.md, Capture): entry from the engine (before PR_EnterFunction, which already writes globals), return to
+it, QuakeC-to-QuakeC calls, and builtin calls before and after. The macros test one int and call the capture code only while a capture file is open; the capture code
+reads the VM state and writes it to the file, it changes nothing. Checked when added: the per-frame hashes of all
+10 R9 maps and the hull trace corpora are identical with and without the patch, with and without -edictcapture.
+
+--- a/pr_exec.c
++++ b/pr_exec.c
+@@ -19,6 +19,7 @@
+ */
+ 
+ #include "quakedef.h"
++#include "edict_capture.h"	// EDICT
+ 
+ 
+ /*
+@@ -386,6 +387,7 @@
+ 	exitdepth = pr_depth;
+ 
++	EDICT_CAPTURE_ENTER (fnum);	// EDICT: before PR_EnterFunction, which already changes globals
+ 	s = PR_EnterFunction (f);
+ 	
+ while (1)
+ {
+@@ -628,10 +630,13 @@
+ 			i = -newf->first_statement;
+ 			if (i >= pr_numbuiltins)
+ 				PR_RunError ("Bad builtin call number");
++			EDICT_CAPTURE_BUILTIN (i, a->function);	// EDICT
+ 			pr_builtins[i] ();
++			EDICT_CAPTURE_BUILTIN_DONE (i);	// EDICT
+ 			break;
+ 		}
+ 
++		EDICT_CAPTURE_CALL (a->function);	// EDICT
+ 		s = PR_EnterFunction (newf);
+ 		break;
+ 
+@@ -643,7 +648,10 @@
+ 	
+ 		s = PR_LeaveFunction ();
+ 		if (pr_depth == exitdepth)
++		{
++			EDICT_CAPTURE_LEAVE (fnum);	// EDICT
+ 			return;		// all done
++		}
+ 		break;
+ 		
+ 	case OP_STATE:

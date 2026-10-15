@@ -1,0 +1,28 @@
+EDICT 0006: a capture point at the start of Host_ServerFrame
+
+Category: harness hook, no change in results.
+One capture point where the server frame begins (the non-FPS_20 Host_ServerFrame, the one compiled): with
+-edictcapture, EdictCapture_ServerFrame (ref/src/edict_capture.c) writes the frame number, host_frametime, the
+rand seed, sv.time and what changed since the last record. In a frame that spawns a map (the first, and every
+restart) SV_SpawnServer runs SV_Physics twice before the frame's own server part; this record is what tells the
+replay where the latter begins (docs/PLAN.md section C, cut 3, step 2). The capture code only reads. Checked when
+added: the per-frame hashes of all 10 R9 maps are identical with and without the patch.
+
+--- a/host.c
++++ b/host.c
+@@ -21,6 +21,7 @@
+ 
+ #include "quakedef.h"
+ #include "r_local.h"
++#include "edict_capture.h"	// EDICT
+ 
+ /*
+ 
+@@ -599,6 +600,7 @@
+ 
+ void Host_ServerFrame (void)
+ {
++	EDICT_CAPTURE_SERVERFRAME ();	// EDICT: the start of the server frame, for the replay
+ // run the world state	
+ 	pr_global_struct->frametime = host_frametime;
+ 

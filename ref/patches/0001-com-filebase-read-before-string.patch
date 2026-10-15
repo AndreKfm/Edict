@@ -1,0 +1,43 @@
+EDICT 0001: COM_FileBase read before the start of its argument
+
+Category: undefined behaviour, no change in results.
+The loop that searches backwards for '/' stopped only at '/' or a zero byte, so for paths without '/'
+(first hit: "gfx.wad" from W_LoadWadFile in Host_Init) it read the bytes in front of the string. The
+1996 32-bit builds happened to find a zero byte there; the x64 clang build does not and crashes
+(AddressSanitizer: global-buffer-overflow in COM_FileBase). The rewrite stops at the start of the
+string and returns what the original returned with a zero byte in front: checked on 21 edge-case
+paths, 0 differences (see the commit that adds this patch).
+
+--- a/common.c
++++ b/common.c
+@@ -855,23 +855,24 @@
+ */
+ void COM_FileBase (char *in, char *out)
+ {
+-	char *s, *s2;
++	char *s, *b;
+ 	
+ 	s = in + strlen(in) - 1;
+ 	
+ 	while (s != in && *s != '.')
+ 		s--;
+ 	
+-	for (s2 = s ; *s2 && *s2 != '/' ; s2--)
++	// EDICT: the original loop ran before the start of 'in' when it held no '/' (e.g. "gfx.wad") and relied
++	// on a zero byte in front of the string. Same results, computed from the start of the base name.
++	for (b = s ; b != in && b[-1] != '/' ; b--)
+ 	;
+ 	
+-	if (s-s2 < 2)
++	if (s-b < 1)
+ 		strcpy (out,"?model?");
+ 	else
+ 	{
+-		s--;
+-		strncpy (out,s2+1, s-s2);
+-		out[s-s2] = 0;
++		strncpy (out,b, s-b);
++		out[s-b] = 0;
+ 	}
+ }
+ 

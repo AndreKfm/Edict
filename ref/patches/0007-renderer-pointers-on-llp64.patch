@@ -1,0 +1,108 @@
+EDICT 0007: the renderer's pointers through long on LLP64
+
+Category: 64-bit correctness, no change in results on LP64.
+Nine sites build a pointer from an integer of type long or unsigned long: the cache alignment of the
+stack arrays (finalverts, basespans, ledges, lsurfs, spans), the cached edge of a medge_t (r_edges plus a
+byte offset, twice also compared as a difference) and the step of the light surface's destination row. long
+is 32 bits on 64-bit Windows, so the pointer lost its upper half and the first frame with a screen wrote
+through it. size_t has the pointer's width on LP64 and LLP64; on LP64 it has long's width too, so Linux builds
+compute the same values. The casts that only test the low bits of an address (r_main.c, d_fill.c, d_scan.c,
+common.c) are unchanged.
+
+--- a/r_alias.c
++++ b/r_alias.c
+@@ -710,7 +710,7 @@
+ 
+ // cache align
+ 	pfinalverts = (finalvert_t *)
+-			(((long)&finalverts[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
++			(((size_t)&finalverts[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
+ 	pauxverts = &auxverts[0];
+ 
+ 	paliashdr = (aliashdr_t *)Mod_Extradata (currententity->model);
+--- a/r_draw.c
++++ b/r_draw.c
+@@ -364,7 +364,7 @@
+ {
+ 	edge_t		*pedge_t;
+ 
+-	pedge_t = (edge_t *)((unsigned long)r_edges + r_pedge->cachededgeoffset);
++	pedge_t = (edge_t *)((size_t)r_edges + r_pedge->cachededgeoffset);
+ 
+ 	if (!pedge_t->surfs[0])
+ 		pedge_t->surfs[0] = surface_p - surfaces;
+@@ -451,9 +451,9 @@
+ 				}
+ 				else
+ 				{
+-					if ((((unsigned long)edge_p - (unsigned long)r_edges) >
++					if ((((size_t)edge_p - (size_t)r_edges) >
+ 						 r_pedge->cachededgeoffset) &&
+-						(((edge_t *)((unsigned long)r_edges +
++						(((edge_t *)((size_t)r_edges +
+ 						 r_pedge->cachededgeoffset))->owner == r_pedge))
+ 					{
+ 						R_EmitCachedEdge ();
+@@ -497,9 +497,9 @@
+ 				{
+ 				// it's cached if the cached edge is valid and is owned
+ 				// by this medge_t
+-					if ((((unsigned long)edge_p - (unsigned long)r_edges) >
++					if ((((size_t)edge_p - (size_t)r_edges) >
+ 						 r_pedge->cachededgeoffset) &&
+-						(((edge_t *)((unsigned long)r_edges +
++						(((edge_t *)((size_t)r_edges +
+ 						 r_pedge->cachededgeoffset))->owner == r_pedge))
+ 					{
+ 						R_EmitCachedEdge ();
+--- a/r_edge.c
++++ b/r_edge.c
+@@ -668,7 +668,7 @@
+ 	surf_t	*s;
+ 
+ 	basespan_p = (espan_t *)
+-			((long)(basespans + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
++			((size_t)(basespans + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
+ 	max_span_p = &basespan_p[MAXSPANS - r_refdef.vrect.width];
+ 
+ 	span_p = basespan_p;
+--- a/r_main.c
++++ b/r_main.c
+@@ -887,13 +887,13 @@
+ 	else
+ 	{
+ 		r_edges =  (edge_t *)
+-				(((long)&ledges[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
++				(((size_t)&ledges[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
+ 	}
+ 
+ 	if (r_surfsonstack)
+ 	{
+ 		surfaces =  (surf_t *)
+-				(((long)&lsurfs[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
++				(((size_t)&lsurfs[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
+ 		surf_max = &surfaces[r_cnumsurfs];
+ 	// surface 0 doesn't really exist; it's just a dummy because index 0
+ 	// is used to indicate no edge attached to surface
+--- a/r_surf.c
++++ b/r_surf.c
+@@ -576,7 +576,7 @@
+ 		pbasesource += sourcetstep;
+ 		lightright += lightrightstep;
+ 		lightleft += lightleftstep;
+-		prowdest = (unsigned short *)((long)prowdest + surfrowbytes);
++		prowdest = (unsigned short *)((size_t)prowdest + surfrowbytes);
+ 	}
+ 
+ 	prowdestbase = prowdest;
+--- a/d_polyse.c
++++ b/d_polyse.c
+@@ -129,7 +129,7 @@
+ 						// one extra because of cache line pretouching
+ 
+ 	a_spans = (spanpackage_t *)
+-			(((long)&spans[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
++			(((size_t)&spans[0] + CACHE_SIZE - 1) & ~(CACHE_SIZE - 1));
+ 
+ 	if (r_affinetridesc.drawtype)
+ 	{

@@ -1,0 +1,22 @@
+EDICT 0011: GetWavinfo reads no cue length marker past the end of the file
+
+Category: undefined behaviour pinned, no change in results (the sound build, build.sh SOUND=1).
+After a cue chunk GetWavinfo takes the next LIST chunk for cooledit's "mark" and compares the four bytes 28 bytes
+into it, without checking that they are in the file. Six of LibreQuake's sounds (plats/medplat1, plats/train1,
+doors/winch2, doors/stndr1, doors/airdoor1, doors/doormv1) end in a LIST chunk of 4 bytes: the compare reads 16 to
+19 bytes past the file, which COM_LoadStackFile put at the top of the hunk, so past the hunk's memory (AddressSanitizer
+stops there). The bytes are whatever lies there; in every run so far they were not "mark". Now bytes past the file
+are never "mark", as the port reads them (0, COM_LoadFile's terminator and beyond).
+
+--- a/snd_mem.c
++++ b/snd_mem.c
+@@ -303,7 +303,8 @@
+ 		FindNextChunk ("LIST");
+ 		if (data_p)
+ 		{
+-			if (!strncmp (data_p + 28, "mark", 4))
++			// EDICT: bytes past the file are not "mark" (patch 0011)
++			if (data_p + 32 <= iff_end && !strncmp (data_p + 28, "mark", 4))
+ 			{	// this is not a proper parse, but it works with cooledit...
+ 				data_p += 24;
+ 				i = GetLittleLong ();	// samples in loop
