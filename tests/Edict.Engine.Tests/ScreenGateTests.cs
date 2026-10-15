@@ -26,11 +26,11 @@ public sealed class ScreenGateTests
     }
 
     /// <summary>The runs of a corpus directory, or only the one EDICT_SCREENRUN names (for localizing a difference).</summary>
-    internal static IEnumerable<TheoryDataRow<string>> RunsOf(string dir) =>
+    internal static IEnumerable<TheoryDataRow<string>> RunsOf(string dir) => CorpusRuns.OrSkip(
         (System.IO.Directory.Exists(dir) ? System.IO.Directory.GetFiles(dir, "*.edh") : [])
         .Select(f => Path.GetFileNameWithoutExtension(f))
         .Where(r => Environment.GetEnvironmentVariable("EDICT_SCREENRUN") is not { Length: > 0 } only || r == only)
-        .Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r));
+        .Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r)), dir, "tools/screens.sh");
 
     public static IEnumerable<TheoryDataRow<string>> Runs => RunsOf(Directory);
 

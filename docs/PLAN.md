@@ -8,12 +8,12 @@ before anything depends on them.
 
 | # | Decision | Alternative rejected | Why |
 |---|---|---|---|
-| D1 | Exactness beats performance. A faster variant that is not bit-identical on the corpus is not a candidate. | "Fast mode" with tolerance | The hash proof is the project's thesis; a second mode doubles the test matrix. |
-| D2 | Reference build: 64-bit clang, `id386=0` (C paths only), `-O2 -ffp-contract=off -fno-fast-math -fno-strict-aliasing -march=x86-64-v2`, SSE scalar math, plus a patch that moves five static strings to the hunk so string_t offsets fit an int (§A.1). | MSVC; 32-bit SSE2 build | clang's FP contraction and excess-precision behaviour is documented and identical on Windows (clang-cl) and Linux. 64-bit keeps a modern toolchain and matches the C# process; the cost is one small extra patch. |
-| D3 | `sin`, `cos`, `atan`, `atan2`, `rand`, `strcmp`, `sprintf` (NaN/infinity output) and `atof` (NaN bits) are pinned in the reference (force-included `edict_libc.h`), and float-to-int overflow by `-fno-strict-float-cast-overflow`; all ported 1:1 to C# (`Edict.Exact`). | Use each platform's libm/CRT | Otherwise ground truth depends on the CRT version of the machine that built the reference. sqrt/floor/ceil/fabs are IEEE-exact and stay native. Consequence to state publicly: the reference is "WinQuake + pinned libm", not "WinQuake as shipped in 1996". |
-| D4 | Target `net10.0` (LTS). .NET 11 is evaluated as a benchmark variant, not adopted by default (§G). | `net11.0` from day one | .NET 11 is STS, GA Nov 2026; one of its breaking changes touches float→int casts. |
-| D5 | The `[NoAlloc]` analyzer is copied as source from Prism (analyzer + annotations + its tests), renamed to `Edict.NoAlloc.*`, with no "HotPath"/"Archfacts" names left: namespace `Edict.NoAlloc`, diagnostic prefix `NA` instead of `HP`, `noalloc-allowlist.toml`, MSBuild property `EdictNoAllocInjectAttributes`. Prism's transitive verifier and benchmarks are not copied. | NuGet / project reference into Prism | Requested; Edict builds from a single checkout and evolves the analyzer independently. Without the verifier, the per-member rule "every callee must carry a matching marker" (NA008) still composes; what is lost is the report of exemption chains, which is acceptable at this scale. |
-| D6 | Zero runtime dependencies in `Edict.Engine`. Anything from the BCL that is in the hot path must be allowlisted for the `[NoAlloc]` analyzer or replaced by own code. | Use BCL collections/formatting | BCL formatting, `string`, `List<T>` and `Math.Sin` are either allocating or not bit-pinned. |
+| D1 | Exactness beats performance. A faster variant that is not bit-identical on the corpus is not a candidate. ([adr/D1](adr/D1-exactness-beats-performance.md)) | "Fast mode" with tolerance | The hash proof is the project's thesis; a second mode doubles the test matrix. |
+| D2 | Reference build: 64-bit clang, `id386=0` (C paths only), `-O2 -ffp-contract=off -fno-fast-math -fno-strict-aliasing -march=x86-64-v2`, SSE scalar math, plus a patch that moves five static strings to the hunk so string_t offsets fit an int (§A.1). ([adr/D2](adr/D2-reference-build.md)) | MSVC; 32-bit SSE2 build | clang's FP contraction and excess-precision behaviour is documented and identical on Windows (clang-cl) and Linux. 64-bit keeps a modern toolchain and matches the C# process; the cost is one small extra patch. |
+| D3 | `sin`, `cos`, `atan`, `atan2`, `rand`, `strcmp`, `sprintf` (NaN/infinity output) and `atof` (NaN bits) are pinned in the reference (force-included `edict_libc.h`), and float-to-int overflow by `-fno-strict-float-cast-overflow`; all ported 1:1 to C# (`Edict.Exact`). ([adr/D3](adr/D3-pinned-libc.md)) | Use each platform's libm/CRT | Otherwise ground truth depends on the CRT version of the machine that built the reference. sqrt/floor/ceil/fabs are IEEE-exact and stay native. Consequence to state publicly: the reference is "WinQuake + pinned libm", not "WinQuake as shipped in 1996". |
+| D4 | Target `net10.0` (LTS). .NET 11 is evaluated as a benchmark variant, not adopted by default (§G). ([adr/D4](adr/D4-target-net10.md)) | `net11.0` from day one | .NET 11 is STS, GA Nov 2026; one of its breaking changes touches float→int casts. |
+| D5 | The `[NoAlloc]` analyzer is copied as source from Prism (analyzer + annotations + its tests), renamed to `Edict.NoAlloc.*`, with no "HotPath"/"Archfacts" names left: namespace `Edict.NoAlloc`, diagnostic prefix `NA` instead of `HP`, `noalloc-allowlist.toml`, MSBuild property `EdictNoAllocInjectAttributes`. Prism's transitive verifier and benchmarks are not copied. ([adr/D5](adr/D5-noalloc-analyzer-copied.md)) | NuGet / project reference into Prism | Requested; Edict builds from a single checkout and evolves the analyzer independently. Without the verifier, the per-member rule "every callee must carry a matching marker" (NA008) still composes; what is lost is the report of exemption chains, which is acceptable at this scale. |
+| D6 | Zero runtime dependencies in `Edict.Engine`. Anything from the BCL that is in the hot path must be allowlisted for the `[NoAlloc]` analyzer or replaced by own code. ([adr/D6](adr/D6-no-runtime-dependencies.md)) | Use BCL collections/formatting | BCL formatting, `string`, `List<T>` and `Math.Sin` are either allocating or not bit-pinned. |
 | D7 | The port's edicts use the reference's stride (`pr_edict_size`, with the x64 C header size), so entity offsets and field pointers are numerically identical ([adr/D7](adr/D7-edict-stride-as-in-c.md), 2026-10-13). | Free stride, entities compared by index (B.2 before) | Recorded VM calls compare word for word, untyped temporaries included; no translation layer. |
 | D8 | The bits of NaN results of float arithmetic are not state: such a result must be NaN on both sides; copies keep all bits; hash and NaN text are sign- and payload-free ([adr/D8](adr/D8-nan-bits-are-not-state.md), 2026-10-13). | Reproduce clang's operand order per expression with explicit NaN rules | LLVM leaves NaN payload and sign unspecified; clang and RyuJIT commute, vectorize and fold freely. |
 
@@ -996,7 +996,9 @@ reference's dedicated server and the reference's client on the port's, each sign
 and echoes, and leaves. Found by the interop test: the original's ban test declares its own in_addr with an unsigned
 long outside Windows and NeXT, so on LP64 it reads sin_zero and bans every client; patch 0012 takes the system's
 headers on Linux (nothing changes on Windows: the oracle and the corpora are the same). R7 group `udp`: all 5
-detected (a quit with the signon in flight was added for NET_SendToAll's wait).
+detected (a quit with the signon in flight was added for NET_SendToAll's wait); since 2026-10-15 also two of
+listennet's known blind spots as `remote:` mutants (no clc_disconnect; the clients not dropped at a shutdown, for
+which the quit test checks the server's "Client ... removed"), both detected. In the exact gates they stay blind.
 P6 done (2026-10-15), the milestone on the final tree (commit 43fe226). Planned at 20–40 weeks (section D); its
 nine steps are dated 2026-10-14. What it brought: the software renderer, the 2D layer, the view and the console
 bit-exact (gated by every present's frame buffer and palette: data/screen2d, data/screen4, data/screen with
@@ -1006,9 +1008,9 @@ clients and the local client's network side exact (data/multi, the listen runs),
 oracle's differential fuzz), and real UDP with a dedicated server and interop with the reference (outside the
 proof). The reference gained patches 0007–0012; two are findings in id's code that a 64-bit or sanitized build
 shows: GetWavinfo's look for "mark" past a file's end (0011) and the ban test that bans every client on LP64
-(0012). R7 over P6's groups (screen 50, world 38, frame 50, sound 38, multi 35, listennet 18, datagram 33, udp 5:
-267 mutants): every one detected but the 34 known blind spots, each with its reason in `tools/mutate.py` (all still
-blind on the final tree). The milestone's checks, all green: `tools/test.sh full` on Windows (282 s: 570 engine
+(0012). R7 over P6's groups (screen 50, world 38, frame 50, sound 38, multi 35, listennet 18, datagram 33, udp 7:
+269 mutants): every one detected but the 34 known blind spots, each with its reason in `tools/mutate.py` (all still
+blind on the final tree; two of them are caught outside the proof by udp's `remote:` mutants). The milestone's checks, all green: `tools/test.sh full` on Windows (282 s: 570 engine
 tests, 36 exact, 68 analyzer) and on Linux (358 s, the Linux oracle and the network reference: the interop tests
 run there; the four GPU renderer tests skip, the run has no display for an OpenGL context); R9 — `r9-linux.sh` (10 maps, release twice, -O0, ASan: 30 of 30 identical), `r9-windows.sh` (10 of 10
 identical with Linux), `r9-screen.sh` with -O0 and ASan/UBSan and with the Windows build (36 of 36 runs identical),
@@ -1241,6 +1243,19 @@ CI jobs: (1) reference build on Linux clang, regenerate `.edh`, compare to commi
 (2) build with NA + ED analyzers as errors; (3) corpus equality, frame hashes, allocation delta 0 over 1,000 frames;
 (4) BDN short run, hard fail on `Allocated > 0`, performance regressions informational on shared runners and hard
 against a committed baseline on the local benchmark machine; (5) weekly sanitizer lane on the reference.
+Set up 2026-10-15 (`.github/workflows/ci.yml`), by the owner's decisions: pull requests, pushes to main and by hand;
+of the corpora only the fast ones (traces, captures, multi, listen: `tools/ci-corpora.sh`, cached on a hash of
+`ref/` and the generators), whose regeneration with the reference is part of every run without a cache; Linux in
+full, Windows the build only. Linux: the reference built with clang, the corpora, `tools/test.sh full` (the gates of
+the screen, sound, client and ten-minute corpora report "no corpus" and skip), job (4) as BenchmarkDotNet's short job
+on the captures' tapes and the hull traces with `tools/bench-check.py` (0 B per operation, the times printed).
+Windows: the build with the analyzers as errors (2) and the analyzer tests. Not set up: (1)'s comparison with a
+committed golden (the golden files are hundreds of MB; a committed fingerprint of their lanes would do, as
+`tools/edh.py diff` compares lanes, not bytes: the files' headers carry their format version, and data/captures
+still holds the older formats the tests read), (5) the sanitizer lane, the Windows gates. In WSL, a fresh tree with
+only LibreQuake's data: the reference 9 s, the corpora 14 min (captures 8.5, multi 4.3), the full tier 83 s (363
+engine tests, 18 of them the skipped gates); the 32 `.edh` of captures, multi and listen it made have every lane
+of data/'s (`tools/edh.py diff`).
 
 ## G. .NET 11 — does it help?
 

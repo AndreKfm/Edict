@@ -241,6 +241,12 @@ Not every change needs every test. Three tiers, chosen by what a run has to answ
 | quick | before every commit | `tools/test.sh quick`: build, engine tests without the trait `Tier=long`, Exact tests |
 | milestone | after a large step, and only when a narrower run cannot answer the question | `tools/test.sh full` (the long tier: the ten-minute runs, the `KnownBad*` classes; the analyzer tests), `tools/mutate.py`, R9 (`tools/r9-*.sh`), the Linux leg |
 
+The CI (`.github/workflows/ci.yml`, docs/PLAN.md F) runs on pull requests and pushes to main: on Linux the
+reference, the fast corpora (`tools/ci-corpora.sh`: traces, captures, multi, listen; cached), `tools/test.sh full`
+and a short BenchmarkDotNet run that fails on any allocation (`tools/bench-check.py`; `EDICT_BENCH_TAPES` picks the
+frame benchmark's tapes); on Windows the build and the analyzer tests. A gate whose corpus is not there reports it
+and skips (`CorpusRuns.OrSkip`): locally too, so a missing corpus shows as skipped tests, not as a pass.
+
 For R7 after a gate gained a test, `tools/mutate.py --known` runs only the known blind spots (a mutant a gate detected
 stays detected when the gate gains a test); `--only <text>` runs single mutants. A mutant's tests stop at their first
 failure, and the tool names the test that failed. The fuzzes take their seeds from XXH64 of the map name: until

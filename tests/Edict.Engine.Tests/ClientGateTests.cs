@@ -25,9 +25,10 @@ public sealed class ClientGateTests
         }
     }
 
-    public static IEnumerable<TheoryDataRow<string>> Runs =>
+    public static IEnumerable<TheoryDataRow<string>> Runs => CorpusRuns.OrSkip(
         (System.IO.Directory.Exists(Directory) ? System.IO.Directory.GetFiles(Directory, "*.edh") : [])
-        .Select(f => Path.GetFileNameWithoutExtension(f)).Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r));
+        .Select(f => Path.GetFileNameWithoutExtension(f)).Order(StringComparer.Ordinal).Select(r => new TheoryDataRow<string>(r)),
+        Directory, "tools/demos.sh");
 
     /// <summary>The first difference, or null; <paramref name="frames"/> gets the number of client frames that hashed alike.</summary>
     internal static string? FirstDivergence(string run, out int frames)
