@@ -182,5 +182,8 @@ public sealed class UdpGameTests
         Assert.True(RunUntil(client, server, () => cl.State == ClientState.CaDisconnected, 10),
             "the client is still connected: " + ClientConsole(client));
         Assert.DoesNotContain("Host_Error", ClientConsole(client));     // the game ended by svc_disconnect
+        // Host_ShutdownServer dropped the remote client (SV_DropClient's Sys_Printf on a dedicated server)
+        Assert.True(SpinWait.SpinUntil(() => server.Console.Contains(" removed"), 5000),
+            "the server did not drop its client at the quit: " + server.Console);
     }
 }
