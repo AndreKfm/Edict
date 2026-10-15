@@ -1,5 +1,5 @@
 # Edict
-Edict - a frame-exact Quake engine port in pure C#, zero allocations in the game loop
+Edict - a frame-exact C# port of the WinQuake engine source, zero allocations in the game loop
 
 ## Playing
 
@@ -44,3 +44,13 @@ or with `-port <n>`. `-port <n>` also sets the port a server listens on; `-nolan
 `sh tools/test.sh quick` (before a commit) and `sh tools/test.sh full`, with `EDICT_ORACLE` pointing to the oracle
 library `ref/build.sh` builds from the C reference; docs/TESTING.md has the tiers, the corpora and the checks
 around them.
+
+## License and trademarks
+
+Edict is licensed under the GNU General Public License, version 2 or later (`LICENSE`), as is the WinQuake source
+release it ports. It contains no game data: it needs LibreQuake's free data (`tools/fetch-data.sh`) or the user's
+own copy of the game.
+
+Quake is a registered trademark of id Software LLC. Edict is not affiliated with or endorsed by id Software,
+ZeniMax Media or Microsoft; the name is used only to say which engine source Edict ports and which game data it
+runs.
