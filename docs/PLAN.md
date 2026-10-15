@@ -1022,6 +1022,13 @@ index, the offsetof idiom of EDICT_FROM_AREA); with them, no report is left. Not
 demo loop (CL_NextDemo), record, stop and timedemo, save and load, screenshot, sizeup and sizedown, slist, and the
 debug commands and cvars of the census (step 2); CD audio (cd_null); ALSA not tried against a device; the interop
 test runs on Linux only (net_wins.c is not built), while `UdpGameTests` covers Winsock.
+**The project is closed as a proof of concept** (owner's decision, 2026-10-15). Its thesis — a C engine ported to
+C# frame-exact, allocation-free in the loop and not slower — is shown; no phase follows P6. Left out on purpose,
+as comfort rather than proof: the parts not ported (the menu, save and load, demo recording and the demo loop,
+screenshot, sizeup and sizedown, slist, CD audio), a performance phase for the client and the renderer, and of the
+CI the golden comparison, the sanitizer lane and the Windows gates (the local checks, R9 and the milestone tiers,
+cover them). Kept after the close: the CI on pull requests, so that the result stays reproducible from a fresh
+checkout. The README states what is shown and its limits.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
