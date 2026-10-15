@@ -997,6 +997,29 @@ and echoes, and leaves. Found by the interop test: the original's ban test decla
 long outside Windows and NeXT, so on LP64 it reads sin_zero and bans every client; patch 0012 takes the system's
 headers on Linux (nothing changes on Windows: the oracle and the corpora are the same). R7 group `udp`: all 5
 detected (a quit with the signon in flight was added for NET_SendToAll's wait).
+P6 done (2026-10-15), the milestone on the final tree (commit 43fe226). Planned at 20–40 weeks (section D); its
+nine steps are dated 2026-10-14. What it brought: the software renderer, the 2D layer, the view and the console
+bit-exact (gated by every present's frame buffer and palette: data/screen2d, data/screen4, data/screen with
+151,171 presents and more), the sound bit-exact (data/sound, every frame's DMA buffer), the client's input and
+the platform (Win32, X11), the GPU renderer (outside the proof, reading the exact state), the server with several
+clients and the local client's network side exact (data/multi, the listen runs), net_dgrm.c exact at level 1 (the
+oracle's differential fuzz), and real UDP with a dedicated server and interop with the reference (outside the
+proof). The reference gained patches 0007–0012; two are findings in id's code that a 64-bit or sanitized build
+shows: GetWavinfo's look for "mark" past a file's end (0011) and the ban test that bans every client on LP64
+(0012). R7 over P6's groups (screen 50, world 38, frame 50, sound 38, multi 35, listennet 18, datagram 33, udp 5:
+267 mutants): every one detected but the 34 known blind spots, each with its reason in `tools/mutate.py` (all still
+blind on the final tree). The milestone's checks, all green: `tools/test.sh full` on Windows (282 s: 570 engine
+tests, 36 exact, 68 analyzer) and on Linux (358 s, the Linux oracle and the network reference: the interop tests
+run there; the four GPU renderer tests skip, the run has no display for an OpenGL context); R9 — `r9-linux.sh` (10 maps, release twice, -O0, ASan: 30 of 30 identical), `r9-windows.sh` (10 of 10
+identical with Linux), `r9-screen.sh` with -O0 and ASan/UBSan and with the Windows build (36 of 36 runs identical),
+the sound build's (`CORPUS=sound`, 66 comparisons, 723 s), `r9-client.sh` (40, 126 s), `r9-net.sh` (20, 1,242 s).
+r9-client's and r9-net's sanitizer filters had fallen behind r9-screen's: they let pass the same known kinds now,
+as far as their corpora reach them (E.3's findings, the shifts, a zero offset to a null visdata, r_part.c's vec3_t
+index, the offsetof idiom of EDICT_FROM_AREA); with them, no report is left. Not ported
+(the console says so, or the reference has none either): the menu (the reference's is a stub, edict_menu.c), the
+demo loop (CL_NextDemo), record, stop and timedemo, save and load, screenshot, sizeup and sizedown, slist, and the
+debug commands and cvars of the census (step 2); CD audio (cd_null); ALSA not tried against a device; the interop
+test runs on Linux only (net_wins.c is not built), while `UdpGameTests` covers Winsock.
 
 ## D. Effort at 7 h/week (calendar weeks)
 
