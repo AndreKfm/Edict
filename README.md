@@ -1,6 +1,50 @@
 # Edict
 Edict - a frame-exact C# port of the WinQuake engine source, zero allocations in the game loop
 
+## Status: a finished proof of concept
+
+Edict set out to show that a C game engine can be ported to C# so that it computes exactly what the C program
+computes, frame for frame, without allocating in its loop and without being slower. That is shown (2026-10-15);
+the project is complete as a proof of concept and is not developed further. docs/PLAN.md has every phase with its
+findings, docs/TESTING.md how each claim is tested.
+
+What is shown, each by state hashes (XXH64) against a C reference build of WinQuake's GPL source release:
+
+- **The server** — the QuakeC VM, the builtins, physics, the hull traces, several clients and their commands:
+  every frame and spawn record of the corpus' input tapes (ten maps, 4,000 frames each; ten-minute runs of 43,199
+  frames) and every message sent to every client, as the reference's.
+- **The client** — demo playback and a listen server's local client: every client record.
+- **The software renderer, the 2D layer and the console** — every present's 320×200 frame buffer and palette, over
+  150,000 presents in the full-frame corpus alone.
+- **The sound** — the mixer's DMA buffer after every frame (172,765 sound records).
+- **The network's exact part** — the server with several clients and net_dgrm.c (a differential fuzz against the
+  reference's own code).
+- **No allocation** in the game loop, enforced per member by a Roslyn analyzer (`[NoAlloc]`) and measured at 0 bytes
+  in every frame of the corpora but those that load (the spawn, a demo) or run a console command; **no slowdown**: the port runs the ten-minute run at 0.72 of the reference's time
+  per frame.
+- **Robustness of the gates** — mutation testing (`tools/mutate.py`; in the last phase 269 mutants, all detected but
+  34 known blind spots, each with its reason), and the reference itself checked at -O0, -O2, under ASan/UBSan, on
+  Windows and Linux (identical records).
+
+It is also a playable game: a window on Windows and Linux, keyboard and mouse, Quake's sound, a GPU renderer, and
+multiplayer over UDP, interoperating with the reference's own network build.
+
+The limits of the claim:
+
+- Exact means exact on the corpus: LibreQuake's free data, the runs and the synthetic inputs in docs/PLAN.md, not
+  every map or mod there is.
+- The reference is WinQuake with a pinned C library (sin, cos, tan, atan, atan2, rand, strcmp, sprintf and atof in
+  `ref/src/edict_libc.c`, [D3](docs/adr/D3-pinned-libc.md)) and twelve minimal patches (`ref/patches`), not the binary
+  of 1996.
+- Outside the proof by design: the GPU renderer (it reads the exact state, never writes it) and the sockets.
+- Not ported: the menu (the reference's is a stub), save and load, demo recording and the demo loop, screenshot,
+  sizeup and sizedown, slist, CD audio, the debug commands.
+
+To check it yourself: `sh tools/fetch-data.sh`, build the reference (`ref/build.sh`), write the corpora with it (the
+`tools/*.sh` generators in docs/TESTING.md, or `tools/ci-corpora.sh` for the fast ones) and run
+`sh tools/test.sh full` with `EDICT_ORACLE` set; the CI (`.github/workflows/ci.yml`) does the fast part of this on
+every pull request.
+
 ## Playing
 
 The game needs a Quake game directory with an `id1` folder (for example LibreQuake's release). On Windows it opens
