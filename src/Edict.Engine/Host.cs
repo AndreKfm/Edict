@@ -177,9 +177,10 @@ public sealed unsafe class Host : IDisposable, ISoundHost, IListenServer
     private static NetMain MakeNet(Cvars cvars, INetLan? lan, int numSockets)
     {
         if (lan is null)
-            return new NetMain(new Loopback(1 << 20), null, null);
+            return new NetMain(new Loopback(), null, null);
         var hn = new HostNet(cvars);
-        return new NetMain(new Loopback(1 << 20), new Datagram(hn, [lan], numSockets, 1), hn) { Rules = hn };
+        // a game's loopback keeps no log of the server's sends: only the gates take it (and empty it every frame)
+        return new NetMain(new Loopback(), new Datagram(hn, [lan], numSockets, 1), hn) { Rules = hn };
     }
 
     /// <summary>NET_Init's rest once the host is there: -port, the LAN drivers (-nolan), listening; deathmatch for maxclients above 1.</summary>
