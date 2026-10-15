@@ -1241,6 +1241,19 @@ CI jobs: (1) reference build on Linux clang, regenerate `.edh`, compare to commi
 (2) build with NA + ED analyzers as errors; (3) corpus equality, frame hashes, allocation delta 0 over 1,000 frames;
 (4) BDN short run, hard fail on `Allocated > 0`, performance regressions informational on shared runners and hard
 against a committed baseline on the local benchmark machine; (5) weekly sanitizer lane on the reference.
+Set up 2026-10-15 (`.github/workflows/ci.yml`), by the owner's decisions: pull requests, pushes to main and by hand;
+of the corpora only the fast ones (traces, captures, multi, listen: `tools/ci-corpora.sh`, cached on a hash of
+`ref/` and the generators), whose regeneration with the reference is part of every run without a cache; Linux in
+full, Windows the build only. Linux: the reference built with clang, the corpora, `tools/test.sh full` (the gates of
+the screen, sound, client and ten-minute corpora report "no corpus" and skip), job (4) as BenchmarkDotNet's short job
+on the captures' tapes and the hull traces with `tools/bench-check.py` (0 B per operation, the times printed).
+Windows: the build with the analyzers as errors (2) and the analyzer tests. Not set up: (1)'s comparison with a
+committed golden (the golden files are hundreds of MB; a committed fingerprint of their lanes would do, as
+`tools/edh.py diff` compares lanes, not bytes: the files' headers carry their format version, and data/captures
+still holds the older formats the tests read), (5) the sanitizer lane, the Windows gates. In WSL, a fresh tree with
+only LibreQuake's data: the reference 9 s, the corpora 14 min (captures 8.5, multi 4.3), the full tier 83 s (363
+engine tests, 18 of them the skipped gates); the 32 `.edh` of captures, multi and listen it made have every lane
+of data/'s (`tools/edh.py diff`).
 
 ## G. .NET 11 — does it help?
 

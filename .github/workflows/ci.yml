@@ -1,0 +1,130 @@
+# Copyright (C) 2026 Andre Kaufmann
+# SPDX-License-Identifier: GPL-2.0-or-later
+# The CI (docs/PLAN.md F, the owner's decisions of 2026-10-15): pull requests, pushes to main, and by hand.
+# Linux: the reference built with clang, the fast corpora generated with it (tools/ci-corpora.sh; cached on a hash
+# of the reference and the generators), the full test tier against them (the gates of the corpora the CI does not
+# make skip), and a short BenchmarkDotNet run that fails on any allocation. Windows: the build with the analyzers
+# as errors and the analyzer tests.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  linux:
+    name: Linux (reference, corpora, tests, benchmarks)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Toolchain
+        run: |
+          command -v clang > /dev/null || { sudo apt-get update && sudo apt-get install -y clang; }
+          clang --version | head -1
+          python3 --version
+
+      - name: Restore the game data
+        id: gamedata
+        uses: actions/cache/restore@v4
+        with:
+          path: data/libreq-v0.09-beta
+          key: libreq-${{ hashFiles('tools/fetch-data.sh') }}
+
+      - name: Fetch the game data (LibreQuake)
+        if: steps.gamedata.outputs.cache-hit != 'true'
+        run: sh tools/fetch-data.sh
+
+      - name: Save the game data
+        if: steps.gamedata.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/libreq-v0.09-beta
+          key: libreq-${{ hashFiles('tools/fetch-data.sh') }}
+
+      - name: Build the reference
+        run: sh ref/build.sh release "$RUNNER_TEMP/ref"
+
+      - name: Restore the corpora
+        id: corpora
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            data/traces
+            data/captures
+            data/multi
+            data/listen
+            data/libreq-v0.09-beta/id1/edict
+          key: corpora-${{ hashFiles('ref/**', 'tools/ci-corpora.sh', 'tools/traces.sh', 'tools/captures.sh', 'tools/multis.sh', 'tools/listen.sh', 'tools/tapegen.py', 'tools/edh.py', 'tools/fetch-data.sh') }}
+
+      - name: Generate the corpora
+        if: steps.corpora.outputs.cache-hit != 'true'
+        run: sh tools/ci-corpora.sh "$RUNNER_TEMP/ref"
+
+      - name: Save the corpora
+        if: steps.corpora.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            data/traces
+            data/captures
+            data/multi
+            data/listen
+            data/libreq-v0.09-beta/id1/edict
+          key: corpora-${{ hashFiles('ref/**', 'tools/ci-corpora.sh', 'tools/traces.sh', 'tools/captures.sh', 'tools/multis.sh', 'tools/listen.sh', 'tools/tapegen.py', 'tools/edh.py', 'tools/fetch-data.sh') }}
+
+      - name: Tests (full tier)
+        env:
+          EDICT_ORACLE: ${{ runner.temp }}/ref/libedict_oracle.so
+        run: sh tools/test.sh full
+
+      - name: Benchmarks (short run, no allocation)
+        env:
+          EDICT_BENCH_TAPES: captures/lq_e0m3,captures/start
+        run: |
+          dotnet run -c Release --project bench/Edict.Benchmarks -- --filter '*' --job short --exporters json \
+            --artifacts "$RUNNER_TEMP/bench"
+          python3 -I tools/bench-check.py "$RUNNER_TEMP/bench/results"
+
+      - name: Upload the benchmark reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmarks
+          path: ${{ runner.temp }}/bench/results
+          if-no-files-found: ignore
+
+  windows:
+    name: Windows (build, analyzers)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Build (the analyzers as errors)
+        run: dotnet build Edict.slnx -c Release
+
+      - name: Analyzer tests
+        run: dotnet run --project analyzers/Edict.NoAlloc/Edict.NoAlloc.Analyzers.Tests -c Release --no-build

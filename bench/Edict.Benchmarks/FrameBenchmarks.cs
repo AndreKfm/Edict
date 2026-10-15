@@ -27,9 +27,16 @@ public class FrameBenchmarks
     private TapeNet _tape = null!;
     private float _time;
 
-    /// <summary>A tape as "directory/map": the long runs in data/long, the corpus in data/captures.</summary>
-    [Params("long/lq_e0m3", "captures/lq_e0m3", "captures/start")]
+    /// <summary>
+    /// A tape as "directory/map": the long runs in data/long, the corpus in data/captures; EDICT_BENCH_TAPES (a comma
+    /// list) picks others (the CI has no data/long).
+    /// </summary>
+    [ParamsSource(nameof(Tapes))]
     public string Tape { get; set; } = "";
+
+    public static IEnumerable<string> Tapes =>
+        (Environment.GetEnvironmentVariable("EDICT_BENCH_TAPES") is { Length: > 0 } t ? t : "long/lq_e0m3,captures/lq_e0m3,captures/start")
+        .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
     private string Map => Path.GetFileName(Tape);
 

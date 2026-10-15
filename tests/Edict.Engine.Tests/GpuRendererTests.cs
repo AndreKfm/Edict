@@ -19,10 +19,10 @@ namespace Edict.Engine.Tests;
 /// </summary>
 public sealed unsafe class GpuRendererTests
 {
-    public static IEnumerable<TheoryDataRow<string>> Runs =>
+    public static IEnumerable<TheoryDataRow<string>> Runs => CorpusRuns.OrSkip(
         new[] { "captures_lq_e0m1", "captures_lq_e0m5", "captures_dev", "fuzz_7" }
             .Where(r => File.Exists(Path.Combine(FullFrameGateTests.FullDirectory, r + ".edh")))
-            .Select(r => new TheoryDataRow<string>(r));
+            .Select(r => new TheoryDataRow<string>(r)), FullFrameGateTests.FullDirectory, "tools/screens.sh");
 
     [Theory]
     [MemberData(nameof(Runs))]
