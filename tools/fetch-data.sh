@@ -9,11 +9,21 @@ URL="https://github.com/lavenderdotpet/LibreQuake/releases/download/$RELEASE/$AS
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/data/libreq-$RELEASE"
 if [ -f "$DEST/id1/pak0.pak" ]; then echo "present: $DEST"; exit 0; fi
+for tool in curl sha256sum; do
+  command -v "$tool" > /dev/null || { echo "fetch-data.sh needs $tool"; exit 1; }
+done
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 curl -sSL -o "$TMP/$ASSET" "$URL"
 echo "$SHA256  $TMP/$ASSET" | sha256sum -c -
-mkdir -p "$DEST"
-unzip -q "$TMP/$ASSET" 'lite/id1/pak0.pak' 'lite/id1/pak1.pak' 'lite/id1/docs/*' -d "$TMP/x"
-mv "$TMP/x/lite/id1" "$DEST/id1"
+# unzip, or Python's zipfile where unzip is missing (a minimal Ubuntu, WSL)
+if unzip -v > /dev/null 2>&1; then
+  unzip -q "$TMP/$ASSET" 'lite/id1/pak0.pak' 'lite/id1/pak1.pak' 'lite/id1/docs/*' -d "$TMP/x"
+elif command -v python3 > /dev/null; then
+  python3 -I -m zipfile -e "$TMP/$ASSET" "$TMP/x"
+else
+  echo "fetch-data.sh needs unzip (or python3)"; exit 1
+fi
+mkdir -p "$DEST/id1"
+mv "$TMP/x/lite/id1/pak0.pak" "$TMP/x/lite/id1/pak1.pak" "$TMP/x/lite/id1/docs" "$DEST/id1/"
 echo "fetched: $DEST"

@@ -1,6 +1,19 @@
 # Edict
 Edict - a frame-exact C# port of the WinQuake engine source, zero allocations in the game loop
 
+## Quick start
+
+With the [.NET 10 SDK](https://dot.net) installed, one command fetches LibreQuake's free game data (on the first run),
+builds the game and starts it:
+
+- Windows: double-click `play.cmd`, or `.\play.ps1` in PowerShell
+- Linux: `./play.sh` (needs an X server; Wayland desktops have XWayland, WSLg works)
+
+Arguments go to the game, e.g. `play.cmd -listen 4` for a listen server, `./play.sh +connect 192.168.1.5` to join
+one, `+map lq_e0m1` for another map, `-software` for the exact software renderer. In the game, `` ` `` opens the
+console and `quit` ends it (the menu is a stub, as in the reference). More under [Playing](#playing) and
+[Multiplayer](#multiplayer).
+
 ## Status: a finished proof of concept
 
 Edict set out to show that a C game engine can be ported to C# so that it computes exactly what the C program
