@@ -65,6 +65,13 @@ The limits of the claim:
 - Not ported: the menu (the reference's is a stub), save and load, demo recording and the demo loop, screenshot,
   sizeup and sizedown, slist, CD audio, the debug commands.
 
+How it was built: Edict was developed with AI. Claude Opus 5.5 (Anthropic), working as a coding agent in Claude
+Code, wrote most of the code, the tools and the documentation, under a plan with hard, measurable gates and with
+the owner's decisions at every step (docs/PLAN.md, docs/adr/); its commits say so ("Co-Authored-By: Claude Opus
+5.5"). That is why the proof matters: nothing here has to be taken on trust, as every claim above is a test that
+compares bits with the C original, and the mutation tests show that those tests catch the mistakes a translation
+makes.
+
 To check it yourself: `sh tools/fetch-data.sh`, build the reference (`ref/build.sh`), write the corpora with it (the
 `tools/*.sh` generators in docs/TESTING.md, or `tools/ci-corpora.sh` for the fast ones) and run
 `sh tools/test.sh full` with `EDICT_ORACLE` set; the CI (`.github/workflows/ci.yml`) does the fast part of this on
