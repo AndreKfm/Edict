@@ -1,0 +1,136 @@
+# Copyright (C) 2026 Andre Kaufmann
+# SPDX-License-Identifier: GPL-2.0-or-later
+# The release: on a tag v<major>.<minor>[.<patch>], a package per platform — the game as one self-contained program
+# (no .NET needed), the start scripts, which fetch LibreQuake's free game data on the first run, a README and the
+# license — each smoke-tested as a dedicated server for 40 frames with the data it fetched, then a GitHub release
+# with both packages and their SHA-256 sums. By hand (workflow_dispatch) it builds and tests the packages without
+# releasing.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  package:
+    name: Package (${{ matrix.rid }})
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-24.04
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ]; then tag="${GITHUB_REF_NAME}"; else tag="v0.0.0-dev"; fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "number=${tag#v}" >> "$GITHUB_OUTPUT"
+          echo "name=edict-${tag#v}-${{ matrix.rid }}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish (self-contained, one file)
+        run: |
+          dotnet publish src/Edict.Platform -c Release -r ${{ matrix.rid }} --self-contained \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none \
+            -p:Version=${{ steps.version.outputs.number }} -o "pkg/${{ steps.version.outputs.name }}"
+
+      - name: Assemble the package
+        run: |
+          dir="pkg/${{ steps.version.outputs.name }}"
+          cp packaging/README.txt LICENSE "$dir/"
+          if [ "${{ matrix.rid }}" = win-x64 ]; then
+            cp play.cmd play.ps1 "$dir/"
+          else
+            mkdir -p "$dir/tools"
+            cp play.sh "$dir/"
+            cp tools/fetch-data.sh "$dir/tools/"
+            chmod +x "$dir/play.sh" "$dir/edict"
+          fi
+          ls -la "$dir"
+
+      - name: Smoke test (the start script, a dedicated server for 40 frames)
+        run: |
+          cd "pkg/${{ steps.version.outputs.name }}"
+          if [ "${{ matrix.rid }}" = win-x64 ]; then
+            pwsh -NoProfile -File play.ps1 -dedicated 1 -edictframes 40 +map start < /dev/null
+          else
+            ./play.sh -dedicated 1 -edictframes 40 +map start < /dev/null
+          fi
+          test -f data/libreq-v0.09-beta/id1/pak0.pak
+          rm -rf data
+
+      - name: Archive
+        run: |
+          cd pkg
+          name="${{ steps.version.outputs.name }}"
+          if [ "${{ matrix.rid }}" = win-x64 ]; then
+            7z a -tzip "$name.zip" "$name" > /dev/null
+          else
+            tar -czf "$name.tar.gz" "$name"
+          fi
+          ls -la
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.name }}
+          path: |
+            pkg/*.zip
+            pkg/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: GitHub release
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums and notes
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          {
+            echo "Edict ${GITHUB_REF_NAME}: a frame-exact C# port of the WinQuake engine source."
+            echo
+            echo "Download the package for your system, unpack it and start \`play.cmd\` (Windows) or \`./play.sh\` (Linux)."
+            echo "The program is self-contained (no .NET needed); on the first start the script fetches LibreQuake's free"
+            echo "game data. README.txt in the package has the details, the repository's README what Edict shows and how."
+            echo
+            echo "Quake is a registered trademark of id Software LLC; Edict is not affiliated with or endorsed by id Software,"
+            echo "ZeniMax Media or Microsoft. Edict contains no game data."
+          } > ../notes.md
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${GITHUB_REF_NAME}" dist/* --title "Edict ${GITHUB_REF_NAME}" --notes-file notes.md
