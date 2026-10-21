@@ -109,7 +109,8 @@ around them.
 ## License and trademarks
 
 Edict is licensed under the GNU General Public License, version 2 or later (`LICENSE`), as is the WinQuake source
-release it ports. It contains no game data: it needs LibreQuake's free data (`tools/fetch-data.sh`) or the user's
+release it ports (Copyright (C) 1996-1997 Id Software, Inc.); `THIRD-PARTY-NOTICES.md` lists everything it contains
+or derives from that is not its own. It contains no game data: it needs LibreQuake's free data (`tools/fetch-data.sh`) or the user's
 own copy of the game.
 
 Quake is a registered trademark of id Software LLC. Edict is not affiliated with or endorsed by id Software,

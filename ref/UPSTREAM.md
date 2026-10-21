@@ -21,6 +21,9 @@ patched copy (see `docs/PLAN.md`, section E.3).
 | `WinQuake/kit/` | Prebuilt `GLQUAKE.EXE` and `OPENGL32.DLL`. |
 | `WinQuake/data/` | Shareware game documentation and license texts for the game data, not source code. |
 | `*.exe`, `*.lib`, `*.ncb`, `*.opt`, `*.plg`, `*.aps`, `*.mdp`, `*.ico`, `*.gif` | Binaries and Visual C++ IDE artifacts. |
+| `WinQuake/mpdosock.h` | Microsoft's WINSOCK.H (© Microsoft, parts © the Regents of the University of California), not id's code and not under the GPL; only the DOS MPATH driver (`net_mp.c`, `mplpc.c`) includes it, which the reference does not build. Removed 2026-10-21. |
+| `WinQuake/3dfx.txt` | 3Dfx Interactive's notes on GLQuake (© 3Dfx, all rights reserved), not id's. Removed 2026-10-21. |
+| `WinQuake/quake.spec.sh` | An RPM spec for the restricted game data, not needed. Removed 2026-10-21. |
 
 ## Verify
 
