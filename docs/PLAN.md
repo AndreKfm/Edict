@@ -1028,7 +1028,12 @@ as comfort rather than proof: the parts not ported (the menu, save and load, dem
 screenshot, sizeup and sizedown, slist, CD audio), a performance phase for the client and the renderer, and of the
 CI the golden comparison, the sanitizer lane and the Windows gates (the local checks, R9 and the milestone tiers,
 cover them). Kept after the close: the CI on pull requests, so that the result stays reproducible from a fresh
-checkout. The README states what is shown and its limits.
+checkout. The README states what is shown and its limits. Added after the close: the start scripts (`play.cmd`,
+`play.ps1`, `play.sh`: the game data fetched on the first run, the game built and started) and the release
+workflow (`.github/workflows/release.yml`: on a tag `v*`, a package per platform — the game published
+self-contained as one file, about 74 MB, 32 MB packed, with the start scripts, `packaging/README.txt` and the
+license; each smoke-tested by its start script as a dedicated server for 40 frames on the data it fetched — and a
+GitHub release with both packages and their SHA-256 sums).
 
 ## D. Effort at 7 h/week (calendar weeks)
 

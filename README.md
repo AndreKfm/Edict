@@ -3,8 +3,12 @@ Edict - a frame-exact C# port of the WinQuake engine source, zero allocations in
 
 ## Quick start
 
-With the [.NET 10 SDK](https://dot.net) installed, one command fetches LibreQuake's free game data (on the first run),
-builds the game and starts it:
+Without anything installed: the [releases](https://github.com/AndreKfm/Edict/releases) have a package per system
+(Windows x64, Linux x64) with the game as one self-contained program; unpack it and start `play.cmd` or
+`./play.sh`, which fetch LibreQuake's free game data on the first start.
+
+From the source, with the [.NET 10 SDK](https://dot.net) installed, one command fetches the game data (on the first
+run), builds the game and starts it:
 
 - Windows: double-click `play.cmd`, or `.\play.ps1` in PowerShell
 - Linux: `./play.sh` (needs an X server; Wayland desktops have XWayland, WSLg works)
