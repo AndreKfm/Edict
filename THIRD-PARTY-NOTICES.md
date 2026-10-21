@@ -30,10 +30,12 @@ algorithms and constants, as musl carries them:
 ## The .NET runtime (release packages only)
 
 The release packages hold the game published self-contained: the .NET runtime is part of the program. It is
-Copyright (c) .NET Foundation and Contributors, under the MIT license; the license file and the third-party notices
-of the very build the package contains come with each package (`dotnet-LICENSE.txt`,
-`dotnet-THIRD-PARTY-NOTICES.txt`), and the release workflow stops if that build is not under the MIT license (some
-of Microsoft's installers carry other terms). The source tree contains no part of it.
+Copyright (c) .NET Foundation and Contributors, under the MIT license. It comes from the NuGet runtime pack
+`Microsoft.NETCore.App.Runtime.<rid>`, whose license file and third-party notices come with each package
+(`dotnet-LICENSE.txt`, `dotnet-THIRD-PARTY-NOTICES.txt`, by `tools/runtime-notices.py`); the release workflow stops if
+the pack is not under the MIT license (an SDK installation's own license file can carry other terms, as Microsoft's
+Windows installer's does, but a self-contained publish does not take the runtime from there). The source tree
+contains no part of it.
 
 ## LibreQuake (not included)
 

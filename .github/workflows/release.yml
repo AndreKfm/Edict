@@ -59,13 +59,10 @@ jobs:
         run: |
           dir="pkg/${{ steps.version.outputs.name }}"
           cp packaging/README.txt LICENSE THIRD-PARTY-NOTICES.md "$dir/"
-          # the .NET runtime is part of the program (self-contained): its license and third-party notices. A GPL
-          # program may carry it under the MIT license; a build under other terms stops the release.
-          root="${DOTNET_ROOT:-$(dirname "$(command -v dotnet)")}"
-          head -3 "$root/LICENSE.txt"
-          grep -q "The MIT License" "$root/LICENSE.txt" || { echo "the .NET build here is not under the MIT license"; exit 1; }
-          cp "$root/LICENSE.txt" "$dir/dotnet-LICENSE.txt"
-          cp "$root/ThirdPartyNotices.txt" "$dir/dotnet-THIRD-PARTY-NOTICES.txt"
+          # the .NET runtime is part of the program (self-contained): the license and third-party notices of the
+          # runtime pack the publish took; a pack not under the MIT license stops the release
+          py=python3; command -v python3 > /dev/null || py=python
+          $py -I tools/runtime-notices.py src/Edict.Platform ${{ matrix.rid }} "$dir"
           if [ "${{ matrix.rid }}" = win-x64 ]; then
             cp play.cmd play.ps1 "$dir/"
           else
