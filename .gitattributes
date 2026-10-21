@@ -7,3 +7,6 @@
 
 # Pristine id Software sources: keep the bytes exactly as upstream.
 ref/upstream/** -text
+
+# Windows batch files: cmd.exe reads CRLF lines
+*.cmd text eol=crlf
