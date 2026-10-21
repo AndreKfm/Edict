@@ -35,19 +35,19 @@ findings, docs/TESTING.md how each claim is tested.
 
 What is shown, each by state hashes (XXH64) against a C reference build of WinQuake's GPL source release:
 
-- **The server** — the QuakeC VM, the builtins, physics, the hull traces, several clients and their commands:
+- **The server** - the QuakeC VM, the builtins, physics, the hull traces, several clients and their commands:
   every frame and spawn record of the corpus' input tapes (ten maps, 4,000 frames each; ten-minute runs of 43,199
   frames) and every message sent to every client, as the reference's.
-- **The client** — demo playback and a listen server's local client: every client record.
-- **The software renderer, the 2D layer and the console** — every present's 320×200 frame buffer and palette, over
+- **The client** - demo playback and a listen server's local client: every client record.
+- **The software renderer, the 2D layer and the console** - every present's 320×200 frame buffer and palette, over
   150,000 presents in the full-frame corpus alone.
-- **The sound** — the mixer's DMA buffer after every frame (172,765 sound records).
-- **The network's exact part** — the server with several clients and net_dgrm.c (a differential fuzz against the
+- **The sound** - the mixer's DMA buffer after every frame (172,765 sound records).
+- **The network's exact part** - the server with several clients and net_dgrm.c (a differential fuzz against the
   reference's own code).
 - **No allocation** in the game loop, enforced per member by a Roslyn analyzer (`[NoAlloc]`) and measured at 0 bytes
   in every frame of the corpora but those that load (the spawn, a demo) or run a console command; **no slowdown**: the port runs the ten-minute run at 0.72 of the reference's time
   per frame.
-- **Robustness of the gates** — mutation testing (`tools/mutate.py`; in the last phase 269 mutants, all detected but
+- **Robustness of the gates** - mutation testing (`tools/mutate.py`; in the last phase 269 mutants, all detected but
   34 known blind spots, each with its reason), and the reference itself checked at -O0, -O2, under ASan/UBSan, on
   Windows and Linux (identical records).
 
