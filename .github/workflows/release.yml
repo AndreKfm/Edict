@@ -58,7 +58,11 @@ jobs:
       - name: Assemble the package
         run: |
           dir="pkg/${{ steps.version.outputs.name }}"
-          cp packaging/README.txt LICENSE "$dir/"
+          cp packaging/README.txt LICENSE THIRD-PARTY-NOTICES.md "$dir/"
+          # the .NET runtime is part of the program (self-contained): the license and third-party notices of the
+          # runtime pack the publish took; a pack not under the MIT license stops the release
+          py=python3; command -v python3 > /dev/null || py=python
+          $py -I tools/runtime-notices.py src/Edict.Platform ${{ matrix.rid }} "$dir"
           if [ "${{ matrix.rid }}" = win-x64 ]; then
             cp play.cmd play.ps1 "$dir/"
           else

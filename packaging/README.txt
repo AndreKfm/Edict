@@ -47,8 +47,11 @@ License and trademarks
 ----------------------
 
 Edict is licensed under the GNU General Public License, version 2 or later
-(LICENSE), as is the WinQuake source release it ports; its source is at the address
-above. It contains no game data. LibreQuake's data, which the start script fetches,
+(LICENSE), as is the WinQuake source release it ports (Copyright (C) 1996-1997
+Id Software, Inc.); its source is at the address above. THIRD-PARTY-NOTICES.md
+lists what else it contains or derives from. The program includes the .NET runtime
+(Copyright (c) .NET Foundation and Contributors, MIT license); its license and its
+third-party notices are dotnet-LICENSE.txt and dotnet-THIRD-PARTY-NOTICES.txt. It contains no game data. LibreQuake's data, which the start script fetches,
 is BSD-3-Clause (the assets) and GPL-2.0 (QuakeC); its licenses come with it in
 data/libreq-v0.09-beta/id1/docs.
 
