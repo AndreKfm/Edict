@@ -1,6 +1,14 @@
 # Edict
 Edict - a frame-exact C# port of the WinQuake engine source, zero allocations in the game loop
 
+| GPU renderer (OpenGL 3.3, GLQuake's look; the default) | The exact software renderer (320×200, shown 3×) |
+|---|---|
+| ![LibreQuake's start map in Edict's GPU renderer](docs/images/start-gpu.png) | ![The same view in the exact software renderer](docs/images/start-software.png) |
+
+The software renderer's frame on the right is the one the gates compare with the C reference, pixel for pixel. Both
+show [LibreQuake](https://github.com/lavenderdotpet/LibreQuake)'s free data (BSD-3-Clause,
+[license](docs/images/LICENSE-LibreQuake.txt)).
+
 ## Quick start
 
 Without anything installed: the [releases](https://github.com/AndreKfm/Edict/releases) have a package per system
