@@ -10,3 +10,6 @@ ref/upstream/** -text
 
 # Windows batch files: cmd.exe reads CRLF lines
 *.cmd text eol=crlf
+
+# GitHub language statistics (Linguist): id's pristine tree is vendored code, so the port's C# is the repository's language
+ref/upstream/** linguist-vendored
