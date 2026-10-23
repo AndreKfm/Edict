@@ -37,12 +37,16 @@ the pack is not under the MIT license (an SDK installation's own license file ca
 Windows installer's does, but a self-contained publish does not take the runtime from there). The source tree
 contains no part of it.
 
-## LibreQuake (not included)
+## LibreQuake (the data not included; two screenshots)
 
 The game data the tests, the reference and the start scripts use is LibreQuake's
 (https://github.com/lavenderdotpet/LibreQuake): the assets under the BSD-3-Clause license, the QuakeC code under
 the GPL-2.0. Neither the repository nor the release packages contain it: `tools/fetch-data.sh` and the start
 scripts download it, with its license documents, into `data/`.
+
+The two screenshots in `docs/images` (`start-gpu.png`, `start-software.png`) show Edict running LibreQuake's start
+map, so they show LibreQuake's textures, models and status bar: Copyright © 2019-2023 Contributors to the
+LibreQuake project, under the BSD-3-Clause license, whose text is beside them (`docs/images/LICENSE-LibreQuake.txt`).
 
 ## Build and test dependencies (not distributed)
 

@@ -1,6 +1,14 @@
 # Edict
 Edict - a frame-exact C# port of the WinQuake engine source, zero allocations in the game loop
 
+| GPU renderer (OpenGL 3.3, GLQuake's look; the default) | The exact software renderer (320×200, shown 3×) |
+|---|---|
+| ![LibreQuake's start map in Edict's GPU renderer](docs/images/start-gpu.png) | ![The same view in the exact software renderer](docs/images/start-software.png) |
+
+The software renderer's frame on the right is the one the gates compare with the C reference, pixel for pixel. Both
+show [LibreQuake](https://github.com/lavenderdotpet/LibreQuake)'s free data (BSD-3-Clause,
+[license](docs/images/LICENSE-LibreQuake.txt)).
+
 ## Quick start
 
 Without anything installed: the [releases](https://github.com/AndreKfm/Edict/releases) have a package per system
@@ -27,19 +35,19 @@ findings, docs/TESTING.md how each claim is tested.
 
 What is shown, each by state hashes (XXH64) against a C reference build of WinQuake's GPL source release:
 
-- **The server** — the QuakeC VM, the builtins, physics, the hull traces, several clients and their commands:
+- **The server** - the QuakeC VM, the builtins, physics, the hull traces, several clients and their commands:
   every frame and spawn record of the corpus' input tapes (ten maps, 4,000 frames each; ten-minute runs of 43,199
   frames) and every message sent to every client, as the reference's.
-- **The client** — demo playback and a listen server's local client: every client record.
-- **The software renderer, the 2D layer and the console** — every present's 320×200 frame buffer and palette, over
+- **The client** - demo playback and a listen server's local client: every client record.
+- **The software renderer, the 2D layer and the console** - every present's 320×200 frame buffer and palette, over
   150,000 presents in the full-frame corpus alone.
-- **The sound** — the mixer's DMA buffer after every frame (172,765 sound records).
-- **The network's exact part** — the server with several clients and net_dgrm.c (a differential fuzz against the
+- **The sound** - the mixer's DMA buffer after every frame (172,765 sound records).
+- **The network's exact part** - the server with several clients and net_dgrm.c (a differential fuzz against the
   reference's own code).
 - **No allocation** in the game loop, enforced per member by a Roslyn analyzer (`[NoAlloc]`) and measured at 0 bytes
   in every frame of the corpora but those that load (the spawn, a demo) or run a console command; **no slowdown**: the port runs the ten-minute run at 0.72 of the reference's time
   per frame.
-- **Robustness of the gates** — mutation testing (`tools/mutate.py`; in the last phase 269 mutants, all detected but
+- **Robustness of the gates** - mutation testing (`tools/mutate.py`; in the last phase 269 mutants, all detected but
   34 known blind spots, each with its reason), and the reference itself checked at -O0, -O2, under ASan/UBSan, on
   Windows and Linux (identical records).
 
@@ -56,6 +64,13 @@ The limits of the claim:
 - Outside the proof by design: the GPU renderer (it reads the exact state, never writes it) and the sockets.
 - Not ported: the menu (the reference's is a stub), save and load, demo recording and the demo loop, screenshot,
   sizeup and sizedown, slist, CD audio, the debug commands.
+
+How it was built: Edict was developed with AI. Claude Opus 5.5 (Anthropic), working as a coding agent in Claude
+Code, wrote most of the code, the tools and the documentation, under a plan with hard, measurable gates and with
+the owner's decisions at every step (docs/PLAN.md, docs/adr/); its commits say so ("Co-Authored-By: Claude Opus
+5.5"). That is why the proof matters: nothing here has to be taken on trust, as every claim above is a test that
+compares bits with the C original, and the mutation tests show that those tests catch the mistakes a translation
+makes.
 
 To check it yourself: `sh tools/fetch-data.sh`, build the reference (`ref/build.sh`), write the corpora with it (the
 `tools/*.sh` generators in docs/TESTING.md, or `tools/ci-corpora.sh` for the fast ones) and run
